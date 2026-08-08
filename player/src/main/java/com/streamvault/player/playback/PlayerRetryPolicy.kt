@@ -11,8 +11,17 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 
 private const val FAST_TRANSIENT_RETRY_DELAY_MS = 500L
-private const val LIVE_TRANSIENT_RETRY_ATTEMPTS = 10
-private const val LIVE_HLS_MALFORMED_RETRY_ATTEMPTS_AFTER_START = 12
+
+/** Segment-level load retries handled inside ExoPlayer (no teardown). */
+private const val LIVE_SEGMENT_RETRY_ATTEMPTS = 10
+
+/**
+ * Engine-level full re-prepare retries. Capped low so a single hiccup can never cascade into
+ * repeated full re-opens: segment blips are absorbed by [LIVE_SEGMENT_RETRY_ATTEMPTS] via
+ * `LoadErrorHandlingPolicy`, and only genuinely repeated failures reach a re-prepare.
+ */
+private const val LIVE_TRANSIENT_REPREPARE_ATTEMPTS = 3
+private const val LIVE_HLS_MALFORMED_REPREPARE_ATTEMPTS = 4
 
 data class PlaybackRetryContext(
     val resolvedStreamType: ResolvedStreamType,
@@ -118,8 +127,8 @@ class PlayerRetryPolicy(
 
     override fun getMinimumLoadableRetryCount(dataType: Int): Int {
         return when {
-            streamContext.isLive && dataType == C.DATA_TYPE_MANIFEST -> LIVE_TRANSIENT_RETRY_ATTEMPTS
-            streamContext.isLive && dataType == C.DATA_TYPE_MEDIA -> LIVE_TRANSIENT_RETRY_ATTEMPTS
+            streamContext.isLive && dataType == C.DATA_TYPE_MANIFEST -> LIVE_SEGMENT_RETRY_ATTEMPTS
+            streamContext.isLive && dataType == C.DATA_TYPE_MEDIA -> LIVE_SEGMENT_RETRY_ATTEMPTS
             dataType == C.DATA_TYPE_MANIFEST -> 3
             dataType == C.DATA_TYPE_MEDIA -> if (streamContext.resolvedStreamType == ResolvedStreamType.PROGRESSIVE) 2 else 2
             else -> 1
@@ -156,7 +165,7 @@ class PlayerRetryPolicy(
             PlaybackErrorCategory.HTTP_SERVER -> {
                 val isProgressive = streamContext.resolvedStreamType == ResolvedStreamType.PROGRESSIVE
                 when {
-                    streamContext.isLive -> LIVE_TRANSIENT_RETRY_ATTEMPTS
+                    streamContext.isLive -> LIVE_TRANSIENT_REPREPARE_ATTEMPTS
                     isProgressive -> 3
                     else -> 2
                 }
@@ -167,23 +176,23 @@ class PlayerRetryPolicy(
                 error.hasCause<UnknownHostException>() -> 1
                 error.hasCause<SocketTimeoutException>() || error.hasCause<ConnectException>() ->
                     when {
-                        streamContext.isLive -> LIVE_TRANSIENT_RETRY_ATTEMPTS
+                        streamContext.isLive -> LIVE_TRANSIENT_REPREPARE_ATTEMPTS
                         streamContext.resolvedStreamType == ResolvedStreamType.PROGRESSIVE && playbackStarted ->
-                            LIVE_TRANSIENT_RETRY_ATTEMPTS
+                            LIVE_TRANSIENT_REPREPARE_ATTEMPTS
                         else -> 2
                     }
-                !playbackStarted -> if (streamContext.isLive) LIVE_TRANSIENT_RETRY_ATTEMPTS else 2
+                !playbackStarted -> if (streamContext.isLive) LIVE_TRANSIENT_REPREPARE_ATTEMPTS else 2
                 else -> 1
             }
 
             PlaybackErrorCategory.SOURCE_MALFORMED -> when {
                 streamContext.resolvedStreamType == ResolvedStreamType.HLS && playbackStarted ->
-                    LIVE_HLS_MALFORMED_RETRY_ATTEMPTS_AFTER_START
+                    LIVE_HLS_MALFORMED_REPREPARE_ATTEMPTS
                 playbackStarted -> 0
                 else -> 1
             }
             PlaybackErrorCategory.UNKNOWN -> when {
-                streamContext.isLive && playbackStarted -> LIVE_TRANSIENT_RETRY_ATTEMPTS
+                streamContext.isLive && playbackStarted -> LIVE_TRANSIENT_REPREPARE_ATTEMPTS
                 playbackStarted -> 0
                 else -> 1
             }

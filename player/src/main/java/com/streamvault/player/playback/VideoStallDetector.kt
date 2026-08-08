@@ -7,7 +7,8 @@ class VideoStallDetector(
     private val initialGraceMs: Long = 8_000L,
     private val stallThresholdMs: Long = 5_000L,
     private val bufferingStallThresholdMs: Long = 8_000L,
-    private val minPositionAdvanceMs: Long = 1_500L
+    private val minPositionAdvanceMs: Long = 1_500L,
+    private val healthyReadyBufferMs: Long = 3_000L
 ) {
     private var startedAtMs: Long = 0L
     private var lastFrameAtMs: Long = 0L
@@ -82,7 +83,8 @@ class VideoStallDetector(
         if (lastFrameAtMs <= 0L) return false
         val frameSilent = now - lastFrameAtMs >= stallThresholdMs
         val requestedButNotAdvancing = playWhenReady && !isPlaying && frameSilent
-        val frameSilentReadyRecovery = recoverFrameSilentReadyStalls && frameSilent
+        val bufferHealthy = bufferedDurationMs >= healthyReadyBufferMs
+        val frameSilentReadyRecovery = recoverFrameSilentReadyStalls && frameSilent && !bufferHealthy
         if (!requestedButNotAdvancing && !frameSilentReadyRecovery && bufferedDurationMs <= 1_000L) {
             lastPositionMs = currentPositionMs
             lastPositionCheckMs = now

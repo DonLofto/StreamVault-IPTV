@@ -25,23 +25,50 @@ class PlaybackStallRecoveryPolicyTest {
     }
 
     @Test
-    fun `live ready stalls reconnect the current stream`() {
+    fun `first live stall is absorbed and does not reconnect`() {
         assertThat(
             shouldReconnectLiveStall(
                 playbackState = PlaybackState.READY,
                 resolvedStreamType = ResolvedStreamType.MPEG_TS_LIVE,
                 recoveryAttempt = 1
             )
+        ).isFalse()
+        assertThat(
+            shouldReconnectLiveStall(
+                playbackState = PlaybackState.BUFFERING,
+                resolvedStreamType = ResolvedStreamType.HLS,
+                recoveryAttempt = 1
+            )
+        ).isFalse()
+    }
+
+    @Test
+    fun `live buffering stall reconnects on a repeated attempt`() {
+        assertThat(
+            shouldReconnectLiveStall(
+                playbackState = PlaybackState.BUFFERING,
+                resolvedStreamType = ResolvedStreamType.MPEG_TS_LIVE,
+                recoveryAttempt = 2
+            )
         ).isTrue()
     }
 
     @Test
-    fun `live ready stalls stop reconnecting after first recovery attempt`() {
+    fun `live ready stall reconnects only when the buffer is exhausted`() {
         assertThat(
             shouldReconnectLiveStall(
                 playbackState = PlaybackState.READY,
                 resolvedStreamType = ResolvedStreamType.MPEG_TS_LIVE,
-                recoveryAttempt = 2
+                recoveryAttempt = 2,
+                bufferedDurationMs = 0L
+            )
+        ).isTrue()
+        assertThat(
+            shouldReconnectLiveStall(
+                playbackState = PlaybackState.READY,
+                resolvedStreamType = ResolvedStreamType.MPEG_TS_LIVE,
+                recoveryAttempt = 2,
+                bufferedDurationMs = 10_000L
             )
         ).isFalse()
     }
@@ -52,7 +79,7 @@ class PlaybackStallRecoveryPolicyTest {
             shouldReconnectLiveStall(
                 playbackState = PlaybackState.READY,
                 resolvedStreamType = ResolvedStreamType.PROGRESSIVE,
-                recoveryAttempt = 1
+                recoveryAttempt = 2
             )
         ).isFalse()
     }

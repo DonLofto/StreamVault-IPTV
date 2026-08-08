@@ -344,6 +344,28 @@ class XtreamStreamUrlResolverTest {
     }
 
     @Test
+    fun resolveWithMetadata_prefers_stable_credential_url_when_requested() {
+        runBlocking {
+        val resolver = xtreamResolver()
+        val url = XtreamUrlFactory.buildInternalStreamUrl(
+            providerId = 9,
+            kind = XtreamStreamKind.MOVIE,
+            streamId = 456,
+            containerExtension = "mp4",
+            directSource = "http://edge.example.com/live/456/index.mp4?exp=1774017000"
+        )
+
+        val tokenized = resolver.resolveWithMetadata(url)
+        val stable = resolver.resolveWithMetadata(url, preferStableUrl = true)
+
+        assertThat(tokenized?.url).isEqualTo("http://edge.example.com/live/456/index.mp4?exp=1774017000")
+        assertThat(tokenized?.expirationTime).isNotNull()
+        assertThat(stable?.url).isEqualTo("https://portal.example.com/movie/alice/secret/456.mp4")
+        assertThat(stable?.expirationTime).isNull()
+        }
+    }
+
+    @Test
     fun extractStreamExpirationTime_reads_unix_seconds_query_parameter() {
         val expirationTime = extractStreamExpirationTime(
             "https://stream.example.com/live.m3u8?token=abc123&expire=1774017000"

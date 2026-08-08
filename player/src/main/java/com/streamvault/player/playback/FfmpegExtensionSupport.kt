@@ -16,13 +16,6 @@ internal data class FfmpegAudioFallbackRequest(
     val fallbackMode: DecoderMode?
 )
 
-@Suppress("UNUSED_PARAMETER")
-internal fun shouldAttemptFfmpegAudioFallback(request: FfmpegAudioFallbackRequest): Boolean {
-    // FFmpeg audio is exposed through Media3's platform-first extension renderer
-    // chain. Retrying into software mode would reopen the provider URL.
-    return false
-}
-
 @UnstableApi
 internal class FfmpegExtensionSupport(
     private val reflectiveLibrary: ReflectiveFfmpegLibrary = ReflectiveFfmpegLibrary()

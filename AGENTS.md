@@ -89,3 +89,47 @@ A passing validation needs:
 Validate more than one live channel when the bug is reported as affecting live
 TV generally. Record the channel names, screenshot count, interval, unique hash
 count, media-session result, and log findings in the final report.
+
+
+## Do NOT
+- Never reference Claude, Claude Code, or AI generation in commit
+  messages or PR descriptions
+- Never commit secrets or .env files
+
+## Project
+
+Android TV IPTV player. Kotlin, Jetpack Compose, Media3 (ExoPlayer), Hilt, Room, OkHttp, Coroutines.
+Multi-module Gradle: `app/` (UI/ViewModels), `player/` (playback + Media3Engine), `data/`
+(provider/repository/URL resolution), `domain/` (models).
+
+Key entry points:
+- `player/src/main/java/com/streamvault/player/Media3PlayerEngine.kt` — central playback engine
+  (player lifecycle, preparation, stall recovery, buffer-policy promotion, retries).
+- `player/src/main/java/com/streamvault/player/playback/PolicyAwareLoadControl.kt` — mutable-policy
+  LoadControl (live buffer promotion without player teardown).
+- `player/src/main/java/com/streamvault/player/timeshift/LiveTimeshiftManager.kt` — live-rewind capture.
+- `data/src/main/java/com/streamvault/data/remote/xtream/XtreamStreamUrlResolver.kt` — playback URL
+  resolution (Xtream/Stalker/Jellyfin/M3U), `preferStableUrl` for long sessions.
+- `app/src/main/java/com/streamvault/app/ui/screens/player/` — player ViewModel + lifecycle actions.
+
+## Commands
+
+Build/test (JAVA_HOME required on this machine; SDK dir in `local.properties`):
+
+```bash
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21
+./gradlew :player:testDebugUnitTest        # player module unit tests
+./gradlew :data:testDebugUnitTest          # data module unit tests
+./gradlew :app:compileDebugKotlin          # app module compile check
+./gradlew :app:assembleDebug               # debug APK
+```
+
+Graph upkeep:
+
+```bash
+graphify update .   # after code changes (AGENTS graph; tool optional)
+```
+
+Emulator / device helpers: see "StreamVault emulator orientation" and "Live TV playback
+validation" above. Environment provisioning (JDK/SDK install, `sdk.dir`, toolchain paths) is
+logged in `SESSION.md`.
