@@ -1734,7 +1734,8 @@ class PlayerViewModel @Inject constructor(
         logicalUrl: String,
         internalContentId: Long,
         providerId: Long,
-        contentType: ContentType
+        contentType: ContentType,
+        preferStableUrl: Boolean = false
     ): com.streamvault.domain.model.StreamInfo? {
         val resolution = resolvePlayerPlaybackStreamInfo(
             logicalUrl = logicalUrl,
@@ -1747,7 +1748,8 @@ class PlayerViewModel @Inject constructor(
             channelRepository = channelRepository,
             movieRepository = movieRepository,
             seriesRepository = seriesRepository,
-            xtreamStreamUrlResolver = xtreamStreamUrlResolver
+            xtreamStreamUrlResolver = xtreamStreamUrlResolver,
+            preferStableUrl = preferStableUrl
         )
         resolution.credentialFailureMessage?.let { message ->
             setLastFailureReason(message)

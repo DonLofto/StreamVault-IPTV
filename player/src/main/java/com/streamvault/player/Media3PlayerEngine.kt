@@ -17,7 +17,6 @@ import androidx.media3.common.text.Cue
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.DefaultLivePlaybackSpeedControl
-import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.Renderer
@@ -54,6 +53,11 @@ import com.streamvault.player.playback.PlaybackErrorCategory
 import com.streamvault.player.playback.FfmpegAudioFallbackRequest
 import com.streamvault.player.playback.FfmpegExtensionSupport
 import com.streamvault.player.playback.LiveHlsBufferPromotionDecider
+import com.streamvault.player.playback.LiveTimeshiftPlaybackGate
+import com.streamvault.player.playback.isPlaybackStressedForTimeshift
+import com.streamvault.player.playback.PlayerReconfigurationDecider
+import com.streamvault.player.playback.PlayerReconfigurationInput
+import com.streamvault.player.playback.PolicyAwareLoadControl
 import com.streamvault.player.playback.PlaybackLogSanitizer
 import com.streamvault.player.playback.PlaybackPreparationPlan
 import com.streamvault.player.playback.PlaybackExtensionRendererMode
@@ -222,6 +226,7 @@ class Media3PlayerEngine @Inject constructor(
     private var currentBufferIsLive: Boolean? = null
     private var currentBufferPolicyLabel: String? = null
     private var currentBufferPolicy: PlaybackBufferPolicy? = null
+    private var policyAwareLoadControl: PolicyAwareLoadControl? = null
     private val promotedLiveHlsBufferReasonsByMediaId = mutableMapOf<String, String>()
     private var audioCodecUnsupportedReported = false
     private var lastSupportErrorMessage: String? = null
@@ -269,7 +274,8 @@ class Media3PlayerEngine @Inject constructor(
     private val _renderSurfaceType = MutableStateFlow(PlayerRenderSurfaceType.SURFACE_VIEW)
     override val renderSurfaceType: StateFlow<PlayerRenderSurfaceType> = _renderSurfaceType.asStateFlow()
 
-    private val liveTimeshiftManager = DefaultLiveTimeshiftManager(context, okHttpClient)
+    private val timeshiftPlaybackGate = LiveTimeshiftPlaybackGate()
+    private val liveTimeshiftManager = DefaultLiveTimeshiftManager(context, okHttpClient, timeshiftPlaybackGate)
     private val _timeshiftState = MutableStateFlow(LiveTimeshiftState())
     override val timeshiftState: StateFlow<LiveTimeshiftState> = _timeshiftState.asStateFlow()
 
@@ -348,6 +354,9 @@ class Media3PlayerEngine @Inject constructor(
         scope.launch {
             while (true) {
                 delay(1_000L)
+                timeshiftPlaybackGate.setStressed(
+                    isPlaybackStressedForTimeshift(_playbackState.value)
+                )
                 val stats = _playerStats.value
                 val liveStream = isCurrentStreamLive()
                 val effectivePlaybackStarted = isEffectivelyPlaybackStarted()
@@ -381,7 +390,10 @@ class Media3PlayerEngine @Inject constructor(
                     audioVideoSyncSinkActive = audioVideoSyncSinkActive
                 )
                 if (shouldRefreshPlaybackSupportSnapshot()) {
-                    playbackSupportSnapshotStore.write(buildPlaybackSupportSnapshot())
+                    val snapshot = buildPlaybackSupportSnapshot()
+                    scope.launch(Dispatchers.IO) {
+                        playbackSupportSnapshotStore.write(snapshot)
+                    }
                 }
                 if (promoteLiveHlsBufferIfNeeded()) {
                     continue
@@ -1032,24 +1044,36 @@ class Media3PlayerEngine @Inject constructor(
             observedVideoFormat = _videoFormat.value,
             qualityReasonOverride = promotedLiveHlsBufferReasonsByMediaId[mediaId]
         )
-        val needsRecreate = activeAudioDecoderMode != preferredAudioDecoderMode ||
-            activeVideoDecoderMode != preferredVideoDecoderMode ||
-            previousAudioDecoderPolicy != nextAudioDecoderPolicy ||
-            previousVideoDecoderPolicy != nextVideoDecoderPolicy ||
-            isLiveBuffer != currentBufferIsLive ||
-            nextBufferPolicy.label != currentBufferPolicyLabel ||
-            requestedAudioDecoderMode == DecoderMode.COMPATIBILITY ||
-            requestedVideoDecoderMode == DecoderMode.COMPATIBILITY
+        val nextBufferPolicyLabel = nextBufferPolicy.label
+        val bufferPolicyChanged = nextBufferPolicyLabel != currentBufferPolicyLabel
+        val needsRecreate = PlayerReconfigurationDecider.requiresPlayerRecreation(
+            PlayerReconfigurationInput(
+                activeAudioDecoderMode = activeAudioDecoderMode,
+                preferredAudioDecoderMode = preferredAudioDecoderMode,
+                activeVideoDecoderMode = activeVideoDecoderMode,
+                preferredVideoDecoderMode = preferredVideoDecoderMode,
+                previousAudioDecoderPolicy = previousAudioDecoderPolicy,
+                nextAudioDecoderPolicy = nextAudioDecoderPolicy,
+                previousVideoDecoderPolicy = previousVideoDecoderPolicy,
+                nextVideoDecoderPolicy = nextVideoDecoderPolicy,
+                isLiveBuffer = isLiveBuffer,
+                currentBufferIsLive = currentBufferIsLive ?: !isLiveBuffer,
+                requestedAudioDecoderMode = requestedAudioDecoderMode,
+                requestedVideoDecoderMode = requestedVideoDecoderMode
+            )
+        )
         activeAudioDecoderMode = preferredAudioDecoderMode
         activeVideoDecoderMode = preferredVideoDecoderMode
         activeAudioDecoderPolicy = nextAudioDecoderPolicy
         activeVideoDecoderPolicy = nextVideoDecoderPolicy
         currentBufferIsLive = isLiveBuffer
-        currentBufferPolicyLabel = nextBufferPolicy.label
+        currentBufferPolicyLabel = nextBufferPolicyLabel
         currentBufferPolicy = nextBufferPolicy
         updateRenderSurfaceForMode()
         if (needsRecreate) {
             recreatePlayer()
+        } else if (bufferPolicyChanged) {
+            applyBufferPolicyToLivePlayer(nextBufferPolicy)
         }
 
         Log.i(
@@ -1147,16 +1171,8 @@ class Media3PlayerEngine @Inject constructor(
             observedVideoFormat = _videoFormat.value,
             qualityReasonOverride = lastMediaId?.let(promotedLiveHlsBufferReasonsByMediaId::get)
         )
-        val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(
-                bufferPolicy.minBufferMs,
-                bufferPolicy.maxBufferMs,
-                bufferPolicy.playbackBufferMs,
-                bufferPolicy.rebufferMs
-            )
-            .setTargetBufferBytes(bufferPolicy.targetBufferBytes)
-            .setPrioritizeTimeOverSizeThresholds(bufferPolicy.prioritizeTimeOverSizeThresholds)
-            .build()
+        val loadControl = PolicyAwareLoadControl(bufferPolicy)
+        policyAwareLoadControl = loadControl
         val livePlaybackSpeedControl = DefaultLivePlaybackSpeedControl.Builder()
             .setFallbackMinPlaybackSpeed(1.0f)
             .setFallbackMaxPlaybackSpeed(1.0f)
@@ -1184,6 +1200,18 @@ class Media3PlayerEngine @Inject constructor(
                 addAnalyticsListener(createAnalyticsListener())
                 addListener(createPlayerListener())
             }
+    }
+
+    private fun applyBufferPolicyToLivePlayer(policy: PlaybackBufferPolicy) {
+        policyAwareLoadControl?.updatePolicy(policy)
+        Log.i(
+            TAG,
+            "buffer-policy applied-in-place label=${policy.label} reason=${policy.qualityReason} " +
+                "minMs=${policy.minBufferMs} maxMs=${policy.maxBufferMs} " +
+                "playbackMs=${policy.playbackBufferMs} rebufferMs=${policy.rebufferMs} " +
+                "targetBytes=${policy.targetBufferBytes} " +
+                "target=${PlaybackLogSanitizer.sanitizeUrl(lastStreamInfo?.url)}"
+        )
     }
 
     private fun PlaybackBufferPolicy.describeForLog(
@@ -1748,6 +1776,9 @@ class Media3PlayerEngine @Inject constructor(
     private fun promoteLiveHlsBufferIfNeeded(): Boolean {
         val streamInfo = lastStreamInfo ?: return false
         val mediaId = lastMediaId ?: return false
+        if (!hasRenderedFirstVideoFrame) {
+            return false
+        }
         val observedFormat = _videoFormat.value.takeUnless(VideoFormat::isEmpty) ?: return false
         val decision = LiveHlsBufferPromotionDecider.decide(
             bufferMode = requestedPlaybackBufferMode,
@@ -1762,7 +1793,6 @@ class Media3PlayerEngine @Inject constructor(
         ) ?: return false
 
         promotedLiveHlsBufferReasonsByMediaId[mediaId] = decision.qualityReason
-        val wasPlaying = exoPlayer?.playWhenReady ?: true
         Log.i(
             TAG,
             "buffer-policy promote mediaId=$mediaId from=${currentBufferPolicyLabel.orEmpty()} " +
@@ -1771,12 +1801,9 @@ class Media3PlayerEngine @Inject constructor(
                 "bitrate=${observedFormat.bitrate} hdr=${observedFormat.isHdr} " +
                 "target=${PlaybackLogSanitizer.sanitizeUrl(streamInfo.url)}"
         )
-        prepareInternal(
-            streamInfo = streamInfo,
-            preserveRetryState = true,
-            seekPositionMs = null,
-            autoPlay = wasPlaying
-        )
+        currentBufferPolicyLabel = decision.policy.label
+        currentBufferPolicy = decision.policy
+        applyBufferPolicyToLivePlayer(decision.policy)
         return true
     }
 
@@ -1791,7 +1818,8 @@ class Media3PlayerEngine @Inject constructor(
         val liveReconnectionStall = shouldReconnectLiveStall(
             playbackState = _playbackState.value,
             resolvedStreamType = currentResolvedStreamType,
-            recoveryAttempt = nextRecoveryAttempt
+            recoveryAttempt = nextRecoveryAttempt,
+            bufferedDurationMs = _playerStats.value.bufferedDurationMs
         )
         Log.w(
             TAG,
@@ -1811,6 +1839,14 @@ class Media3PlayerEngine @Inject constructor(
                 preserveRetryState = true,
                 seekPositionMs = null,
                 autoPlay = wasPlaying
+            )
+            return
+        }
+
+        if (isCurrentStreamLive() && videoStallRecoveryAttempt == 1) {
+            Log.w(
+                TAG,
+                "video-stall absorbed attempt=1 live budget retained target=${PlaybackLogSanitizer.sanitizeUrl(streamInfo.url)}"
             )
             return
         }

@@ -7,6 +7,7 @@ import com.streamvault.domain.model.TimeshiftBackendPreference
 import com.streamvault.domain.model.StreamInfo
 import com.streamvault.domain.model.StreamType
 import com.streamvault.player.playback.applyUnsafeTlsBypass
+import com.streamvault.player.playback.LiveTimeshiftPlaybackGate
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -74,7 +75,8 @@ internal fun buildDashSnapshotPlaylist(
 @Singleton
 internal class DefaultLiveTimeshiftManager @Inject constructor(
     @param:ApplicationContext private val context: Context,
-    private val okHttpClient: OkHttpClient
+    private val okHttpClient: OkHttpClient,
+    private val playbackGate: LiveTimeshiftPlaybackGate = LiveTimeshiftPlaybackGate()
 ) : LiveTimeshiftManager, ComponentCallbacks2 {
     private val unsafeOkHttpClient: OkHttpClient by lazy {
         okHttpClient.newBuilder()
@@ -417,6 +419,17 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             )
         }
 
+        /**
+         * Pauses capture while the primary player is buffer-stressed, so the timeshift mirror
+         * download never competes with the player's own requests for provider bandwidth.
+         */
+        protected suspend fun awaitPlaybackNotStressed() {
+            while (playbackGate.stressed.value) {
+                currentCoroutineContext().ensureActive()
+                delay(TIMESHIFT_PLAYBACK_THROTTLE_POLL_MS)
+            }
+        }
+
         protected fun resolveRelativeUrl(baseUrl: String, value: String): String {
             return runCatching { URI(baseUrl).resolve(value).toString() }.getOrDefault(value)
         }
@@ -462,6 +475,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                                 val buffer = ByteArray(PROGRESSIVE_READ_BUFFER_SIZE)
                                 while (true) {
                                     currentCoroutineContext().ensureActive()
+                                    awaitPlaybackNotStressed()
                                     val read = source.read(buffer)
                                     if (read <= 0) break
                                     current.write(buffer, read)
@@ -608,6 +622,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                                 currentCoroutineContext().ensureActive()
                                 if (remoteSegment.mediaSequence <= lastProcessedSequence) return@forEach
                                 lastProcessedSequence = remoteSegment.mediaSequence
+                                awaitPlaybackNotStressed()
                                 if (backend == LiveTimeshiftBackend.DISK) checkDiskAndBudget()
                                 val retained = retainHlsSegment(remoteSegment)
                                 val windowDuration = segmentMutex.withLock {
@@ -855,6 +870,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                     parsed.mediaSegments.forEach { remote ->
                         currentCoroutineContext().ensureActive()
                         if (!seenSegments.add(remote.uri)) return@forEach
+                        awaitPlaybackNotStressed()
                         if (backend == LiveTimeshiftBackend.DISK) checkDiskAndBudget()
                         val retained = retainSegment(remote, isInit = false)
                         val windowDuration = segmentMutex.withLock {
@@ -1181,5 +1197,6 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
         private const val HLS_ERROR_RETRY_DELAY_MS = 2_000L
         private const val DASH_ERROR_RETRY_DELAY_MS = 2_000L
         private const val MIN_FREE_DISK_BYTES = 200L * 1024 * 1024  // 200 MB
+        private const val TIMESHIFT_PLAYBACK_THROTTLE_POLL_MS = 250L
     }
 }

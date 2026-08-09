@@ -14,13 +14,17 @@ internal fun shouldRecoverFrameSilentReadyStalls(resolvedStreamType: ResolvedStr
 internal fun shouldReconnectLiveStall(
     playbackState: PlaybackState,
     resolvedStreamType: ResolvedStreamType,
-    recoveryAttempt: Int
+    recoveryAttempt: Int,
+    bufferedDurationMs: Long = 0L
 ): Boolean =
-    recoveryAttempt == 1 &&
+    recoveryAttempt >= 2 &&
+        resolvedStreamType.isLiveForStallRecovery &&
         (
-            playbackState == PlaybackState.BUFFERING && resolvedStreamType.isLiveForStallRecovery ||
-                playbackState == PlaybackState.READY && resolvedStreamType.isLiveForStallRecovery
+            playbackState == PlaybackState.BUFFERING ||
+                playbackState == PlaybackState.READY && bufferedDurationMs < STALL_RECONNECT_MIN_READY_BUFFER_MS
         )
+
+private const val STALL_RECONNECT_MIN_READY_BUFFER_MS = 3_000L
 
 private val ResolvedStreamType.isLiveForStallRecovery: Boolean
     get() = this == ResolvedStreamType.HLS ||

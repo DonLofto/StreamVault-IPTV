@@ -31,18 +31,16 @@ class PlayerRetryPolicyTest {
     )
 
     @Test
-    fun `live server errors retry 10 times with bounded backoff`() {
+    fun `live server errors cap engine re-prepare at 3 attempts after segment retries`() {
         val error = IOException("HTTP 500")
         assertThat(policy.shouldRetry(error, liveContext, playbackStarted = false, attempt = 1)).isTrue()
         assertThat(policy.shouldRetry(error, liveContext, playbackStarted = false, attempt = 2)).isTrue()
         assertThat(policy.shouldRetry(error, liveContext, playbackStarted = false, attempt = 3)).isTrue()
-        assertThat(policy.shouldRetry(error, liveContext, playbackStarted = false, attempt = 10)).isTrue()
-        assertThat(policy.shouldRetry(error, liveContext, playbackStarted = false, attempt = 11)).isFalse()
-        assertThat(policy.maxAttempts(error, playbackStarted = false)).isEqualTo(10)
+        assertThat(policy.shouldRetry(error, liveContext, playbackStarted = false, attempt = 4)).isFalse()
+        assertThat(policy.maxAttempts(error, playbackStarted = false)).isEqualTo(3)
         assertThat(policy.retryDelayMs(error, 1)).isEqualTo(1000L)
         assertThat(policy.retryDelayMs(error, 2)).isEqualTo(2500L)
         assertThat(policy.retryDelayMs(error, 3)).isEqualTo(5000L)
-        assertThat(policy.retryDelayMs(error, 10)).isEqualTo(5000L)
     }
 
     @Test
@@ -168,32 +166,32 @@ class PlayerRetryPolicyTest {
     }
 
     @Test
-    fun `live network timeouts retry 10 times`() {
+    fun `live network timeouts cap engine re-prepare at 3 attempts`() {
         val error = SocketTimeoutException("timed out")
 
-        assertThat(policy.shouldRetry(error, liveContext, playbackStarted = true, attempt = 10)).isTrue()
-        assertThat(policy.shouldRetry(error, liveContext, playbackStarted = true, attempt = 11)).isFalse()
-        assertThat(policy.maxAttempts(error, playbackStarted = true)).isEqualTo(10)
+        assertThat(policy.shouldRetry(error, liveContext, playbackStarted = true, attempt = 3)).isTrue()
+        assertThat(policy.shouldRetry(error, liveContext, playbackStarted = true, attempt = 4)).isFalse()
+        assertThat(policy.maxAttempts(error, playbackStarted = true)).isEqualTo(3)
     }
 
     @Test
-    fun `progressive network timeouts after playback start retry 10 times`() {
+    fun `progressive network timeouts after playback start cap engine re-prepare at 3 attempts`() {
         val error = SocketTimeoutException("timed out")
 
-        assertThat(progressivePolicy.shouldRetry(error, progressiveContext, playbackStarted = true, attempt = 10))
+        assertThat(progressivePolicy.shouldRetry(error, progressiveContext, playbackStarted = true, attempt = 3))
             .isTrue()
-        assertThat(progressivePolicy.shouldRetry(error, progressiveContext, playbackStarted = true, attempt = 11))
+        assertThat(progressivePolicy.shouldRetry(error, progressiveContext, playbackStarted = true, attempt = 4))
             .isFalse()
-        assertThat(progressivePolicy.maxAttempts(error, playbackStarted = true)).isEqualTo(10)
+        assertThat(progressivePolicy.maxAttempts(error, playbackStarted = true)).isEqualTo(3)
     }
 
     @Test
-    fun `malformed hls refresh after playback start retries before app recovery`() {
+    fun `malformed hls refresh after playback start caps engine re-prepare at 4 attempts`() {
         val error = ParserException.createForMalformedContainer("bad live segment", null)
         assertThat(policy.shouldRetry(error, liveContext, playbackStarted = true, attempt = 1)).isTrue()
-        assertThat(policy.shouldRetry(error, liveContext, playbackStarted = true, attempt = 12)).isTrue()
-        assertThat(policy.shouldRetry(error, liveContext, playbackStarted = true, attempt = 13)).isFalse()
-        assertThat(policy.maxAttempts(error, playbackStarted = true)).isEqualTo(12)
+        assertThat(policy.shouldRetry(error, liveContext, playbackStarted = true, attempt = 4)).isTrue()
+        assertThat(policy.shouldRetry(error, liveContext, playbackStarted = true, attempt = 5)).isFalse()
+        assertThat(policy.maxAttempts(error, playbackStarted = true)).isEqualTo(4)
         assertThat(policy.retryReason(error)).isEqualTo("malformed-live-hls-refresh")
         assertThat(policy.retryDelayMs(error, 1)).isEqualTo(1000L)
         assertThat(policy.retryDelayMs(error, 2)).isEqualTo(2500L)
@@ -222,14 +220,13 @@ class PlayerRetryPolicyTest {
     }
 
     @Test
-    fun `unknown live runtime error after playback start retries before surfacing`() {
+    fun `unknown live runtime error after playback start caps engine re-prepare at 3 attempts`() {
         val error = RuntimeException("Unexpected runtime error")
         assertThat(policy.shouldRetry(error, liveContext, playbackStarted = true, attempt = 1)).isTrue()
         assertThat(policy.shouldRetry(error, liveContext, playbackStarted = true, attempt = 2)).isTrue()
         assertThat(policy.shouldRetry(error, liveContext, playbackStarted = true, attempt = 3)).isTrue()
-        assertThat(policy.shouldRetry(error, liveContext, playbackStarted = true, attempt = 10)).isTrue()
-        assertThat(policy.shouldRetry(error, liveContext, playbackStarted = true, attempt = 11)).isFalse()
-        assertThat(policy.maxAttempts(error, playbackStarted = true)).isEqualTo(10)
+        assertThat(policy.shouldRetry(error, liveContext, playbackStarted = true, attempt = 4)).isFalse()
+        assertThat(policy.maxAttempts(error, playbackStarted = true)).isEqualTo(3)
     }
 
     private class TestPlaybackException(

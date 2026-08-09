@@ -50,11 +50,17 @@ internal fun PlayerViewModel.startTokenRenewalMonitoring(expirationTime: Long?) 
             val remaining = expiry - System.currentTimeMillis()
             if (remaining > LIFECYCLE_TOKEN_RENEWAL_LEAD_MS) continue
             if (!isActivePlaybackSession(requestVersion)) return@launch
+            // Defer while playback is healthy (READY + playing): a destructive renewal would
+            // re-buffer a stream that is already progressing. Renew only once the buffer is
+            // actually stressed, and prefer the credential-based stable URL so a session that
+            // can drop its token converges and stops renewing on a fixed cadence.
+            if (playerEngine.playbackState.value == PlaybackState.READY) continue
             val refreshed = resolvePlaybackStreamInfo(
                 logicalUrl = currentStreamUrl,
                 internalContentId = currentContentId,
                 providerId = currentProviderId,
-                contentType = currentContentType
+                contentType = currentContentType,
+                preferStableUrl = true
             ) ?: return@launch
             if (!isActivePlaybackSession(requestVersion)) return@launch
             currentResolvedPlaybackUrl = refreshed.url

@@ -78,7 +78,8 @@ internal suspend fun resolvePlayerPlaybackStreamInfo(
     channelRepository: ChannelRepository,
     movieRepository: MovieRepository,
     seriesRepository: SeriesRepository,
-    xtreamStreamUrlResolver: XtreamStreamUrlResolver
+    xtreamStreamUrlResolver: XtreamStreamUrlResolver,
+    preferStableUrl: Boolean = false
 ): PlayerPlaybackStreamResolution {
     var fallbackStreamId: Long? = null
     var fallbackContainerExtension: String? = null
@@ -165,7 +166,8 @@ internal suspend fun resolvePlayerPlaybackStreamInfo(
             fallbackProviderId = providerId.takeIf { it > 0 },
             fallbackStreamId = fallbackStreamId,
             fallbackContentType = contentType,
-            fallbackContainerExtension = fallbackContainerExtension
+            fallbackContainerExtension = fallbackContainerExtension,
+            preferStableUrl = preferStableUrl
         )?.let { resolved ->
             val ext = resolved.containerExtension ?: fallbackContainerExtension
             return PlayerPlaybackStreamResolution(
