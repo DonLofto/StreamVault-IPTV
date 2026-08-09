@@ -10,6 +10,8 @@ import com.streamvault.data.local.entity.ProgramEntity
 import com.streamvault.data.mapper.toDomain
 import com.streamvault.data.mapper.toEntity
 import com.streamvault.data.parser.XmltvParser
+import com.streamvault.data.parser.EpgInputLimitException
+import com.streamvault.data.parser.MaxBytesInputStream
 import com.streamvault.data.remote.http.HttpRequestProfile
 import com.streamvault.data.remote.http.safeRequestIdentitySummary
 import com.streamvault.data.remote.http.toGenericRequestProfile
@@ -114,19 +116,15 @@ class EpgRepositoryImpl @Inject constructor(
     ): Flow<Map<String, List<Program>>> {
         if (channelIds.isEmpty()) return flowOf(emptyMap())
         val chunks = channelIds.chunked(500)
-        if (chunks.size == 1) {
-            return preferencesRepository.epgTimeShiftMinutes(providerId).flatMapLatest { minutes ->
-                val offsetMs = minutes * 60_000L
-                programDao.getForChannels(providerId, channelIds, startTime - offsetMs, endTime - offsetMs)
-                    .map { entities ->
-                        repositoryTimingReporter.measure(label = "epg.programsForChannels", rowCount = { entities.size }) {
-                            entities.map { it.toDomain().shifted(offsetMs) }.groupBy { it.channelId }
-                        }
-                    }
+        return preferencesRepository.epgTimeShiftMinutes(providerId).flatMapLatest { minutes ->
+            val offsetMs = minutes * 60_000L
+            combine(chunks.map { ids ->
+                programDao.getForChannels(providerId, ids, startTime - offsetMs, endTime - offsetMs)
+            }) { chunkRows ->
+                repositoryTimingReporter.measure(label = "epg.programsForChannels", rowCount = { chunkRows.sumOf { it.size } }) {
+                    chunkRows.asSequence().flatten().map { it.toDomain().shifted(offsetMs) }.groupBy { it.channelId }
+                }
             }
-        }
-        return flow {
-            emit(getProgramsForChannelsSnapshot(providerId, channelIds, startTime, endTime))
         }
     }
 
@@ -329,7 +327,15 @@ class EpgRepositoryImpl @Inject constructor(
                                 }
                             }
                             xmltvParser.maybeDecompressGzip(epgUrl, limitedStream).use { xmlInput ->
-                                xmltvParser.parseStreaming(xmlInput, timezoneId = providerTimezoneId) { program ->
+                                val decompressionLimited = MaxBytesInputStream(
+                                    xmlInput,
+                                    NetworkTimeoutConfig.EPG_MAX_DECOMPRESSED_BYTES
+                                )
+                                xmltvParser.parseStreaming(
+                                    decompressionLimited,
+                                    timezoneId = providerTimezoneId,
+                                    maxProgrammes = NetworkTimeoutConfig.EPG_MAX_PROGRAMMES
+                                ) { program ->
                                     batch.add(program.copy(providerId = stagingProviderId).toEntity())
                                     if (batch.size >= EPG_PROGRAM_BATCH_SIZE) {
                                         flushBatch()
@@ -349,7 +355,9 @@ class EpgRepositoryImpl @Inject constructor(
                     Result.success(Unit)
                 } catch (e: Exception) {
                     programDao.deleteByProvider(stagingProviderId)
-                    if (e is IOException && e.message?.contains("too large", ignoreCase = true) == true) {
+                    if (e is EpgInputLimitException) {
+                        Result.error("EPG content exceeded size or programme limit", e)
+                    } else if (e is IOException && e.message?.contains("too large", ignoreCase = true) == true) {
                         Result.error("EPG response exceeded 200 MB limit", e)
                     } else {
                         Result.error("Failed to refresh EPG: ${e.message}", e)

@@ -1,5 +1,7 @@
 package com.streamvault.data.repository
 
+import com.streamvault.data.sync.EpgAdmissionPolicy
+
 import android.content.Context
 import android.net.Uri
 import android.util.Log
@@ -23,6 +25,8 @@ import com.streamvault.domain.model.EpgMatchType
 import com.streamvault.domain.model.EpgOverrideCandidate
 import com.streamvault.domain.model.EpgSourceType
 import com.streamvault.data.parser.XmltvParser
+import com.streamvault.data.parser.EpgInputLimitException
+import com.streamvault.data.parser.MaxBytesInputStream
 import com.streamvault.data.util.ProviderInputSanitizer
 import com.streamvault.data.util.UrlSecurityPolicy
 import com.streamvault.data.remote.http.HttpRequestProfile
@@ -222,6 +226,15 @@ class EpgSourceRepositoryImpl @Inject constructor(
 
             val now = System.currentTimeMillis()
 
+            // H5: shared admission gate — low memory or insufficient free space defers
+            // inline stale-EPG staging exactly like the background worker path.
+            val admission = EpgAdmissionPolicy(context)
+            if (!admission.isAdmitted()) {
+                val reason = admission.rejectionReason() ?: "device constrained"
+                Log.w(TAG, "Deferring EPG source refresh $sourceId: $reason")
+                return@withLock Result.error("EPG refresh deferred: $reason")
+            }
+
             // Rate-limit: skip if last successful refresh was less than 5 minutes ago
             if (source.lastRefreshAt > 0 && now - source.lastRefreshAt < MIN_REFRESH_INTERVAL_MS) {
                 Log.d(TAG, "Skipping refresh for source $sourceId: last refresh was ${(now - source.lastRefreshAt) / 1000}s ago")
@@ -326,9 +339,14 @@ class EpgSourceRepositoryImpl @Inject constructor(
                         }
                     }
                     xmltvParser.maybeDecompressGzip(source.url, limited).use { decompressed ->
+                        val decompressionLimited = MaxBytesInputStream(
+                            decompressed,
+                            NetworkTimeoutConfig.EPG_MAX_DECOMPRESSED_BYTES
+                        )
                         xmltvParser.parseStreamingWithChannels(
-                            inputStream = decompressed,
+                            inputStream = decompressionLimited,
                             timezoneId = sourceTimezoneId,
+                            maxProgrammes = NetworkTimeoutConfig.EPG_MAX_PROGRAMMES,
                             onChannel = { xmltvChannel ->
                                 channelBatch.add(
                                     EpgChannelEntity(
@@ -408,16 +426,17 @@ class EpgSourceRepositoryImpl @Inject constructor(
                     }
                 }
                 val isOversizeError = e is IOException && e.message?.contains("too large", ignoreCase = true) == true
-                val statusMessage = if (isOversizeError) {
-                    "EPG response exceeded 200 MB limit"
-                } else {
-                    e.message ?: "Unknown error"
+                val isLimitError = e is EpgInputLimitException
+                val statusMessage = when {
+                    isLimitError -> "EPG content exceeded size or programme limit"
+                    isOversizeError -> "EPG response exceeded 200 MB limit"
+                    else -> e.message ?: "Unknown error"
                 }
                 epgSourceDao.updateRefreshError(sourceId, statusMessage)
-                if (isOversizeError) {
-                    Result.error("EPG response exceeded 200 MB limit", e)
-                } else {
-                    Result.error("Failed to refresh EPG source: ${e.message}", e)
+                when {
+                    isLimitError -> Result.error("EPG content exceeded size or programme limit", e)
+                    isOversizeError -> Result.error("EPG response exceeded 200 MB limit", e)
+                    else -> Result.error("Failed to refresh EPG source: ${e.message}", e)
                 }
             }
         }

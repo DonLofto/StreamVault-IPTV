@@ -8,6 +8,7 @@ import com.streamvault.data.local.entity.ProviderEntity
 import com.streamvault.data.local.entity.ProgramBrowseEntity
 import com.streamvault.data.local.entity.ProgramEntity
 import com.streamvault.data.parser.XmltvParser
+import com.streamvault.data.parser.EpgInputLimitException
 import com.streamvault.domain.model.Program
 import com.streamvault.domain.model.ProviderType
 import kotlinx.coroutines.CompletableDeferred
@@ -16,10 +17,12 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -210,7 +213,7 @@ class EpgRepositoryImplTest {
         val activeParsers = AtomicInteger(0)
         val maxConcurrentParsers = AtomicInteger(0)
 
-        whenever(xmltvParser.parseStreaming(any(), anyOrNull(), any())).thenAnswer { invocation ->
+        whenever(xmltvParser.parseStreaming(any(), anyOrNull(), any(), any())).thenAnswer { invocation ->
             val activeCount = activeParsers.incrementAndGet()
             maxConcurrentParsers.updateAndGet { current -> maxOf(current, activeCount) }
             val callIndex = parserCallOrder.incrementAndGet()
@@ -223,7 +226,7 @@ class EpgRepositoryImplTest {
                     secondParserEntered.complete(Unit)
                 }
 
-                val onProgram = invocation.getArgument<suspend (Program) -> Unit>(2)
+                val onProgram = invocation.getArgument<suspend (Program) -> Unit>(3)
                 runBlocking {
                     onProgram(
                         Program(
@@ -479,8 +482,56 @@ class EpgRepositoryImplTest {
     }
 
     @Test
-    fun `getProgramsForChannelsSnapshot chunks large requests without reactive combine`() = runTest {
-        val firstChunk = (1..500).map { index ->
+    fun `getProgramsForMoreThan500Channels_reemitsAfterRoomInvalidation`() = runTest {
+        val channelIds = (1..501).map { "channel-$it" }
+        val firstEmission = (1..501).map { index ->
+            ProgramBrowseEntity(
+                id = index.toLong(),
+                providerId = 7L,
+                channelId = "channel-$index",
+                title = "Program $index",
+                startTime = 100L,
+                endTime = 200L
+            )
+        }
+        val channelFlow = kotlinx.coroutines.flow.MutableStateFlow(firstEmission)
+        whenever(programDao.getForChannels(eq(7L), any(), eq(0L), eq(1_000L))).thenAnswer { invocation ->
+            val requestedIds = invocation.getArgument<List<String>>(1).toSet()
+            channelFlow.map { rows -> rows.filter { it.channelId in requestedIds } }
+        }
+
+        val repository = EpgRepositoryImpl(
+            programDao = programDao,
+            providerDao = providerDao,
+            xmltvParser = xmltvParser,
+            okHttpClient = okHttpClientReturningXml(),
+            transactionRunner = transactionRunner,
+            epgSourceRepository = epgSourceRepository,
+            preferencesRepository = preferencesRepository
+        )
+
+        val emissions = mutableListOf<Map<String, List<Program>>>()
+        val collection = async {
+            repository.getProgramsForChannels(7L, channelIds, 0L, 1_000L)
+                .take(2)
+                .toList(emissions)
+        }
+        runCurrent()
+
+        channelFlow.value = firstEmission.map { entity ->
+            entity.copy(title = "Program ${entity.channelId.removePrefix("channel-")} Updated")
+        }
+
+        collection.await()
+
+        assertThat(emissions).hasSize(2)
+        assertThat(emissions[0]).hasSize(501)
+        assertThat(emissions[1]["channel-1"]?.single()?.title).isEqualTo("Program 1 Updated")
+        assertThat(emissions[1]["channel-501"]?.single()?.title).isEqualTo("Program 501 Updated")
+    }
+
+    @Test
+    fun `getProgramsForChannelsSnapshot chunks large requests without reactive combine`() = runTest {        val firstChunk = (1..500).map { index ->
             ProgramBrowseEntity(
                 id = index.toLong(),
                 providerId = 7L,
@@ -536,7 +587,7 @@ class EpgRepositoryImplTest {
                 override fun read(): Int = throw IOException("EPG response too large (>200 MB)")
             }
         )
-        whenever(xmltvParser.parseStreaming(any(), anyOrNull(), any())).thenAnswer { invocation ->
+        whenever(xmltvParser.parseStreaming(any(), anyOrNull(), any(), any())).thenAnswer { invocation ->
             val input = invocation.getArgument<java.io.InputStream>(0)
             input.read()
             Unit
@@ -556,6 +607,31 @@ class EpgRepositoryImplTest {
 
         assertThat(result.isError).isTrue()
         assertThat(result.errorMessageOrNull()).isEqualTo("EPG response exceeded 200 MB limit")
+    }
+
+    @Test
+    fun `refreshEpg returns typed error when decompressed content exceeds limit`() = runTest {
+        whenever(xmltvParser.maybeDecompressGzip(any(), any())).thenAnswer { invocation ->
+            invocation.getArgument(1)
+        }
+        whenever(xmltvParser.parseStreaming(any(), anyOrNull(), any(), any())).thenAnswer { invocation ->
+            throw EpgInputLimitException("EPG programme count exceeds limit")
+        }
+
+        val repository = EpgRepositoryImpl(
+            programDao = programDao,
+            providerDao = providerDao,
+            xmltvParser = xmltvParser,
+            okHttpClient = okHttpClientReturningXml(),
+            transactionRunner = transactionRunner,
+            epgSourceRepository = epgSourceRepository,
+            preferencesRepository = preferencesRepository
+        )
+
+        val result = repository.refreshEpg(7L, "https://example.com/epg.xml")
+
+        assertThat(result.isError).isTrue()
+        assertThat(result.errorMessageOrNull()).isEqualTo("EPG content exceeded size or programme limit")
     }
 
     @Test
@@ -579,8 +655,8 @@ class EpgRepositoryImplTest {
             insertTransactionDepths += transactionDepth
             Unit
         }.whenever(programDao).insertAll(any())
-        whenever(xmltvParser.parseStreaming(any(), anyOrNull(), any())).thenAnswer { invocation ->
-            val onProgram = invocation.getArgument<suspend (Program) -> Unit>(2)
+        whenever(xmltvParser.parseStreaming(any(), anyOrNull(), any(), any())).thenAnswer { invocation ->
+            val onProgram = invocation.getArgument<suspend (Program) -> Unit>(3)
             runBlocking {
                 repeat(600) { index ->
                     parserCallbackTransactionDepths += transactionDepth
@@ -630,8 +706,8 @@ class EpgRepositoryImplTest {
                 stalkerDeviceTimezone = "America/New_York"
             )
         )
-        whenever(xmltvParser.parseStreaming(any(), anyOrNull(), any())).thenAnswer { invocation ->
-            val onProgram = invocation.getArgument<suspend (Program) -> Unit>(2)
+        whenever(xmltvParser.parseStreaming(any(), anyOrNull(), any(), any())).thenAnswer { invocation ->
+            val onProgram = invocation.getArgument<suspend (Program) -> Unit>(3)
             runBlocking {
                 onProgram(
                     Program(
@@ -660,7 +736,7 @@ class EpgRepositoryImplTest {
         val result = repository.refreshEpg(7L, "https://example.com/epg.xml")
 
         assertThat(result.isSuccess).isTrue()
-        verify(xmltvParser).parseStreaming(any(), eq("America/New_York"), any())
+        verify(xmltvParser).parseStreaming(any(), eq("America/New_York"), any(), any())
     }
 
     private fun okHttpClientReturningXml(): OkHttpClient =

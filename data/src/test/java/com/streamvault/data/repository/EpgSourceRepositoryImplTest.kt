@@ -254,7 +254,7 @@ class EpgSourceRepositoryImplTest {
         whenever(providerEpgSourceDao.getProviderIdsForSourceSync(10L)).thenReturn(emptyList())
         doAnswer { throw IOException("EPG response too large (>200 MB)") }
             .whenever(xmltvParser)
-            .parseStreamingWithChannels(any(), anyOrNull(), any(), any())
+            .parseStreamingWithChannels(any(), anyOrNull(), any(), any(), any())
 
         val result = repository.refreshSource(10L)
 
@@ -453,7 +453,7 @@ class EpgSourceRepositoryImplTest {
         val result = repository.refreshSource(10L)
 
         assertThat(result is Result.Success).isTrue()
-        verify(xmltvParser).parseStreamingWithChannels(any(), eq("America/New_York"), any(), any())
+        verify(xmltvParser).parseStreamingWithChannels(any(), eq("America/New_York"), any(), any(), any())
     }
 
     @Test
@@ -500,7 +500,7 @@ class EpgSourceRepositoryImplTest {
         val result = repository.refreshSource(10L)
 
         assertThat(result is Result.Success).isTrue()
-        verify(xmltvParser).parseStreamingWithChannels(any(), isNull(), any(), any())
+        verify(xmltvParser).parseStreamingWithChannels(any(), isNull(), any(), any(), any())
     }
 
     private class CloseTrackingInputStream : ByteArrayInputStream(byteArrayOf()) {

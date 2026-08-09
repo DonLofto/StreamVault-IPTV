@@ -38,6 +38,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -124,6 +125,7 @@ internal fun EpgGrid(
     density: GuideDensity,
     transparentOverlay: Boolean = false,
     initialFocusedChannelId: Long? = null,
+    guideSessionKey: String,
     onChannelClick: (Channel) -> Unit,
     onChannelLongClick: ((Channel, Program?) -> Unit)? = null,
     onProgramClick: (Channel, Program) -> Unit,
@@ -149,9 +151,11 @@ internal fun EpgGrid(
             ?: 0
     }
 
-    LaunchedEffect(channels.size, resolvedInitialChannelId) {
+    // B7: key focus initialization to the guide session/category entry, not the appended
+    // channel-list size, so pagination appends never reset focus/scroll to the first row.
+    LaunchedEffect(guideSessionKey, resolvedInitialChannelId) {
         if (channels.isEmpty()) return@LaunchedEffect
-        verticalListState.scrollToItem((initialFocusIndex - 2).coerceAtLeast(0))
+        verticalListState.scrollToItem(initialFocusIndex.coerceAtLeast(0))
         delay(140)
         initialFocusRequester.requestFocus()
     }
@@ -353,6 +357,7 @@ fun EpgRow(
     val currentProgram by remember(programs, now) {
         derivedStateOf { programs.currentProgramAt(now) }
     }
+
     val hasUsableArchive = channel.archivePlaybackCapability().canBuildReplayCandidate
     val totalDuration = (windowEnd - windowStart).coerceAtLeast(1L)
     val channelPaddingVertical = when (density) {
@@ -552,14 +557,19 @@ fun ProgramItem(
     onFocused: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
-    val now = currentGuideNow()
-    val isCurrent = now in program.startTime until program.endTime
 
+    // M1: geometry and labels depend only on the programme and window, not the guide
+    // clock. They are computed here (no currentGuideNow() read) so the 30-second tick
+    // recomposes only the inner clock-dependent cell, not the whole row of cells.
     val appTimeFormat = LocalAppTimeFormat.current
     val format = remember(appTimeFormat) { appTimeFormat.createTimeFormatter() }
     val zone = remember { ZoneId.systemDefault() }
-    val startStr = format.format(Instant.ofEpochMilli(program.startTime).atZone(zone))
-    val endStr = format.format(Instant.ofEpochMilli(program.endTime).atZone(zone))
+    val startStr = remember(program.id, format, zone) {
+        format.format(Instant.ofEpochMilli(program.startTime).atZone(zone))
+    }
+    val endStr = remember(program.id, format, zone) {
+        format.format(Instant.ofEpochMilli(program.endTime).atZone(zone))
+    }
     val totalDuration = (windowEnd - windowStart).coerceAtLeast(1L)
     val visibleStart = max(program.startTime, windowStart)
     val visibleEnd = max(visibleStart + 1, minOf(program.endTime, windowEnd))
@@ -614,6 +624,52 @@ fun ProgramItem(
         )
     }
 
+    ProgramItemCell(
+        program = program,
+        transparentOverlay = transparentOverlay,
+        itemStart = itemStart,
+        itemWidth = itemWidth,
+        outerVerticalPadding = outerVerticalPadding,
+        innerHorizontalPadding = innerHorizontalPadding,
+        innerVerticalPadding = innerVerticalPadding,
+        titleStyle = titleStyle,
+        timeStyle = timeStyle,
+        isVeryCompactCell = isVeryCompactCell,
+        isFocused = isFocused,
+        startStr = startStr,
+        endStr = endStr,
+        onClick = onClick,
+        onFocused = onFocused,
+        onFocusChanged = { isFocused = it }
+    )
+}
+
+/**
+ * M1: the only part of a programme cell that depends on the guide clock — current-state
+ * colors. Recomputes on the 30-second tick without forcing the whole cell to rebuild.
+ */
+@Composable
+private fun ProgramItemCell(
+    program: Program,
+    transparentOverlay: Boolean,
+    itemStart: Dp,
+    itemWidth: Dp,
+    outerVerticalPadding: Dp,
+    innerHorizontalPadding: Dp,
+    innerVerticalPadding: Dp,
+    titleStyle: TextStyle,
+    timeStyle: TextStyle,
+    isVeryCompactCell: Boolean,
+    isFocused: Boolean,
+    startStr: String,
+    endStr: String,
+    onClick: () -> Unit,
+    onFocused: () -> Unit,
+    onFocusChanged: (Boolean) -> Unit
+) {
+    val now = currentGuideNow()
+    val isCurrent = now in program.startTime until program.endTime
+
     TvClickableSurface(
         onClick = onClick,
         modifier = Modifier
@@ -624,7 +680,7 @@ fun ProgramItem(
                 if (it.isFocused && !isFocused) {
                     onFocused()
                 }
-                isFocused = it.isFocused
+                onFocusChanged(it.isFocused)
             },
         colors = ClickableSurfaceDefaults.colors(
             containerColor = when {

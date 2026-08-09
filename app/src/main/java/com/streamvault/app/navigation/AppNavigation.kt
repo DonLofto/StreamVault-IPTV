@@ -114,8 +114,11 @@ object Routes {
     fun epg(categoryId: Long? = null, anchorTime: Long? = null, favoritesOnly: Boolean? = null): String {
         val resolvedCategoryId = categoryId ?: -1L
         val resolvedAnchorTime = anchorTime ?: -1L
-        val resolvedFavoritesOnly = favoritesOnly ?: false
-        return "$EPG?categoryId=$resolvedCategoryId&anchorTime=$resolvedAnchorTime&favoritesOnly=$resolvedFavoritesOnly"
+        return if (favoritesOnly == null) {
+            "$EPG?categoryId=$resolvedCategoryId&anchorTime=$resolvedAnchorTime"
+        } else {
+            "$EPG?categoryId=$resolvedCategoryId&anchorTime=$resolvedAnchorTime&favoritesOnly=$favoritesOnly"
+        }
     }
 
     fun livePlayer(
@@ -647,12 +650,12 @@ fun AppNavigation(mainActivity: MainActivity) {
             arguments = listOf(
                 navArgument("categoryId") { type = NavType.LongType; defaultValue = -1L },
                 navArgument("anchorTime") { type = NavType.LongType; defaultValue = -1L },
-                navArgument("favoritesOnly") { type = NavType.BoolType; defaultValue = false }
+                navArgument("favoritesOnly") { type = NavType.BoolType; nullable = true }
             )
         ) { backStackEntry ->
             val epgCategoryId = backStackEntry.arguments?.getLong("categoryId")?.takeIf { it != -1L }
             val epgAnchorTime = backStackEntry.arguments?.getLong("anchorTime")?.takeIf { it != -1L }
-            val epgFavoritesOnly = backStackEntry.arguments?.getBoolean("favoritesOnly") ?: false
+            val epgFavoritesOnly = backStackEntry.arguments?.getBoolean("favoritesOnly")
             com.streamvault.app.ui.screens.epg.FullEpgScreen(
                 currentRoute = Routes.EPG,
                 initialCategoryId = epgCategoryId,

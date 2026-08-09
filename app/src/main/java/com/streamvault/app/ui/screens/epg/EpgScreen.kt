@@ -139,7 +139,7 @@ fun FullEpgScreen(
     currentRoute: String,
     initialCategoryId: Long? = null,
     initialAnchorTime: Long? = null,
-    initialFavoritesOnly: Boolean = false,
+    initialFavoritesOnly: Boolean? = null,
     onPlayChannel: (Channel, Long, Boolean, Long?, String) -> Unit,
     onPlayArchive: (Channel, Program, Long, Boolean, Long?, String) -> Unit,
     onNavigate: (String) -> Unit,
@@ -460,6 +460,12 @@ fun FullEpgScreen(
                             guideWindowStart = uiState.guideWindowStart,
                             guideWindowEnd = uiState.guideWindowEnd,
                             density = uiState.selectedDensity,
+                            initialFocusedChannelId = initialCategoryId,
+                            guideSessionKey = buildString {
+                                append(uiState.selectedCategoryId)
+                                append(':')
+                                append(uiState.combinedProfileId ?: "none")
+                            },
                             onChannelClick = { channel ->
                                 if (isGuideChannelLocked(channel, categoriesById, uiState.parentalControlLevel)) {
                                     requestLockedGuideAction(LockedGuideAction.PlayChannel(channel, returnRoute))

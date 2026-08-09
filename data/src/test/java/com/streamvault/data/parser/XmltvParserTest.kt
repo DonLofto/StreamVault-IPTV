@@ -1,6 +1,7 @@
 package com.streamvault.data.parser
 
 import com.google.common.truth.Truth.assertThat
+import com.streamvault.domain.model.Program
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -265,10 +266,63 @@ class XmltvParserTest {
         val programs = parser.parse(xml.byteInputStream())
 
         // XmltvParser has a try/catch that returns partial results
-        // At minimum, no exception should propagate
-        assertThat(programs).isNotNull()
-        // Depending on where the parser breaks, we expect 0–2 programs (not a crash)
-        assertThat(programs.size).isAtMost(2)
+        // The two complete programmes are retained; parsing stops at the broken input.
+        assertThat(programs).hasSize(2)
+    }
+
+    @Test
+    fun `parseStreaming_exceedingMaxProgrammes_throwsTypedLimitError`() = runTest {
+        val xml = buildString {
+            append("<?xml version=\"1.0\"?><tv>")
+            repeat(5) { index ->
+                append(
+                    "<programme start=\"20250101120000 +0000\" stop=\"20250101130000 +0000\" channel=\"ch1\">" +
+                        "<title>Program $index</title></programme>"
+                )
+            }
+            append("</tv>")
+        }
+        val emitted = mutableListOf<Program>()
+
+        val error = kotlin.runCatching {
+            parser.parseStreaming(
+                xml.byteInputStream(),
+                maxProgrammes = 3
+            ) { emitted.add(it) }
+        }.exceptionOrNull()
+
+        assertThat(error).isInstanceOf(EpgInputLimitException::class.java)
+        assertThat(error?.message).contains("programme count")
+        assertThat(emitted).hasSize(3)
+    }
+
+    @Test
+    fun `parseStreaming_gzipExpandingBeyondByteLimit_throwsTypedLimitError`() = runTest {
+        val xml = buildString {
+            append("<?xml version=\"1.0\"?><tv>")
+            repeat(50) { index ->
+                append(
+                    "<programme start=\"20250101120000 +0000\" stop=\"20250101130000 +0000\" channel=\"ch1\">" +
+                        "<title>Program $index with enough text to inflate the payload</title></programme>"
+                )
+            }
+            append("</tv>")
+        }
+        val gzipBytes = ByteArrayOutputStream().use { bos ->
+            GZIPOutputStream(bos).use { gzip -> gzip.write(xml.toByteArray()) }
+            bos.toByteArray()
+        }
+        val limited = MaxBytesInputStream(
+            java.util.zip.GZIPInputStream(gzipBytes.inputStream()),
+            maxBytes = 256L
+        )
+
+        val error = kotlin.runCatching {
+            parser.parseStreaming(limited, maxProgrammes = 1_000_000) { }
+        }.exceptionOrNull()
+
+        assertThat(error).isInstanceOf(EpgInputLimitException::class.java)
+        assertThat(error?.message).contains("decompressed size")
     }
 
     @Test
