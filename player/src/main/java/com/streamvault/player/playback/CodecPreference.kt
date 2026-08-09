@@ -14,10 +14,22 @@ enum class ActiveDecoderPolicy {
     COMPATIBILITY
 }
 
+/**
+ * B12: managed selection must engage whenever the effective recovery policy is
+ * software/compatibility, even when the user requested AUTO. Error recovery switches the
+ * effective policy to SOFTWARE_PREFERRED/COMPATIBILITY; keying on the requested mode alone
+ * would rebuild renderers with MediaCodecSelector.DEFAULT and re-select the failed
+ * hardware codec. Ordinary AUTO playback (policy AUTO) keeps the stock Media3 selector.
+ */
 internal fun shouldUseManagedCodecSelector(
     requestedMode: DecoderMode,
     decoderPolicy: ActiveDecoderPolicy
-): Boolean = requestedMode != DecoderMode.AUTO && decoderPolicy != ActiveDecoderPolicy.AUTO
+): Boolean = when (decoderPolicy) {
+    ActiveDecoderPolicy.SOFTWARE_PREFERRED,
+    ActiveDecoderPolicy.COMPATIBILITY -> true
+    ActiveDecoderPolicy.HARDWARE_PREFERRED -> requestedMode != DecoderMode.AUTO
+    ActiveDecoderPolicy.AUTO -> requestedMode != DecoderMode.AUTO
+}
 
 internal data class PlaybackRendererPlan(
     val useAudioVideoSyncSink: Boolean,

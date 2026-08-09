@@ -82,4 +82,17 @@ class PlayerDataSourceFactoryProviderTest {
         assertThat(shouldWrapDataSourceReadStats(ResolvedStreamType.PROGRESSIVE)).isFalse()
         assertThat(shouldWrapDataSourceReadStats(ResolvedStreamType.DASH)).isFalse()
     }
+
+    @Test
+    fun `read stats disabled by default does not wrap live streams`() {
+        assertThat(PLAYER_READ_DIAGNOSTICS_DEFAULT).isFalse()
+        assertThat(shouldWrapDataSourceReadStats(ResolvedStreamType.HLS)).isTrue()
+    }
+
+    @Test
+    fun `read stats gate combines diagnostics flag with live stream type`() {
+        assertThat(readStatsWrappingEnabled(readDiagnosticsEnabled = false, resolvedStreamType = ResolvedStreamType.HLS)).isFalse()
+        assertThat(readStatsWrappingEnabled(readDiagnosticsEnabled = true, resolvedStreamType = ResolvedStreamType.HLS)).isTrue()
+        assertThat(readStatsWrappingEnabled(readDiagnosticsEnabled = true, resolvedStreamType = ResolvedStreamType.PROGRESSIVE)).isFalse()
+    }
 }

@@ -20,10 +20,20 @@ import okhttp3.Protocol
 internal fun shouldUsePlatformHttpDataSource(resolvedStreamType: ResolvedStreamType): Boolean =
     false
 
+// M3: read-stats instrumentation is opt-in; the default build does not pay per-read
+// bookkeeping or URL sanitization on the playback path.
+internal const val PLAYER_READ_DIAGNOSTICS_DEFAULT = false
+
+internal fun readStatsWrappingEnabled(
+    readDiagnosticsEnabled: Boolean,
+    resolvedStreamType: ResolvedStreamType
+): Boolean = readDiagnosticsEnabled && shouldWrapDataSourceReadStats(resolvedStreamType)
+
 @UnstableApi
 class PlayerDataSourceFactoryProvider(
     private val context: Context,
-    private val baseClient: OkHttpClient
+    private val baseClient: OkHttpClient,
+    private val readDiagnosticsEnabled: Boolean = PLAYER_READ_DIAGNOSTICS_DEFAULT
 ) {
     private companion object {
         private const val TAG = "PlayerDataSource"
@@ -96,7 +106,10 @@ class PlayerDataSourceFactoryProvider(
             }
         }
         val defaultFactory = DefaultDataSource.Factory(context, upstreamFactory)
-        val factory = if (shouldWrapDataSourceReadStats(resolvedStreamType)) {
+        // M3: read-stats wrapping is opt-in via an explicit diagnostics session. When
+        // disabled, HLS/MPEG-TS sources go straight to the upstream factory with no
+        // per-read bookkeeping or URL sanitization on the playback path.
+        val factory = if (readStatsWrappingEnabled(readDiagnosticsEnabled, resolvedStreamType)) {
             PlayerDataSourceReadStatsFactory(
                 upstream = defaultFactory,
                 resolvedStreamType = resolvedStreamType,
