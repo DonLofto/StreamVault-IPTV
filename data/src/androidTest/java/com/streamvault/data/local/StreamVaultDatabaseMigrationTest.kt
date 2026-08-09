@@ -66,11 +66,11 @@ class StreamVaultDatabaseMigrationTest {
 
         migratedDb.execSQL(
             """
-            INSERT INTO channels (
-                stream_id, name, stream_url, number, catch_up_supported, catch_up_days,
-                provider_id, is_adult, is_user_protected, logical_group_id, error_count
-            ) VALUES (1002, 'Sports Arena', 'http://test/live/sports', 102, 0, 0, 1, 0, 0, '', 0)
-            """.trimIndent()
+                INSERT INTO channels (
+                    stream_id, name, stream_url, number, catch_up_supported, catch_up_days,
+                    provider_id, is_adult, is_user_protected, logical_group_id, error_count, sync_fingerprint
+                ) VALUES (1001, 'News One', 'http://test/live/news', 101, 0, 0, 1, 0, 0, '', 0)
+                """.trimIndent()
         )
         assertEquals(1, countRows(migratedDb, "SELECT COUNT(*) FROM channels_fts WHERE channels_fts MATCH 'sports*'"))
 
@@ -1286,8 +1286,76 @@ class StreamVaultDatabaseMigrationTest {
         migratedDb.close()
     }
 
-    private fun countRows(db: androidx.sqlite.db.SupportSQLiteDatabase, sql: String): Int {
-        db.query(sql).use { cursor ->
+    @Test
+    fun migrate61To62_addsGuideAndLogoSourcePolicies() {
+        migrationTestHelper.createDatabase("streamvault-61-62-test", 61).close()
+
+        val migratedDb = migrationTestHelper.runMigrationsAndValidate(
+            "streamvault-61-62-test",
+            62,
+            true,
+            StreamVaultDatabase.MIGRATION_61_62
+        )
+
+        assertEquals(
+            1,
+            countRows(
+                migratedDb,
+                "SELECT COUNT(*) FROM pragma_table_info('providers') WHERE name = 'guide_source_policy'"
+            )
+        )
+        assertEquals(
+            1,
+            countRows(
+                migratedDb,
+                "SELECT COUNT(*) FROM pragma_table_info('providers') WHERE name = 'channel_logo_source_policy'"
+            )
+        )
+        migratedDb.close()
+    }
+    @Test
+    fun migrate62To63_addsChannelOrderingIndexes() {
+        migrationTestHelper.createDatabase("streamvault-62-63-test", 62).apply {
+            execSQL(
+                """
+                INSERT INTO channels (
+                    stream_id, name, stream_url, number, catch_up_supported, catch_up_days,
+                    provider_id, is_adult, is_user_protected, logical_group_id, error_count, sync_fingerprint
+                ) VALUES (1001, 'News One', 'http://test/live/news', 101, 0, 0, 1, 0, 0, '', 0, '')
+                """.trimIndent()
+            )
+            close()
+        }
+
+        val migratedDb = migrationTestHelper.runMigrationsAndValidate(
+            "streamvault-62-63-test",
+            63,
+            true,
+            StreamVaultDatabase.MIGRATION_62_63
+        )
+
+        assertEquals(
+            1,
+            countRows(
+                migratedDb,
+                "SELECT COUNT(*) FROM pragma_index_list('channels') WHERE name = 'index_channels_provider_id_number'"
+            )
+        )
+        assertEquals(
+            1,
+            countRows(
+                migratedDb,
+                "SELECT COUNT(*) FROM pragma_index_list('channels') WHERE name = 'index_channels_provider_id_category_id_number'"
+            )
+        )
+        assertEquals(
+            1,
+            countRows(migratedDb, "SELECT COUNT(*) FROM channels WHERE stream_id = 1001 AND number = 101")
+        )
+        migratedDb.close()
+    }
+
+    private fun countRows(db: androidx.sqlite.db.SupportSQLiteDatabase, sql: String): Int {        db.query(sql).use { cursor ->
             if (!cursor.moveToFirst()) return 0
             return cursor.getInt(0)
         }

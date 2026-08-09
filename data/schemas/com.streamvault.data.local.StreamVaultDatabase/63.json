@@ -1,8 +1,8 @@
 {
   "formatVersion": 1,
   "database": {
-    "version": 62,
-    "identityHash": "d264bd271c35afee323d4f3a16f64b0e",
+    "version": 63,
+    "identityHash": "fce14bc7c9eb38fed542545e76004ea1",
     "entities": [
       {
         "tableName": "providers",
@@ -493,6 +493,27 @@
             ],
             "orders": [],
             "createSql": "CREATE INDEX IF NOT EXISTS `index_channels_provider_id_category_id_logical_group_id` ON `${TABLE_NAME}` (`provider_id`, `category_id`, `logical_group_id`)"
+          },
+          {
+            "name": "index_channels_provider_id_number",
+            "unique": false,
+            "columnNames": [
+              "provider_id",
+              "number"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_channels_provider_id_number` ON `${TABLE_NAME}` (`provider_id`, `number`)"
+          },
+          {
+            "name": "index_channels_provider_id_category_id_number",
+            "unique": false,
+            "columnNames": [
+              "provider_id",
+              "category_id",
+              "number"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_channels_provider_id_category_id_number` ON `${TABLE_NAME}` (`provider_id`, `category_id`, `number`)"
           }
         ],
         "foreignKeys": [
@@ -5356,7 +5377,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'd264bd271c35afee323d4f3a16f64b0e')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'fce14bc7c9eb38fed542545e76004ea1')"
     ]
   }
 }

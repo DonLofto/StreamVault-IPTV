@@ -14,6 +14,7 @@ android {
 
     defaultConfig {
         minSdk = 25
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
@@ -96,6 +97,8 @@ dependencies {
     testImplementation(libs.kxml2)
     // Mocking for SyncManagerTest
     testImplementation(libs.mockito.kotlin)
+    // sqlite-jdbc: JVM SQLite for EXPLAIN QUERY PLAN / query-plan regression tests
+    testImplementation("org.xerial:sqlite-jdbc:3.41.2.2")
 
     // Android instrumentation tests
     androidTestImplementation(libs.room.testing)

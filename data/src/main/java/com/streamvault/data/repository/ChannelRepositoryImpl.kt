@@ -12,6 +12,7 @@ import com.streamvault.data.mapper.toDomain
 import com.streamvault.data.preferences.PreferencesRepository
 import com.streamvault.data.remote.xtream.XtreamStreamUrlResolver
 import com.streamvault.data.util.rankSearchResults
+import com.streamvault.data.util.RepositoryTimingReporter
 import com.streamvault.data.util.toFtsPrefixQuery
 import com.streamvault.domain.model.Category
 import com.streamvault.domain.model.ChannelLogoSourcePolicy
@@ -53,7 +54,8 @@ class ChannelRepositoryImpl @Inject constructor(
     private val favoriteDao: FavoriteDao,
     private val preferencesRepository: PreferencesRepository,
     private val parentalControlManager: com.streamvault.domain.manager.ParentalControlManager,
-    private val xtreamStreamUrlResolver: XtreamStreamUrlResolver
+    private val xtreamStreamUrlResolver: XtreamStreamUrlResolver,
+    private val repositoryTimingReporter: RepositoryTimingReporter = RepositoryTimingReporter(enabled = false)
 ) : ChannelRepository {
     private companion object {
         const val TAG = "ChannelRepository"
@@ -345,7 +347,9 @@ class ChannelRepositoryImpl @Inject constructor(
         val hiddenIds = values[4] as Set<Long>
         val filtered = applyVisibilityFilter(entities, level, unlockedCats, hideDecorativeRows)
             .filterNot { it.id in hiddenIds }
-        applyNumbering(buildPresentedChannels(filtered, settings, unlockedCats), settings.numberingMode)
+        repositoryTimingReporter.measure(label = "channels.present", rowCount = { filtered.size }) {
+            applyNumbering(buildPresentedChannels(filtered, settings, unlockedCats), settings.numberingMode)
+        }
     }.flowOn(Dispatchers.Default)
 
     private fun decorativeAwareCategoryCountFlow(providerId: Long): Flow<List<CategoryCount>> =

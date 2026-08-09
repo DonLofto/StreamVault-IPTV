@@ -15,7 +15,6 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Before
 import org.junit.Test
 import org.mockito.kotlin.any
-import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.verify
@@ -77,15 +76,20 @@ class SyncCatalogStoreMemoryTest {
                 )
             }
 
+        val capturedBatches = mutableListOf<List<MovieImportStageEntity>>()
+        whenever(catalogSyncDao.insertMovieStages(any())).thenAnswer { invocation ->
+            val batch = invocation.getArgument<List<MovieImportStageEntity>>(0)
+            capturedBatches += batch.toList()
+            Unit
+        }
+
         val result = limitedStore.replaceMovieCatalog(providerId, categories = null, movies = movies)
 
         assertThat(result).isEqualTo(limit)
 
-        val insertedStages = argumentCaptor<List<MovieImportStageEntity>>()
-        verify(catalogSyncDao).insertMovieStages(insertedStages.capture())
-        val allBatches = insertedStages.allValues
-        val peakBatch = allBatches.maxOfOrNull { it.size } ?: 0
-        val totalInserted = allBatches.sumOf { it.size }
+        verify(catalogSyncDao, org.mockito.kotlin.atLeastOnce()).insertMovieStages(any())
+        val peakBatch = capturedBatches.maxOfOrNull { it.size } ?: 0
+        val totalInserted = capturedBatches.sumOf { it.size }
 
         // Peak in-memory rows is the batch size, not the 250k distinct total.
         assertThat(peakBatch).isAtMost(500)

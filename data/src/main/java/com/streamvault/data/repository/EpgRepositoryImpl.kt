@@ -15,6 +15,7 @@ import com.streamvault.data.remote.http.safeRequestIdentitySummary
 import com.streamvault.data.remote.http.toGenericRequestProfile
 import com.streamvault.data.remote.http.withRequestProfile
 import com.streamvault.data.util.rankSearchResults
+import com.streamvault.data.util.RepositoryTimingReporter
 import com.streamvault.domain.model.Program
 import com.streamvault.domain.model.Result
 import com.streamvault.domain.repository.EpgRepository
@@ -58,6 +59,7 @@ class EpgRepositoryImpl @Inject constructor(
     private val transactionRunner: DatabaseTransactionRunner,
     private val epgSourceRepository: EpgSourceRepository,
     private val preferencesRepository: PreferencesRepository,
+    private val repositoryTimingReporter: RepositoryTimingReporter = RepositoryTimingReporter(enabled = false),
     private val externalScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 ) : EpgRepository {
 
@@ -116,7 +118,11 @@ class EpgRepositoryImpl @Inject constructor(
             return preferencesRepository.epgTimeShiftMinutes(providerId).flatMapLatest { minutes ->
                 val offsetMs = minutes * 60_000L
                 programDao.getForChannels(providerId, channelIds, startTime - offsetMs, endTime - offsetMs)
-                    .map { entities -> entities.map { it.toDomain().shifted(offsetMs) }.groupBy { it.channelId } }
+                    .map { entities ->
+                        repositoryTimingReporter.measure(label = "epg.programsForChannels", rowCount = { entities.size }) {
+                            entities.map { it.toDomain().shifted(offsetMs) }.groupBy { it.channelId }
+                        }
+                    }
             }
         }
         return flow {
@@ -144,9 +150,11 @@ class EpgRepositoryImpl @Inject constructor(
             }
         }
 
-        return entities
-            .map { it.toDomain().shifted(offsetMs) }
-            .groupBy { it.channelId }
+        return repositoryTimingReporter.measure(label = "epg.programsForChannelsSnapshot", rowCount = { entities.size }) {
+            entities
+                .map { it.toDomain().shifted(offsetMs) }
+                .groupBy { it.channelId }
+        }
     }
 
     override fun getProgramsByCategory(
