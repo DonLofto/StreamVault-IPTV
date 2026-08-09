@@ -28,6 +28,7 @@ class BackgroundEpgSyncWorker(
     @InstallIn(SingletonComponent::class)
     interface BackgroundEpgSyncWorkerEntryPoint {
         fun syncManager(): SyncManager
+        fun playbackNetworkAdmissionGate(): PlaybackNetworkAdmissionGate
     }
 
     override suspend fun doWork(): Result {
@@ -43,6 +44,20 @@ class BackgroundEpgSyncWorker(
         val admission = EpgAdmissionPolicy(applicationContext)
         if (!admission.isAdmitted()) {
             Log.w(TAG, "Deferring background EPG sync for provider $providerId: ${admission.rejectionReason()}")
+            return Result.retry()
+        }
+
+        // H6: defer while playback is active so feed downloads never compete with segments.
+        val gate = EntryPointAccessors.fromApplication(
+            applicationContext,
+            BackgroundEpgSyncWorkerEntryPoint::class.java
+        ).playbackNetworkAdmissionGate()
+        if (gate.awaitBackgroundAdmission(
+                trafficClass = PlaybackNetworkAdmissionGate.TrafficClass.BACKGROUND_EPG,
+                maxWaitMs = 30_000L
+            ) == PlaybackNetworkAdmissionGate.Admission.DEFER
+        ) {
+            Log.w(TAG, "Deferring background EPG sync for provider $providerId: playback active")
             return Result.retry()
         }
 

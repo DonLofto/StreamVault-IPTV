@@ -190,6 +190,8 @@ class SyncManager @Inject constructor(
     private val epgRepository: EpgRepository,
     private val epgSourceRepository: EpgSourceRepository,
     private val okHttpClient: OkHttpClient,
+    @com.streamvault.data.di.BackgroundSyncClient
+    private val backgroundSyncHttpClient: OkHttpClient,
     private val credentialCrypto: CredentialCrypto,
     private val syncMetadataRepository: SyncMetadataRepository,
     private val transactionRunner: DatabaseTransactionRunner,
@@ -210,7 +212,7 @@ class SyncManager @Inject constructor(
     )
     private val m3uImporter = SyncManagerM3uImporter(
         m3uParser = m3uParser,
-        okHttpClient = okHttpClient,
+        okHttpClient = backgroundSyncHttpClient,
         syncCatalogStore = syncCatalogStore,
         retryTransient = { block -> retryTransient(block = block) },
         progress = ::progress,
@@ -235,7 +237,7 @@ class SyncManager @Inject constructor(
     private val syncAdmissionMutex = Mutex()
     private val xtreamCatalogHttpService: OkHttpXtreamApiService by lazy {
         OkHttpXtreamApiService(
-            client = okHttpClient,
+            client = backgroundSyncHttpClient,
             json = xtreamJson,
             defaultRequestProfile = buildAppRequestProfile(
                 versionName = null,

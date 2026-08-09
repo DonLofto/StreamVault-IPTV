@@ -33,11 +33,26 @@ class StalkerIndexWorker(
     interface StalkerIndexWorkerEntryPoint {
         fun providerDao(): ProviderDao
         fun syncManager(): SyncManager
+        fun playbackNetworkAdmissionGate(): PlaybackNetworkAdmissionGate
     }
 
     override suspend fun doWork(): Result {
         if (applicationContext.isCurrentlyLowOnMemoryForSync()) {
             Log.w(TAG, "Deferring Stalker index work: device low on memory")
+            return Result.retry()
+        }
+
+        // H6: defer catalog fetch while playback is active.
+        val gate = EntryPointAccessors.fromApplication(
+            applicationContext,
+            StalkerIndexWorkerEntryPoint::class.java
+        ).playbackNetworkAdmissionGate()
+        if (gate.awaitBackgroundAdmission(
+                trafficClass = PlaybackNetworkAdmissionGate.TrafficClass.BACKGROUND_CATALOG,
+                maxWaitMs = 30_000L
+            ) == PlaybackNetworkAdmissionGate.Admission.DEFER
+        ) {
+            Log.w(TAG, "Deferring Stalker index work: playback active")
             return Result.retry()
         }
 

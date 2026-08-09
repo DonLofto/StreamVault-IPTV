@@ -26,6 +26,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
@@ -36,6 +37,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.shareIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -291,57 +293,66 @@ class EpgRepositoryImpl @Inject constructor(
                         .url(epgUrl)
                         .build()
                         .withRequestProfile(providerRequestProfile)
-                    epgHttpClient.newCall(request).execute().use { response ->
-                        if (!response.isSuccessful) {
-                            Log.w(
-                                "EpgRepository",
-                                "EPG request failed for provider $providerId (${request.safeRequestIdentitySummary(providerRequestProfile)}): HTTP ${response.code}"
-                            )
-                            return@withLock Result.error("Failed to download EPG: HTTP ${response.code}")
-                        }
-
-                        val contentLength = response.header("Content-Length")?.toLongOrNull() ?: -1L
-                        if (contentLength > MAX_EPG_SIZE_BYTES) {
-                            return@withLock Result.error("EPG file too large (${contentLength / 1_048_576}MB)")
-                        }
-
-                        val body = response.body ?: return@withLock Result.error("Empty EPG response")
-
-                        transactionRunner.inTransaction {
-                            programDao.deleteByProvider(stagingProviderId)
-                        }
-
-                        body.byteStream().use { rawStream ->
-                            // Let OkHttp negotiate/decompress standard gzip responses. We still
-                            // inspect the bytes so download-style URLs that return raw `.gz`
-                            // payloads without transparent decompression continue to work.
-                            val limitedStream = object : FilterInputStream(rawStream) {
-                                private var bytesRead = 0L
-                                override fun read(): Int {
-                                    if (bytesRead >= MAX_EPG_SIZE_BYTES) throw IOException("EPG response too large (>200 MB)")
-                                    return super.read().also { if (it >= 0) bytesRead++ }
-                                }
-                                override fun read(b: ByteArray, off: Int, len: Int): Int {
-                                    if (bytesRead >= MAX_EPG_SIZE_BYTES) throw IOException("EPG response too large (>200 MB)")
-                                    return super.read(b, off, len).also { if (it > 0) bytesRead += it }
-                                }
-                            }
-                            xmltvParser.maybeDecompressGzip(epgUrl, limitedStream).use { xmlInput ->
-                                val decompressionLimited = MaxBytesInputStream(
-                                    xmlInput,
-                                    NetworkTimeoutConfig.EPG_MAX_DECOMPRESSED_BYTES
+                    val call = epgHttpClient.newCall(request)
+                    try {
+                        call.execute().use { response ->
+                            if (!response.isSuccessful) {
+                                Log.w(
+                                    "EpgRepository",
+                                    "EPG request failed for provider $providerId (${request.safeRequestIdentitySummary(providerRequestProfile)}): HTTP ${response.code}"
                                 )
-                                xmltvParser.parseStreaming(
-                                    decompressionLimited,
-                                    timezoneId = providerTimezoneId,
-                                    maxProgrammes = NetworkTimeoutConfig.EPG_MAX_PROGRAMMES
-                                ) { program ->
-                                    batch.add(program.copy(providerId = stagingProviderId).toEntity())
-                                    if (batch.size >= EPG_PROGRAM_BATCH_SIZE) {
-                                        flushBatch()
+                                return@withLock Result.error("Failed to download EPG: HTTP ${response.code}")
+                            }
+
+                            val contentLength = response.header("Content-Length")?.toLongOrNull() ?: -1L
+                            if (contentLength > MAX_EPG_SIZE_BYTES) {
+                                return@withLock Result.error("EPG file too large (${contentLength / 1_048_576}MB)")
+                            }
+
+                            val body = response.body ?: return@withLock Result.error("Empty EPG response")
+
+                            transactionRunner.inTransaction {
+                                programDao.deleteByProvider(stagingProviderId)
+                            }
+
+                            body.byteStream().use { rawStream ->
+                                // Let OkHttp negotiate/decompress standard gzip responses. We still
+                                // inspect the bytes so download-style URLs that return raw `.gz`
+                                // payloads without transparent decompression continue to work.
+                                val limitedStream = object : FilterInputStream(rawStream) {
+                                    private var bytesRead = 0L
+                                    override fun read(): Int {
+                                        if (bytesRead >= MAX_EPG_SIZE_BYTES) throw IOException("EPG response too large (>200 MB)")
+                                        return super.read().also { if (it >= 0) bytesRead++ }
+                                    }
+                                    override fun read(b: ByteArray, off: Int, len: Int): Int {
+                                        if (bytesRead >= MAX_EPG_SIZE_BYTES) throw IOException("EPG response too large (>200 MB)")
+                                        return super.read(b, off, len).also { if (it > 0) bytesRead += it }
+                                    }
+                                }
+                                xmltvParser.maybeDecompressGzip(epgUrl, limitedStream).use { xmlInput ->
+                                    val decompressionLimited = MaxBytesInputStream(
+                                        xmlInput,
+                                        NetworkTimeoutConfig.EPG_MAX_DECOMPRESSED_BYTES
+                                    )
+                                    xmltvParser.parseStreaming(
+                                        decompressionLimited,
+                                        timezoneId = providerTimezoneId,
+                                        maxProgrammes = NetworkTimeoutConfig.EPG_MAX_PROGRAMMES
+                                    ) { program ->
+                                        batch.add(program.copy(providerId = stagingProviderId).toEntity())
+                                        if (batch.size >= EPG_PROGRAM_BATCH_SIZE) {
+                                            flushBatch()
+                                        }
                                     }
                                 }
                             }
+                        }
+                    } finally {
+                        // H6: cancel the blocking OkHttp call when the coroutine/worker is
+                        // cancelled, so EPG work never lingers past its cancellation.
+                        if (!currentCoroutineContext().isActive) {
+                            call.cancel()
                         }
                     }
 

@@ -115,6 +115,7 @@ class PlayerViewModel @Inject constructor(
     internal val syncManager: SyncManager,
     private val downloadManager: DownloadManager,
     internal val okHttpClient: OkHttpClient,
+    private val playbackNetworkAdmissionGate: com.streamvault.data.sync.PlaybackNetworkAdmissionGate,
 ) : ViewModel() {
     companion object {
         private const val MAX_PROGRAM_HISTORY_ITEMS = 18
@@ -490,6 +491,16 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             activePlayerEngineFlow.flatMapLatest { it.playbackState }.collect { state ->
                 _playerDiagnostics.update { it.copy(playbackStateLabel = state.name.replace('_', ' ')) }
+                // H6: signal the process-scoped admission gate so background sync/EPG
+                // work defers while the player is active. The same signal drives the
+                // existing per-provider Stalker traffic coordinator.
+                val gateProviderId = currentChannelFlow.value?.providerId ?: 0L
+                when {
+                    state == PlaybackState.READY && lastObservedPlaybackState != PlaybackState.READY ->
+                        playbackNetworkAdmissionGate.onPlaybackStarted(gateProviderId)
+                    state != PlaybackState.READY && lastObservedPlaybackState == PlaybackState.READY ->
+                        playbackNetworkAdmissionGate.onPlaybackStopped(gateProviderId)
+                }
                 if (state == PlaybackState.ENDED && lastObservedPlaybackState != PlaybackState.ENDED) {
                     handlePlaybackEnded()
                 }
