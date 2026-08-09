@@ -21,6 +21,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.streamvault.app.backup.BackupFileBridge
 import com.streamvault.app.ui.model.isArchivePlayable
 import com.streamvault.domain.model.Channel
 import com.streamvault.domain.model.Episode
@@ -48,8 +49,10 @@ import com.streamvault.domain.model.SeriesDetailPresentationHint
 import com.streamvault.domain.model.VirtualCategoryIds
 import java.io.Serializable
 import kotlin.coroutines.resume
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 
 
 private const val PLAYER_REQUEST_KEY = "player_request"
@@ -426,7 +429,15 @@ fun AppNavigation(mainActivity: MainActivity) {
             }
 
             is ExternalNavigationRequest.ImportBackup -> {
-                if (navController.navigateIfResumed(Routes.settings(backupUri = request.uri)) { launchSingleTop = true }) {
+                // H1: copy the incoming backup off the main thread before navigating, so a
+                // slow document provider never blocks the first frame or navigation.
+                val copiedUri = withContext(Dispatchers.IO) {
+                    runCatching {
+                        BackupFileBridge.copyToImportInbox(mainActivity, Uri.parse(request.uri))
+                    }.getOrNull()
+                }
+                val targetUri = copiedUri?.toString() ?: request.uri
+                if (navController.navigateIfResumed(Routes.settings(backupUri = targetUri)) { launchSingleTop = true }) {
                     mainActivity.clearExternalNavigationRequest()
                 }
             }

@@ -40,6 +40,7 @@ class RecordingReconcileWorker(
     companion object {
         private const val PERIODIC_WORK_NAME = "RecordingReconcileWorker"
         private const val ONE_SHOT_WORK_NAME = "RecordingReconcileWorkerOneShot"
+        private const val ONE_SHOT_INITIAL_DELAY_SECONDS = 15L
 
         fun enqueuePeriodic(context: Context) {
             val request = PeriodicWorkRequestBuilder<RecordingReconcileWorker>(6, TimeUnit.HOURS)
@@ -52,7 +53,11 @@ class RecordingReconcileWorker(
         }
 
         fun enqueueOneShot(context: Context) {
-            val request = OneTimeWorkRequestBuilder<RecordingReconcileWorker>().build()
+            // M5: defer the reconcile until after first frame so startup I/O does not
+            // overlap cold-start contention. WorkManager runs it once the delay elapses.
+            val request = OneTimeWorkRequestBuilder<RecordingReconcileWorker>()
+                .setInitialDelay(ONE_SHOT_INITIAL_DELAY_SECONDS, TimeUnit.SECONDS)
+                .build()
             WorkManager.getInstance(context).enqueueUniqueWork(
                 ONE_SHOT_WORK_NAME,
                 ExistingWorkPolicy.REPLACE,

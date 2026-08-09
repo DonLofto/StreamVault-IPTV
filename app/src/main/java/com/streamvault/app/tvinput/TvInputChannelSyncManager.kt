@@ -53,7 +53,9 @@ class TvInputChannelSyncManager @Inject constructor(
                 }
 
                 val channels = channelRepository.getChannels(provider.id).first()
-                val existingChannelIds = loadExistingChannels().toMutableMap()
+                val existing = loadExistingChannels()
+                val existingChannelIds = existing.idsByKey.toMutableMap()
+                val existingFingerprints = existing.fingerprintsByKey.toMutableMap()
                 val targetKeys = channels.mapTo(mutableSetOf(), ::channelKey)
 
                 existingChannelIds
@@ -65,9 +67,15 @@ class TvInputChannelSyncManager @Inject constructor(
 
                 channels.forEach { channel ->
                     val key = channelKey(channel)
-                    val channelId = ensureChannel(context.contentResolver, existingChannelIds[key], provider.id, channel)
+                    val existingId = existingChannelIds[key]
+                    // H7: skip unchanged channels entirely (no update, no program rewrite).
+                    if (existingId != null && fingerprintFor(channel) == existingFingerprints[key]) {
+                        return@forEach
+                    }
+                    val channelId = ensureChannel(context.contentResolver, existingId, provider.id, channel)
                         ?: return@forEach
                     existingChannelIds[key] = channelId
+                    existingFingerprints[key] = fingerprintFor(channel)
                     replacePrograms(
                         channelId = channelId,
                         programs = programsByEpgId[channel.epgChannelId].orEmpty(),
@@ -95,27 +103,39 @@ class TvInputChannelSyncManager @Inject constructor(
         return merged
     }
 
-    private fun loadExistingChannels(): Map<String, Long> {
+    private fun loadExistingChannels(): ExistingTvChannels {
         val targetInputId = inputId()
+        // H7: select by input_id so the platform never scans unrelated channels.
         return context.contentResolver.query(
             TvContract.Channels.CONTENT_URI,
-            arrayOf(BaseColumns._ID, CHANNEL_COLUMN_INPUT_ID, CHANNEL_COLUMN_INTERNAL_PROVIDER_ID),
-            null,
-            null,
+            arrayOf(
+                BaseColumns._ID,
+                CHANNEL_COLUMN_INPUT_ID,
+                CHANNEL_COLUMN_INTERNAL_PROVIDER_ID,
+                CHANNEL_COLUMN_INTERNAL_PROVIDER_DATA
+            ),
+            "$CHANNEL_COLUMN_INPUT_ID = ?",
+            arrayOf(targetInputId),
             null
         )?.use { cursor ->
             val idIndex = cursor.getColumnIndexOrThrow(BaseColumns._ID)
-            val inputIdIndex = cursor.getColumnIndexOrThrow(CHANNEL_COLUMN_INPUT_ID)
             val keyIndex = cursor.getColumnIndexOrThrow(CHANNEL_COLUMN_INTERNAL_PROVIDER_ID)
-            buildMap {
-                while (cursor.moveToNext()) {
-                    if (cursor.getString(inputIdIndex) == targetInputId) {
-                        put(cursor.getString(keyIndex), cursor.getLong(idIndex))
-                    }
-                }
+            val dataIndex = cursor.getColumnIndexOrThrow(CHANNEL_COLUMN_INTERNAL_PROVIDER_DATA)
+            val idsByKey = HashMap<String, Long>()
+            val fingerprintsByKey = HashMap<String, String>()
+            while (cursor.moveToNext()) {
+                val key = cursor.getString(keyIndex)
+                idsByKey[key] = cursor.getLong(idIndex)
+                fingerprintsByKey[key] = decodeFingerprint(cursor.getString(dataIndex)) ?: ""
             }
-        }.orEmpty()
+            ExistingTvChannels(idsByKey, fingerprintsByKey)
+        } ?: ExistingTvChannels(emptyMap(), emptyMap())
     }
+
+    private data class ExistingTvChannels(
+        val idsByKey: Map<String, Long>,
+        val fingerprintsByKey: Map<String, String>
+    )
 
     private fun insertChannel(providerId: Long, channel: Channel): Long? {
         val uri = context.contentResolver.insert(
@@ -254,7 +274,7 @@ class TvInputChannelSyncManager @Inject constructor(
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
 
     private fun deleteManagedChannels() {
-        loadExistingChannels().values.forEach(::deleteChannel)
+        loadExistingChannels().idsByKey.values.forEach(::deleteChannel)
     }
 
     private fun deleteChannel(channelId: Long) {
@@ -270,7 +290,30 @@ class TvInputChannelSyncManager @Inject constructor(
     private fun channelKey(channel: Channel): String = "${channel.providerId}:${channel.id}"
 
     private fun encodeChannelData(providerId: Long, channel: Channel): String =
-        listOf(providerId, channel.id, channel.epgChannelId.orEmpty()).joinToString(ENTRY_SEPARATOR)
+        listOf(
+            providerId,
+            channel.id,
+            channel.epgChannelId.orEmpty(),
+            // H7: fingerprint appended after the tune-decoded prefix (parts 0..1). The tune
+            // path reads only the first two segments, so the appended field is safe.
+            fingerprintFor(channel)
+        ).joinToString(ENTRY_SEPARATOR)
+
+    /** H7: stable fingerprint of channel identity + platform-relevant values. */
+    private fun fingerprintFor(channel: Channel): String =
+        listOf(
+            channel.number.toString(),
+            channel.name,
+            channel.categoryName ?: "",
+            channel.epgChannelId ?: ""
+        ).joinToString(FINGERPRINT_FIELD_SEPARATOR)
+
+    /** H7: decode the fingerprint previously stored in internal_provider_data. */
+    private fun decodeFingerprint(rawData: String?): String? =
+        rawData?.substringAfter(ENTRY_SEPARATOR)
+            ?.substringAfter(ENTRY_SEPARATOR)
+            ?.substringAfter(ENTRY_SEPARATOR)
+            ?.takeIf { it.isNotEmpty() }
 
     private companion object {
         const val TAG = "TvInputChannelSync"
@@ -295,6 +338,7 @@ class TvInputChannelSyncManager @Inject constructor(
         const val PROGRAM_LOOKBACK_MS = 3 * 60 * 60 * 1000L
         const val PROGRAM_LOOKAHEAD_MS = 18 * 60 * 60 * 1000L
         const val ENTRY_SEPARATOR = ":"
+        const val FINGERPRINT_FIELD_SEPARATOR = "~"
         val syncMutex = Mutex()
     }
 }
