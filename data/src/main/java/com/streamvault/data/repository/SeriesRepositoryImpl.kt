@@ -985,8 +985,10 @@ class SeriesRepositoryImpl @Inject constructor(
         }
     }
 
+    // B3: fetch offset + limit + buffer so in-memory filter/drop(offset) can fill pages
+    // beyond the first 200; never cap the source before applying drop(offset).
     private fun browseFetchLimit(query: LibraryBrowseQuery): Int =
-        (query.offset + query.limit + BROWSE_WINDOW_BUFFER).coerceAtMost(SEARCH_RESULT_LIMIT)
+        query.offset + query.limit + BROWSE_WINDOW_BUFFER
 
     private suspend fun fetchSeriesBrowseResult(query: LibraryBrowseQuery): PagedResult<Series> {
         val normalizedSearch = query.searchQuery.trim()
