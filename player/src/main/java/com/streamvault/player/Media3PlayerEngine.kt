@@ -40,6 +40,7 @@ import com.streamvault.domain.model.StreamInfo
 import com.streamvault.domain.model.VideoFormat
 import com.streamvault.domain.repository.PlaybackCompatibilityRepository
 import com.streamvault.player.audio.PlayerAudioFocusController
+import com.streamvault.player.cache.AppCacheQuota
 import com.streamvault.player.playback.ActiveDecoderPolicy
 import com.streamvault.player.playback.DefaultDecoderPreferencePolicy
 import com.streamvault.player.playback.DefaultPlaybackCompatibilityProfile
@@ -124,7 +125,8 @@ class Media3PlayerEngine @Inject constructor(
     private val okHttpClient: OkHttpClient,
     private val playbackCompatibilityRepository: PlaybackCompatibilityRepository,
     private val audioCompatibilityMemoryStore: AudioCompatibilityMemoryStore,
-    private val playbackSupportSnapshotStore: PlaybackSupportSnapshotStore
+    private val playbackSupportSnapshotStore: PlaybackSupportSnapshotStore,
+    private val appCacheQuota: AppCacheQuota
 ) : PlayerEngine {
 
     companion object {
@@ -275,7 +277,7 @@ class Media3PlayerEngine @Inject constructor(
     override val renderSurfaceType: StateFlow<PlayerRenderSurfaceType> = _renderSurfaceType.asStateFlow()
 
     private val timeshiftPlaybackGate = LiveTimeshiftPlaybackGate()
-    private val liveTimeshiftManager = DefaultLiveTimeshiftManager(context, okHttpClient, timeshiftPlaybackGate)
+    private val liveTimeshiftManager = DefaultLiveTimeshiftManager(context, okHttpClient, timeshiftPlaybackGate, appCacheQuota)
     private val _timeshiftState = MutableStateFlow(LiveTimeshiftState())
     override val timeshiftState: StateFlow<LiveTimeshiftState> = _timeshiftState.asStateFlow()
 

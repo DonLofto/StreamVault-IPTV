@@ -20,6 +20,7 @@ import com.streamvault.player.AudioCompatibilityMemoryStore
 import com.streamvault.player.Media3PlayerEngine
 import com.streamvault.player.PlayerEngine
 import com.streamvault.player.PlaybackSupportSnapshotStore
+import com.streamvault.player.cache.AppCacheQuota
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -44,8 +45,15 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(
+    fun provideAppCacheQuota(
         @ApplicationContext context: Context
+    ): AppCacheQuota = AppCacheQuota(context)
+
+    @Provides
+    @Singleton
+    fun provideOkHttpClient(
+        @ApplicationContext context: Context,
+        appCacheQuota: AppCacheQuota
     ): OkHttpClient {
         val appUserAgent = buildAppUserAgent(BuildConfig.VERSION_NAME)
         val isDebuggable = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
@@ -65,7 +73,7 @@ object NetworkModule {
             .cache(
                 Cache(
                     directory = File(context.cacheDir, "streamvault_http_cache"),
-                    maxSize = 256L * 1024 * 1024
+                    maxSize = appCacheQuota.budgets.httpCacheBytes
                 )
             )
             .connectTimeout(NetworkTimeoutConfig.CONNECT_TIMEOUT_SECONDS, SECONDS)
@@ -133,6 +141,7 @@ object NetworkModule {
     fun provideMainPlayerEngine(
         @ApplicationContext context: Context,
         okHttpClient: OkHttpClient,
+        appCacheQuota: AppCacheQuota,
         playbackCompatibilityRepository: com.streamvault.domain.repository.PlaybackCompatibilityRepository,
         audioCompatibilityMemoryStore: AudioCompatibilityMemoryStore,
         playbackSupportSnapshotStore: PlaybackSupportSnapshotStore
@@ -141,7 +150,8 @@ object NetworkModule {
         okHttpClient,
         playbackCompatibilityRepository,
         audioCompatibilityMemoryStore,
-        playbackSupportSnapshotStore
+        playbackSupportSnapshotStore,
+        appCacheQuota
     )
 
     /**
@@ -153,6 +163,7 @@ object NetworkModule {
     fun provideAuxiliaryPlayerEngine(
         @ApplicationContext context: Context,
         okHttpClient: OkHttpClient,
+        appCacheQuota: AppCacheQuota,
         playbackCompatibilityRepository: com.streamvault.domain.repository.PlaybackCompatibilityRepository,
         audioCompatibilityMemoryStore: AudioCompatibilityMemoryStore,
         playbackSupportSnapshotStore: PlaybackSupportSnapshotStore
@@ -161,7 +172,8 @@ object NetworkModule {
         okHttpClient,
         playbackCompatibilityRepository,
         audioCompatibilityMemoryStore,
-        playbackSupportSnapshotStore
+        playbackSupportSnapshotStore,
+        appCacheQuota
     ).apply {
         enableMediaSession = false
         bypassAudioFocus = true

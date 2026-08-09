@@ -91,7 +91,6 @@ internal class SyncCatalogStore(
                 } else {
                     applyChannels(providerId, sessionId)
                 }
-                catalogSyncDao.rebuildChannelFts()
             }
             return limitedChannels.size
         } finally {
@@ -112,7 +111,6 @@ internal class SyncCatalogStore(
                 } else {
                     applyMovies(providerId, sessionId)
                 }
-                catalogSyncDao.rebuildMovieFts()
             }
             movieDao.restoreWatchProgress(providerId)
             return stagingResult.acceptedCount
@@ -134,7 +132,6 @@ internal class SyncCatalogStore(
                 } else {
                     applySeries(providerId, sessionId)
                 }
-                catalogSyncDao.rebuildSeriesFts()
             }
             return stagingResult.acceptedCount
         } finally {
@@ -148,7 +145,6 @@ internal class SyncCatalogStore(
                 categories?.let { stageCategories(providerId, sessionId, it) }
                 categories?.let { applyCategories(providerId, sessionId, "LIVE") }
                 applyChannels(providerId, sessionId)
-                catalogSyncDao.rebuildChannelFts()
             }
         } finally {
             clearSession(providerId, sessionId)
@@ -161,7 +157,6 @@ internal class SyncCatalogStore(
                 categories?.let { stageCategories(providerId, sessionId, it) }
                 categories?.let { applyCategories(providerId, sessionId, "MOVIE") }
                 applyMovies(providerId, sessionId)
-                catalogSyncDao.rebuildMovieFts()
             }
             movieDao.restoreWatchProgress(providerId)
         } finally {
@@ -175,7 +170,6 @@ internal class SyncCatalogStore(
                 categories?.let { stageCategories(providerId, sessionId, it) }
                 categories?.let { applyCategories(providerId, sessionId, "SERIES") }
                 applySeries(providerId, sessionId)
-                catalogSyncDao.rebuildSeriesFts()
             }
         } finally {
             clearSession(providerId, sessionId)
@@ -195,7 +189,6 @@ internal class SyncCatalogStore(
                 categories?.let { stageCategories(providerId, sessionId, it) }
                 categories?.let { applyCategories(providerId, sessionId, "LIVE", pruneStale = false) }
                 upsertChannels(providerId, sessionId)
-                catalogSyncDao.rebuildChannelFts()
             }
         } finally {
             clearSession(providerId, sessionId)
@@ -212,7 +205,6 @@ internal class SyncCatalogStore(
                 categories?.let { stageCategories(providerId, sessionId, it) }
                 categories?.let { applyCategories(providerId, sessionId, "MOVIE", pruneStale = false) }
                 upsertMovies(providerId, sessionId)
-                catalogSyncDao.rebuildMovieFts()
             }
             movieDao.restoreWatchProgress(providerId)
         } finally {
@@ -230,7 +222,6 @@ internal class SyncCatalogStore(
                 categories?.let { stageCategories(providerId, sessionId, it) }
                 categories?.let { applyCategories(providerId, sessionId, "SERIES", pruneStale = false) }
                 upsertSeries(providerId, sessionId)
-                catalogSyncDao.rebuildSeriesFts()
             }
         } finally {
             clearSession(providerId, sessionId)
@@ -251,7 +242,6 @@ internal class SyncCatalogStore(
             transactionRunner.inTransaction {
                 categories?.let { applyCategories(providerId, sessionId, "LIVE", pruneStale = false) }
                 upsertChannels(providerId, sessionId)
-                catalogSyncDao.rebuildChannelFts()
             }
             return stagedChannels.size
         } finally {
@@ -272,7 +262,6 @@ internal class SyncCatalogStore(
             transactionRunner.inTransaction {
                 categories?.let { applyCategories(providerId, sessionId, "MOVIE", pruneStale = false) }
                 upsertMovies(providerId, sessionId)
-                catalogSyncDao.rebuildMovieFts()
             }
             movieDao.restoreWatchProgress(providerId)
             return stagingResult.acceptedCount
@@ -294,7 +283,6 @@ internal class SyncCatalogStore(
             transactionRunner.inTransaction {
                 categories?.let { applyCategories(providerId, sessionId, "SERIES", pruneStale = false) }
                 upsertSeries(providerId, sessionId)
-                catalogSyncDao.rebuildSeriesFts()
             }
             return stagingResult.acceptedCount
         } finally {
@@ -371,13 +359,11 @@ internal class SyncCatalogStore(
                 stageCategories(providerId, sessionId, liveCategories.orEmpty())
                 applyCategories(providerId, sessionId, "LIVE")
                 applyChannels(providerId, sessionId)
-                catalogSyncDao.rebuildChannelFts()
             }
             if (includeMovies) {
                 stageCategories(providerId, sessionId, movieCategories.orEmpty())
                 applyCategories(providerId, sessionId, "MOVIE")
                 applyMovies(providerId, sessionId)
-                catalogSyncDao.rebuildMovieFts()
             }
         }
         if (includeMovies) {
@@ -668,15 +654,13 @@ internal class SyncCatalogStore(
     ): StagingResult {
         return stageDistinctRows(
             items = movies,
-            keySelector = { movie -> movie.streamId },
             limit = sizeLimits.maxMoviesPerProvider,
-            bestFirstComparator = compareByDescending<MovieEntity> { it.rating }
-                .thenBy { it.name.lowercase() }
-                .thenBy { it.streamId },
             logLabel = "movies",
             providerId = providerId,
             stageBuilder = { movie -> movieStageEntity(providerId, sessionId, movie) },
-            insert = catalogSyncDao::insertMovieStages
+            insert = catalogSyncDao::insertMovieStages,
+            countDistinct = { catalogSyncDao.countMovieStages(providerId, sessionId) },
+            trimToTopLimit = { limit -> catalogSyncDao.deleteMovieStagesBeyondTop(providerId, sessionId, limit) }
         )
     }
 
@@ -687,70 +671,58 @@ internal class SyncCatalogStore(
     ): StagingResult {
         return stageDistinctRows(
             items = series,
-            keySelector = { item -> item.seriesId },
             limit = sizeLimits.maxSeriesPerProvider,
-            bestFirstComparator = compareByDescending<SeriesEntity> { it.rating }
-                .thenBy { it.name.lowercase() }
-                .thenBy { it.seriesId },
             logLabel = "series",
             providerId = providerId,
             stageBuilder = { item -> seriesStageEntity(providerId, sessionId, item) },
-            insert = catalogSyncDao::insertSeriesStages
+            insert = catalogSyncDao::insertSeriesStages,
+            countDistinct = { catalogSyncDao.countSeriesStages(providerId, sessionId) },
+            trimToTopLimit = { limit -> catalogSyncDao.deleteSeriesStagesBeyondTop(providerId, sessionId, limit) }
         )
     }
 
-    private suspend fun <T, K, S> stageDistinctRows(
+    /**
+     * H3: dedupes and ranks in SQLite instead of an unbounded in-memory key set.
+     * The stage tables already keyed on (session, provider, remote key), and inserts use
+     * REPLACE (dedupe), so streaming every row through bounded batches keeps peak Java heap
+     * independent of the total distinct row count. Overflow rows are then trimmed to the
+     * configured limit with one ranked DELETE. This preserves "best rows across the whole
+     * source" while bounding memory.
+     */
+    private suspend fun <T, S> stageDistinctRows(
         items: Sequence<T>,
-        keySelector: (T) -> K,
         limit: Int,
-        bestFirstComparator: Comparator<T>,
         logLabel: String,
         providerId: Long,
         stageBuilder: (T) -> S,
-        insert: suspend (List<S>) -> Unit
+        insert: suspend (List<S>) -> Unit,
+        countDistinct: suspend () -> Int,
+        trimToTopLimit: suspend (Int) -> Unit
     ): StagingResult {
-        val seenKeys = HashSet<K>()
-        val bestItems = java.util.PriorityQueue<T>(limit.coerceAtLeast(1), bestFirstComparator.reversed())
         val batch = ArrayList<S>(STAGE_BATCH_SIZE)
-        var distinctCount = 0
-
         items.forEach { item ->
-            if (!seenKeys.add(keySelector(item))) {
-                return@forEach
-            }
-            distinctCount++
-            if (bestItems.size < limit) {
-                bestItems += item
-            } else if (limit > 0 && bestFirstComparator.compare(item, bestItems.peek()) < 0) {
-                bestItems.poll()
-                bestItems += item
+            batch.add(stageBuilder(item))
+            if (batch.size >= STAGE_BATCH_SIZE) {
+                insert(batch)
+                batch.clear()
             }
         }
-
-        val overflowed = distinctCount > limit
-        if (overflowed) {
-            Log.w(
-                TAG,
-                "Provider $providerId $logLabel staging exceeded limit $limit; kept ${bestItems.size} highest-priority distinct rows out of $distinctCount."
-            )
-        }
-
-        bestItems
-            .toList()
-            .sortedWith(bestFirstComparator)
-            .forEach { item ->
-                batch.add(stageBuilder(item))
-                if (batch.size >= STAGE_BATCH_SIZE) {
-                    insert(batch)
-                    batch.clear()
-                }
-            }
-
         if (batch.isNotEmpty()) {
             insert(batch)
         }
 
-        return StagingResult(acceptedCount = bestItems.size, overflowed = overflowed)
+        val distinctCount = countDistinct()
+        val acceptedCount = minOf(distinctCount, limit)
+        val overflowed = distinctCount > limit
+        if (overflowed) {
+            Log.w(
+                TAG,
+                "Provider $providerId $logLabel staging exceeded limit $limit; kept $acceptedCount highest-priority distinct rows out of $distinctCount."
+            )
+            trimToTopLimit(limit)
+        }
+
+        return StagingResult(acceptedCount = acceptedCount, overflowed = overflowed)
     }
 
     private suspend fun <T> insertStageRows(

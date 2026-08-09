@@ -848,14 +848,33 @@ interface CatalogSyncDao {
     )
     suspend fun deleteStaleSeriesForStage(providerId: Long, sessionId: Long)
 
-    // ── FTS bulk rebuild (call once after each bulk catalog write, outside the transaction) ──
+    // ── H3: bounded catalog staging — trim staged rows to the top `limit` by priority ──
 
-    @Query("INSERT INTO channels_fts(channels_fts) VALUES('rebuild')")
-    suspend fun rebuildChannelFts()
+    @Query(
+        """
+        DELETE FROM movie_import_stage
+        WHERE provider_id = :providerId AND session_id = :sessionId
+          AND stream_id NOT IN (
+              SELECT stream_id FROM movie_import_stage
+              WHERE provider_id = :providerId AND session_id = :sessionId
+              ORDER BY rating DESC, lower(name) ASC, stream_id ASC
+              LIMIT :limit
+          )
+        """
+    )
+    suspend fun deleteMovieStagesBeyondTop(providerId: Long, sessionId: Long, limit: Int)
 
-    @Query("INSERT INTO movies_fts(movies_fts) VALUES('rebuild')")
-    suspend fun rebuildMovieFts()
-
-    @Query("INSERT INTO series_fts(series_fts) VALUES('rebuild')")
-    suspend fun rebuildSeriesFts()
+    @Query(
+        """
+        DELETE FROM series_import_stage
+        WHERE provider_id = :providerId AND session_id = :sessionId
+          AND provider_series_key NOT IN (
+              SELECT provider_series_key FROM series_import_stage
+              WHERE provider_id = :providerId AND session_id = :sessionId
+              ORDER BY rating DESC, lower(name) ASC, series_id ASC
+              LIMIT :limit
+          )
+        """
+    )
+    suspend fun deleteSeriesStagesBeyondTop(providerId: Long, sessionId: Long, limit: Int)
 }

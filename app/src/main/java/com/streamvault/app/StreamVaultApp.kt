@@ -32,6 +32,7 @@ import com.streamvault.data.manager.recording.RecordingReconcileWorker
 import com.streamvault.data.sync.ProviderSyncWorker
 import com.streamvault.data.sync.XtreamIndexWorker
 import com.streamvault.player.timeshift.TimeshiftDiskManager
+import com.streamvault.player.cache.AppCacheQuota
 import javax.inject.Inject
 import okhttp3.OkHttpClient
 
@@ -51,6 +52,9 @@ class StreamVaultApp : Application(), SingletonImageLoader.Factory {
 
     @Inject
     lateinit var jellyfinImageAuthInterceptor: JellyfinImageAuthInterceptor
+
+    @Inject
+    lateinit var appCacheQuota: AppCacheQuota
 
     private val imageOkHttpClient: OkHttpClient by lazy {
         okHttpClient.newBuilder()
@@ -149,7 +153,7 @@ class StreamVaultApp : Application(), SingletonImageLoader.Factory {
             .diskCache {
                 DiskCache.Builder()
                     .directory(this.cacheDir.resolve("image_cache").toOkioPath())
-                    .maxSizeBytes(1024L * 1024L * 100L) // 100MB disk cache
+                    .maxSizeBytes(appCacheQuota.budgets.imageCacheBytes)
                     .build()
             }
             // Limit concurrent decoding and fetching to 6 for TV hardware constraints
