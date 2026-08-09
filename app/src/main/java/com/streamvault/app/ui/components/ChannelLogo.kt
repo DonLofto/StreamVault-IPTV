@@ -46,7 +46,15 @@ fun ChannelLogoBadge(
             .background(backgroundColor),
         contentAlignment = Alignment.Center
     ) {
-        if (!showFallback && model != null) {
+        // L3: keep one AsyncImage mounted and layer the initials/fallback beneath it, so
+        // success/failure state changes never remount the image request (and its painter).
+        Text(
+            text = channelInitials(channelName),
+            style = textStyle,
+            color = textColor,
+            fontWeight = FontWeight.Bold
+        )
+        if (model != null) {
             AsyncImage(
                 model = model,
                 contentDescription = channelName,
@@ -58,26 +66,6 @@ fun ChannelLogoBadge(
                     .fillMaxSize()
                     .padding(contentPadding)
             )
-        } else {
-            Text(
-                text = channelInitials(channelName),
-                style = textStyle,
-                color = textColor,
-                fontWeight = FontWeight.Bold
-            )
-            if (model != null) {
-                AsyncImage(
-                    model = model,
-                    contentDescription = channelName,
-                    contentScale = ContentScale.Fit,
-                    onLoading = { showFallback = true },
-                    onError = { showFallback = true },
-                    onSuccess = { showFallback = false },
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(contentPadding)
-                )
-            }
         }
     }
 }

@@ -190,6 +190,9 @@ fun PlayerScreen(
     val parentalControlLevel by viewModel.parentalControlLevel.collectAsStateWithLifecycle()
     val activeCategoryId by viewModel.activeCategoryId.collectAsStateWithLifecycle()
     val showEpgOverlay by viewModel.showEpgOverlay.collectAsStateWithLifecycle()
+    val showFullGuideOverlay by viewModel.showFullGuideOverlay.collectAsStateWithLifecycle()
+    val epgViewModel: com.streamvault.app.ui.screens.epg.EpgViewModel = hiltViewModel()
+    val epgUiState by epgViewModel.uiState.collectAsStateWithLifecycle()
     val currentChannelList by viewModel.currentChannelList.collectAsStateWithLifecycle()
     val recentChannels by viewModel.recentChannels.collectAsStateWithLifecycle()
     val lastVisitedCategory by viewModel.lastVisitedCategory.collectAsStateWithLifecycle()
@@ -596,6 +599,11 @@ fun PlayerScreen(
                     return@onPreviewKeyEvent false
                 }
                 if (showChannelInfoOverlay && channelInfoSubPanelOpen) {
+                    return@onPreviewKeyEvent false
+                }
+                // B11: while the transport controls are visible their focusable children own
+                // DPAD Up/Down navigation; root zap handling must not intercept first.
+                if (showControls || showFullGuideOverlay) {
                     return@onPreviewKeyEvent false
                 }
 
@@ -1219,6 +1227,61 @@ fun PlayerScreen(
             )
         }
 
+        // B10: exclusive transparent full guide overlay.
+        if (!isInPictureInPictureMode && showFullGuideOverlay && contentType == "LIVE") {
+            com.streamvault.app.ui.screens.player.overlay.PlayerTransparentGuideOverlay(
+                uiState = epgUiState,
+                currentPlayerChannelId = currentChannel?.id ?: internalChannelId,
+                onDismiss = {
+                    viewModel.closeFullGuideOverlay()
+                    viewModel.showControlsForFullGuideClose()
+                },
+                onJumpToNow = epgViewModel::jumpToNow,
+                onSelectCategory = { category -> epgViewModel.selectCategory(category.id) },
+                onSearchQueryChange = epgViewModel::updateProgramSearchQuery,
+                onClearSearch = epgViewModel::clearProgramSearch,
+                onWatchChannel = { channel ->
+                    viewModel.closeFullGuideOverlay()
+                    if (channel.id == currentChannel?.id) {
+                        viewModel.showControlsForFullGuideClose()
+                    } else {
+                        viewModel.prepare(
+                            streamUrl = channel.streamUrl,
+                            epgChannelId = channel.epgChannelId,
+                            internalChannelId = channel.id,
+                            categoryId = channel.categoryId ?: -1L,
+                            providerId = channel.providerId,
+                            isVirtual = false,
+                            contentType = "LIVE",
+                            title = channel.name,
+                            artworkUrl = channel.logoUrl,
+                            showResumePrompt = false
+                        )
+                    }
+                },
+                onWatchArchive = { channel, program ->
+                    viewModel.closeFullGuideOverlay()
+                    viewModel.prepare(
+                        streamUrl = channel.streamUrl,
+                        epgChannelId = channel.epgChannelId,
+                        internalChannelId = channel.id,
+                        categoryId = channel.categoryId ?: -1L,
+                        providerId = channel.providerId,
+                        isVirtual = false,
+                        combinedProfileId = combinedProfileId,
+                        contentType = "LIVE",
+                        title = channel.name,
+                        artworkUrl = channel.logoUrl,
+                        showResumePrompt = false,
+                        archiveStartMs = program.startTime,
+                        archiveEndMs = program.endTime
+                    )
+                },
+                onRequestMoreChannels = epgViewModel::requestMoreChannels,
+                modifier = Modifier.align(Alignment.Center)
+            )
+        }
+
         if (contentType == "LIVE") {
             AnimatedVisibility(
                 visible = showChannelListOverlay,
@@ -1286,6 +1349,10 @@ fun PlayerScreen(
                     nextProgram = nextProgram,
                     upcomingPrograms = upcomingPrograms,
                     onDismiss = { viewModel.closeOverlays() },
+                    onOpenFullGuide = {
+                        viewModel.closeOverlays()
+                        viewModel.openFullGuideOverlay()
+                    },
                     onOpenArchiveBrowser = {
                         showProgramHistory = true
                         viewModel.closeOverlays()
