@@ -123,7 +123,6 @@ object Routes {
             "$EPG?categoryId=$resolvedCategoryId&anchorTime=$resolvedAnchorTime&favoritesOnly=$favoritesOnly"
         }
     }
-
     fun livePlayer(
         channel: Channel,
         categoryId: Long? = channel.categoryId,
@@ -661,12 +660,15 @@ fun AppNavigation(mainActivity: MainActivity) {
             arguments = listOf(
                 navArgument("categoryId") { type = NavType.LongType; defaultValue = -1L },
                 navArgument("anchorTime") { type = NavType.LongType; defaultValue = -1L },
-                navArgument("favoritesOnly") { type = NavType.BoolType; nullable = true }
+                // B8: BoolType cannot be nullable in Navigation Compose, so the route
+                // encodes the tri-state as an optional string ("true"/"false"/absent).
+                navArgument("favoritesOnly") { type = NavType.StringType; nullable = true }
             )
         ) { backStackEntry ->
             val epgCategoryId = backStackEntry.arguments?.getLong("categoryId")?.takeIf { it != -1L }
             val epgAnchorTime = backStackEntry.arguments?.getLong("anchorTime")?.takeIf { it != -1L }
-            val epgFavoritesOnly = backStackEntry.arguments?.getBoolean("favoritesOnly")
+            val epgFavoritesOnly = backStackEntry.arguments?.getString("favoritesOnly")
+                ?.toBooleanStrictOrNull()
             com.streamvault.app.ui.screens.epg.FullEpgScreen(
                 currentRoute = Routes.EPG,
                 initialCategoryId = epgCategoryId,
