@@ -223,7 +223,8 @@ class XtreamStreamUrlResolver @Inject constructor(
                 )
             }
             ProviderType.M3U,
-            ProviderType.JELLYFIN -> null
+            ProviderType.JELLYFIN,
+            ProviderType.EMBY -> null
         }
     }
 

@@ -68,7 +68,8 @@ class SeriesRepositoryImpl @Inject constructor(
     private val xtreamIndexJobDao: XtreamIndexJobDao,
     private val syncManager: SyncManager,
     private val seriesCategoryHydrationDao: SeriesCategoryHydrationDao,
-    private val jellyfinProvider: JellyfinProvider
+    private val jellyfinProvider: JellyfinProvider,
+    private val embyProvider: com.streamvault.data.remote.emby.EmbyProvider
 ) : SeriesRepository {
     private companion object {
         const val TAG = "SeriesRepository"
@@ -428,6 +429,33 @@ class SeriesRepositoryImpl @Inject constructor(
                         }
                         is com.streamvault.domain.model.Result.Error -> {
                             Log.w(TAG, "Failed to fetch Jellyfin episodes: ${episodesResult.message}")
+                            return Result.success(attachSeriesPresentation(buildSeriesWithPersistedEpisodes(seriesEntity), knownPresentation))
+                        }
+                        is com.streamvault.domain.model.Result.Loading -> {}
+                    }
+                    return Result.success(attachSeriesPresentation(buildSeriesWithPersistedEpisodes(seriesEntity), knownPresentation))
+                }
+                ProviderType.EMBY -> {
+                    val remoteId = seriesEntity.providerSeriesId?.takeIf { it.isNotBlank() }
+                        ?: return Result.success(attachSeriesPresentation(buildSeriesWithPersistedEpisodes(seriesEntity), knownPresentation))
+                    val decryptedPassword = credentialCrypto.decryptIfNeeded(provider.password)
+                    when (val episodesResult = embyProvider.fetchEpisodes(
+                        provider = com.streamvault.domain.model.Provider(
+                            id = providerId, name = "Emby", type = ProviderType.EMBY,
+                            serverUrl = provider.serverUrl, username = provider.username,
+                            password = decryptedPassword
+                        ),
+                        seriesRemoteId = remoteId,
+                        seriesLocalId = seriesEntity.id
+                    )) {
+                        is com.streamvault.domain.model.Result.Success -> {
+                            if (episodesResult.data.isNotEmpty()) {
+                                episodeDao.replaceAll(seriesEntity.id, providerId, episodesResult.data)
+                            }
+                            return Result.success(attachSeriesPresentation(buildSeriesWithPersistedEpisodes(seriesEntity), knownPresentation))
+                        }
+                        is com.streamvault.domain.model.Result.Error -> {
+                            Log.w(TAG, "Failed to fetch Emby episodes: ${episodesResult.message}")
                             return Result.success(attachSeriesPresentation(buildSeriesWithPersistedEpisodes(seriesEntity), knownPresentation))
                         }
                         is com.streamvault.domain.model.Result.Loading -> {}

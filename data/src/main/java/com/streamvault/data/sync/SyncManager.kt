@@ -185,6 +185,7 @@ class SyncManager @Inject constructor(
     private val stalkerApiService: StalkerApiService,
     private val episodeDao: EpisodeDao,
     private val jellyfinProvider: JellyfinProvider,
+    private val embyProvider: com.streamvault.data.remote.emby.EmbyProvider,
     private val xtreamJson: Json,
     private val m3uParser: M3uParser,
     private val epgRepository: EpgRepository,
@@ -698,6 +699,7 @@ class SyncManager @Inject constructor(
                         ProviderType.M3U -> syncM3u(provider, force, onProgress)
                         ProviderType.STALKER_PORTAL -> syncStalker(provider, force, onProgress)
                         ProviderType.JELLYFIN -> syncJellyfin(provider, force, onProgress)
+                        ProviderType.EMBY -> syncEmby(provider, force, onProgress)
                     }
                 }
                 providerDao.updateSyncTime(providerId, System.currentTimeMillis())
@@ -4164,6 +4166,90 @@ class SyncManager @Inject constructor(
         }
     }
 
+    private suspend fun syncEmby(
+        provider: Provider,
+        force: Boolean,
+        onProgress: ((String) -> Unit)?
+    ): SyncOutcome {
+        val warnings = mutableListOf<String>()
+        try {
+            val decryptedPassword = credentialCrypto.decryptIfNeeded(provider.password)
+            val decryptedProvider = provider.copy(password = decryptedPassword)
+            android.util.Log.d("EmbySync", "Starting Emby sync for provider=${provider.id}")
+            progress(provider.id, onProgress, "Loading Emby library...")
+            val (resolvedLive, resolvedMovies, resolvedSeries) = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                val liveResult = embyProvider.fetchLiveChannels(decryptedProvider)
+                val movieResult = embyProvider.fetchMovies(decryptedProvider)
+                val seriesResult = embyProvider.fetchSeries(decryptedProvider)
+                Triple(liveResult, movieResult, seriesResult)
+            }
+
+            val channelEntities = (resolvedLive as? com.streamvault.domain.model.Result.Success)?.data.orEmpty()
+            val movieEntities = (resolvedMovies as? com.streamvault.domain.model.Result.Success)?.data.orEmpty()
+            val seriesEntities = (resolvedSeries as? com.streamvault.domain.model.Result.Success)?.data.orEmpty()
+
+            if (channelEntities.isNotEmpty()) {
+                progress(provider.id, onProgress, "Importing Emby live channels...")
+                transactionRunner.inTransaction {
+                    channelDao.insertAll(channelEntities)
+                    categoryDao.replaceAll(provider.id, ContentType.LIVE.name, listOf(
+                        com.streamvault.data.local.entity.CategoryEntity(
+                            providerId = provider.id, categoryId = 3L, name = "Live TV",
+                            type = ContentType.LIVE
+                        )
+                    ))
+                }
+            }
+
+            if (movieEntities.isNotEmpty()) {
+                progress(provider.id, onProgress, "Importing Emby movies...")
+                movieEntities.chunked(50).forEach { chunk ->
+                    transactionRunner.inTransaction {
+                        movieDao.upsertCategoryPage(provider.id, chunk)
+                    }
+                }
+                transactionRunner.inTransaction {
+                    categoryDao.replaceAll(provider.id, ContentType.MOVIE.name, listOf(
+                        com.streamvault.data.local.entity.CategoryEntity(
+                            providerId = provider.id, categoryId = 1L, name = "Movies",
+                            type = ContentType.MOVIE
+                        )
+                    ))
+                }
+            }
+
+            if (seriesEntities.isNotEmpty()) {
+                progress(provider.id, onProgress, "Importing Emby series...")
+                seriesEntities.forEach { seriesEntity ->
+                    val remoteId = seriesEntity.providerSeriesId
+                    if (!remoteId.isNullOrBlank()) {
+                        transactionRunner.inTransaction {
+                            seriesDao.insertAll(listOf(seriesEntity))
+                        }
+                    }
+                }
+                transactionRunner.inTransaction {
+                    categoryDao.replaceAll(provider.id, ContentType.SERIES.name, listOf(
+                        com.streamvault.data.local.entity.CategoryEntity(
+                            providerId = provider.id, categoryId = 2L, name = "Series",
+                            type = ContentType.SERIES
+                        )
+                    ))
+                }
+            }
+
+            if (channelEntities.isEmpty() && movieEntities.isEmpty() && seriesEntities.isEmpty()) {
+                warnings.add("Emby library is empty or contains no supported items.")
+                return SyncOutcome(partial = true, warnings = warnings)
+            }
+
+            return SyncOutcome(warnings = warnings)
+        } catch (e: Exception) {
+            warnings.add("Emby sync failed: ${e.message.orEmpty()}")
+            return SyncOutcome(partial = true, warnings = warnings)
+        }
+    }
+
     /**
      * Returned by [syncProviderEpg] so callers can distinguish between warning-only
      * degradations and transient network/IO failures that WorkManager should retry.
@@ -4292,7 +4378,8 @@ class SyncManager @Inject constructor(
                 }
             }
 
-            ProviderType.JELLYFIN -> Unit
+            ProviderType.JELLYFIN,
+            ProviderType.EMBY -> Unit
         }
 
         if (shouldUseExternalGuide(guidePolicy)) {
@@ -4370,7 +4457,8 @@ class SyncManager @Inject constructor(
             }
             ProviderType.M3U -> providerDao.getById(provider.id)?.epgUrl ?: provider.epgUrl
             ProviderType.STALKER_PORTAL -> providerDao.getById(provider.id)?.epgUrl ?: provider.epgUrl
-            ProviderType.JELLYFIN -> ""
+            ProviderType.JELLYFIN,
+            ProviderType.EMBY -> ""
         }
         if (!shouldUseProviderGuide(guidePolicy)) {
             if (shouldUseExternalGuide(guidePolicy)) {
@@ -4393,7 +4481,8 @@ class SyncManager @Inject constructor(
             ProviderType.XTREAM_CODES -> UrlSecurityPolicy.validateXtreamEpgUrl(epgUrl)
             ProviderType.M3U -> UrlSecurityPolicy.validateOptionalEpgUrl(epgUrl)
             ProviderType.STALKER_PORTAL -> UrlSecurityPolicy.validateOptionalEpgUrl(epgUrl)
-            ProviderType.JELLYFIN -> null
+            ProviderType.JELLYFIN,
+            ProviderType.EMBY -> null
         }
         validationError?.let { message ->
             throw IllegalStateException(message)
@@ -4866,7 +4955,8 @@ class SyncManager @Inject constructor(
                 sectionWarnings += liveCatalogResult.warnings
             }
 
-            ProviderType.JELLYFIN -> throw IllegalStateException("Live TV retry is unavailable for Jellyfin providers")
+            ProviderType.JELLYFIN,
+            ProviderType.EMBY -> throw IllegalStateException("Live TV retry is unavailable for this provider")
         }
         return if (sectionWarnings.isEmpty()) SyncOutcome() else SyncOutcome(partial = true, warnings = sectionWarnings)
     }
@@ -4977,7 +5067,8 @@ class SyncManager @Inject constructor(
                 scheduleStalkerIndexContinuation(provider, ContentType.MOVIE, force = true)
             }
 
-            ProviderType.JELLYFIN -> throw IllegalStateException("Movies retry is unavailable for Jellyfin providers")
+            ProviderType.JELLYFIN,
+            ProviderType.EMBY -> throw IllegalStateException("Movies retry is unavailable for this provider")
         }
         return if (sectionWarnings.isEmpty()) SyncOutcome() else SyncOutcome(partial = true, warnings = sectionWarnings)
     }
@@ -5066,7 +5157,8 @@ class SyncManager @Inject constructor(
                 throw IllegalStateException("Series retry is unavailable for this provider")
             }
 
-            ProviderType.JELLYFIN -> throw IllegalStateException("Series retry is unavailable for Jellyfin providers")
+            ProviderType.JELLYFIN,
+            ProviderType.EMBY -> throw IllegalStateException("Series retry is unavailable for this provider")
         }
         return if (sectionWarnings.isEmpty()) SyncOutcome() else SyncOutcome(partial = true, warnings = sectionWarnings)
     }

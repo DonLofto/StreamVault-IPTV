@@ -864,7 +864,8 @@ class ProviderRepositoryImpl @Inject constructor(
                 }
             }
             ProviderType.M3U,
-            ProviderType.JELLYFIN -> Result.error("On-demand guide lookup is unavailable for this provider.")
+            ProviderType.JELLYFIN,
+            ProviderType.EMBY -> Result.error("On-demand guide lookup is unavailable for this provider.")
         }
     }
 
@@ -941,7 +942,8 @@ class ProviderRepositoryImpl @Inject constructor(
                 results
             }
             ProviderType.M3U,
-            ProviderType.JELLYFIN -> normalizedRequests.associateWith {
+            ProviderType.JELLYFIN,
+            ProviderType.EMBY -> normalizedRequests.associateWith {
                 Result.error("On-demand guide lookup is unavailable for this provider.")
             }
         }
@@ -978,7 +980,8 @@ class ProviderRepositoryImpl @Inject constructor(
                 sourceStreamUrl = channel?.streamUrl,
                 sourceCatchUpSource = channel?.catchUpSource
             )
-            ProviderType.JELLYFIN -> emptyList()
+            ProviderType.JELLYFIN,
+            ProviderType.EMBY -> emptyList()
         }
     }
 

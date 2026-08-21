@@ -263,7 +263,8 @@ private fun supportsGuideAndLogoPolicy(providerType: ProviderType): Boolean = wh
     ProviderType.XTREAM_CODES,
     ProviderType.STALKER_PORTAL,
     ProviderType.M3U -> true
-    ProviderType.JELLYFIN -> false
+    ProviderType.JELLYFIN,
+    ProviderType.EMBY -> false
 }
 
 @Composable

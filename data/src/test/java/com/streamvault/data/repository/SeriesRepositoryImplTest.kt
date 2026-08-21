@@ -87,6 +87,7 @@ class SeriesRepositoryImplTest {
     private val xtreamStreamUrlResolver: XtreamStreamUrlResolver = mock()
     private val seriesCategoryHydrationDao: SeriesCategoryHydrationDao = mock()
     private val jellyfinProvider: JellyfinProvider = mock()
+    private val embyProvider: com.streamvault.data.remote.emby.EmbyProvider = mock()
     private val xtreamContentIndexDao: XtreamContentIndexDao = mock()
     private val xtreamIndexJobDao: XtreamIndexJobDao = mock()
     private val syncManager: SyncManager = mock()
@@ -1097,7 +1098,8 @@ class SeriesRepositoryImplTest {
             xtreamIndexJobDao = xtreamIndexJobDao,
             syncManager = syncManager,
             seriesCategoryHydrationDao = seriesCategoryHydrationDao,
-            jellyfinProvider = jellyfinProvider
+            jellyfinProvider = jellyfinProvider,
+            embyProvider = embyProvider
         )
     }
 }

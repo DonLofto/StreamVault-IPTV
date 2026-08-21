@@ -451,6 +451,7 @@ class MovieRepositoryImpl @Inject constructor(
                 ProviderType.STALKER_PORTAL -> return Result.success(attachMoviePresentation(movieEntity.toDomain(), knownPresentation))
                 ProviderType.M3U -> return Result.success(attachMoviePresentation(movieEntity.toDomain(), knownPresentation))
                 ProviderType.JELLYFIN -> return Result.success(attachMoviePresentation(movieEntity.toDomain(), knownPresentation))
+                ProviderType.EMBY -> return Result.success(attachMoviePresentation(movieEntity.toDomain(), knownPresentation))
             }
         } catch (e: Exception) {
             if (provider.type == ProviderType.XTREAM_CODES) {

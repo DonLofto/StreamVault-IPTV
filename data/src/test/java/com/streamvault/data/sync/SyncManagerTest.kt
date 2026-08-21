@@ -235,6 +235,7 @@ class SyncManagerTest {
     private val preferencesRepo: PreferencesRepository = mock()
     private val stalkerApiService: StalkerApiService = mock()
     private val jellyfinProvider: JellyfinProvider = mock()
+    private val embyProvider: com.streamvault.data.remote.emby.EmbyProvider = mock()
     private val xtreamBackend = FakeXtreamBackend()
     private val xtreamJson = Json {
         ignoreUnknownKeys = true
@@ -361,6 +362,7 @@ class SyncManagerTest {
         stalkerApiService = stalkerApiService,
         episodeDao = episodeDao,
         jellyfinProvider = jellyfinProvider,
+        embyProvider = embyProvider,
         xtreamJson = xtreamJson,
         m3uParser = M3uParser(),
         epgRepository = epgRepo,

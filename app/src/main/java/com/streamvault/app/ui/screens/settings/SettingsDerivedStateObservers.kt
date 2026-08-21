@@ -176,6 +176,9 @@ private fun buildCapabilitySummary(application: Application, provider: Provider)
                 "Jellyfin catalog with direct streaming and guide data from the server."
             }
         }
+        ProviderType.EMBY -> {
+            "Emby server catalog with Live TV, Movies, and Series streaming."
+        }
     }
 }
 
@@ -184,6 +187,7 @@ private fun Provider.sourceLabel(): String = when (type) {
     ProviderType.M3U -> "M3U Playlist"
     ProviderType.STALKER_PORTAL -> "Stalker/MAG Portal"
     ProviderType.JELLYFIN -> "Jellyfin"
+    ProviderType.EMBY -> "Emby"
 }
 
 private fun Provider.expirySummary(): String {
@@ -221,5 +225,8 @@ private fun Provider.archiveSummary(): String = when (type) {
         } else {
             "Jellyfin replay combines server guide data with optional XMLTV coverage."
         }
+    }
+    ProviderType.EMBY -> {
+        "Emby live TV and guide data sync directly from server."
     }
 }

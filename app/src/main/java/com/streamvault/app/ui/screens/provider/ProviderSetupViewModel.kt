@@ -238,7 +238,8 @@ class ProviderSetupViewModel @Inject constructor(
                             ProviderType.XTREAM_CODES -> 0
                             ProviderType.STALKER_PORTAL -> 1
                             ProviderType.M3U -> 2
-                            ProviderType.JELLYFIN -> 3
+                            ProviderType.JELLYFIN,
+                            ProviderType.EMBY -> 3
                         },
                         m3uTab = if (provider.m3uUrl.startsWith("file://")) 1 else 0
                     )

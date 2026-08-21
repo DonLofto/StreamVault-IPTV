@@ -103,6 +103,9 @@ abstract class RepositoryModule {
     @Binds @Singleton
     abstract fun bindCredentialCrypto(impl: AndroidKeystoreCredentialCrypto): CredentialCrypto
 
+    @Binds @Singleton
+    abstract fun bindTraktRepository(impl: com.streamvault.data.remote.trakt.TraktRepositoryImpl): com.streamvault.domain.trakt.TraktRepository
+
     companion object {
         @Provides
         @Singleton

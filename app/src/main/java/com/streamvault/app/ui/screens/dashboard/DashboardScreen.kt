@@ -614,6 +614,7 @@ private fun DashboardProviderHealthCard(
         com.streamvault.domain.model.ProviderType.M3U -> stringResource(R.string.dashboard_provider_m3u)
         com.streamvault.domain.model.ProviderType.STALKER_PORTAL -> "Stalker/MAG Portal"
         com.streamvault.domain.model.ProviderType.JELLYFIN -> "Jellyfin"
+        com.streamvault.domain.model.ProviderType.EMBY -> "Emby"
     }
 
     Surface(

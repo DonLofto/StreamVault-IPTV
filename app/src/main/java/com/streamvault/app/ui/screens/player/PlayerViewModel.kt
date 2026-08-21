@@ -1570,6 +1570,7 @@ class PlayerViewModel @Inject constructor(
                                 com.streamvault.domain.model.ProviderType.M3U -> "M3U Playlist"
                                 com.streamvault.domain.model.ProviderType.STALKER_PORTAL -> "Stalker/MAG Portal"
                                 com.streamvault.domain.model.ProviderType.JELLYFIN -> "Jellyfin"
+                                com.streamvault.domain.model.ProviderType.EMBY -> "Emby"
                             }
                         )
                     }

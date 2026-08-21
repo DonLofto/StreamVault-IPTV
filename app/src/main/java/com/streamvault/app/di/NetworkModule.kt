@@ -226,4 +226,18 @@ object NetworkModule {
         enableMediaSession = false
         bypassAudioFocus = true
     }
+
+    @Provides
+    @Singleton
+    fun provideTraktApiService(
+        okHttpClient: OkHttpClient,
+        gson: Gson
+    ): com.streamvault.data.remote.trakt.TraktApiService {
+        return retrofit2.Retrofit.Builder()
+            .baseUrl("https://api.trakt.tv/")
+            .client(okHttpClient)
+            .addConverterFactory(retrofit2.converter.gson.GsonConverterFactory.create(gson))
+            .build()
+            .create(com.streamvault.data.remote.trakt.TraktApiService::class.java)
+    }
 }
