@@ -47,8 +47,9 @@ Summary of implemented remediations, architectural mitigations, and verified per
 ### M3. Gated Player Read Telemetry
 - Read statistics wrappers only perform URI sanitization and state snapshots when an active diagnostic session is engaged.
 
-### M4. Unified Multi-Subsystem Cache Budget Coordinator
+### M4. Unified Multi-Subsystem Cache Budget Coordinator & Shared Timeshift SimpleCache
 - Coordinated storage quota dynamically balancing timeshift rolling disk buffer, OkHttp HTTP response cache, and Coil image cache.
+- Shared Media3 `SimpleCache` and `CacheDataSource` between `Media3PlayerEngine` and `LiveTimeshiftManager`, eliminating duplicate network segment downloads during live rewind capture. Live edge manifests (`.m3u8`, `.mpd`) bypass the cache to guarantee real-time stream sequence freshness.
 
 ### M5. Lazy Cold-Start Dependency Graph
 - Heavy feature managers, protocol clients, and background reconcilers injected lazily (`Lazy`/`Provider`), reducing cold start allocation and contention.

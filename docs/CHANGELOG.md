@@ -29,6 +29,7 @@ All notable product changes are recorded in this document.
 - Added full transparent guide overlay integration in the live player with direct DPAD activation.
 - Added composite database indexes `(provider_id, number)` and `(provider_id, category_id, number)` for accelerated channel browsing.
 - Added coordinated multi-subsystem storage cache budgeting across timeshift, HTTP response cache, and image caches.
+- Added shared Media3 `SimpleCache` and `CacheDataSource` between ExoPlayer and `LiveTimeshiftManager` to eliminate duplicate network bandwidth consumption during live rewind capture.
 - Added single-worker coalesced seek thumbnail generation with byte-capped LRU bitmap caching.
 - Added bounded rolling ring-buffer logs for debug runtime diagnostics.
 
