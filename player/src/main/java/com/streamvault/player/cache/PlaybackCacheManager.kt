@@ -12,28 +12,38 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @OptIn(UnstableApi::class)
+@Suppress("DEPRECATION")
 @Singleton
 class PlaybackCacheManager @Inject constructor(
     private val context: Context,
     private val cacheDirOverride: File? = null,
-    private val maxCacheBytes: Long = DEFAULT_MAX_CACHE_BYTES
+    private val maxCacheBytes: Long = DEFAULT_MAX_CACHE_BYTES,
+    private val databaseProviderOverride: DatabaseProvider? = null,
+    private val simpleCacheOverride: SimpleCache? = null
 ) {
-    private var simpleCache: SimpleCache? = null
-    private var databaseProvider: DatabaseProvider? = null
+    private var simpleCache: SimpleCache? = simpleCacheOverride
+    private var databaseProvider: DatabaseProvider? = databaseProviderOverride
     private val lock = Any()
 
     fun getCache(): SimpleCache {
         synchronized(lock) {
             simpleCache?.let { return it }
             val dir = cacheDirOverride ?: File(context.cacheDir, CACHE_SUBDIR).apply { mkdirs() }
-            val dbProvider = StandaloneDatabaseProvider(context).also { databaseProvider = it }
+            val dbProvider = databaseProviderOverride ?: try {
+                StandaloneDatabaseProvider(context).also { databaseProvider = it }
+            } catch (t: Throwable) {
+                null
+            }
             val evictor = LeastRecentlyUsedCacheEvictor(maxCacheBytes)
             val cache = try {
-                SimpleCache(dir, evictor, dbProvider)
+                if (dbProvider != null) {
+                    SimpleCache(dir, evictor, dbProvider)
+                } else {
+                    SimpleCache(dir, evictor)
+                }
             } catch (t: Throwable) {
-                dir.deleteRecursively()
-                dir.mkdirs()
-                SimpleCache(dir, evictor, dbProvider)
+                val fallbackDir = File(dir.parentFile ?: context.cacheDir, "${dir.name}_fallback_${System.nanoTime()}").apply { mkdirs() }
+                SimpleCache(fallbackDir, evictor)
             }
             simpleCache = cache
             return cache
