@@ -84,6 +84,18 @@ class PlayerDataSourceFactoryProvider(
             }
             builder
                 .addInterceptor(StalkerPlaybackRequestLoggingInterceptor)
+                // Some IPTV edges (Cloudflare-protected origins) answer 407 Proxy
+                // Authentication Required to requests carrying Accept-Encoding: gzip.
+                // Pinning identity prevents OkHttp's transparent gzip from adding the
+                // header, matching what AVFoundation/VLC-style clients send.
+                .addInterceptor { chain ->
+                    val request = chain.request()
+                    if (request.header("Accept-Encoding") == null) {
+                        chain.proceed(request.newBuilder().header("Accept-Encoding", "identity").build())
+                    } else {
+                        chain.proceed(request)
+                    }
+                }
                 .connectTimeout(profile.connectTimeoutMs, TimeUnit.MILLISECONDS)
                 .readTimeout(profile.readTimeoutMs, TimeUnit.MILLISECONDS)
                 .writeTimeout(profile.writeTimeoutMs, TimeUnit.MILLISECONDS)
@@ -182,24 +194,28 @@ private object StalkerPlaybackRequestLoggingInterceptor : Interceptor {
 
     override fun intercept(chain: Interceptor.Chain): okhttp3.Response {
         val request = chain.request()
-        if (!request.hasStalkerPlaybackShape()) {
-            return chain.proceed(request)
+        // Debug aid: log every playback request header set (not just stalker-shaped ones),
+        // so Xtream/M3U TS and HLS requests are visible in logcat for 407/403 diagnosis.
+        val shouldLog = request.hasStalkerPlaybackShape() || request.url.toString().contains("/live/")
+        if (shouldLog) {
+            Log.d(
+                TAG,
+                "Playback request actual method=${request.method} target=${PlaybackLogSanitizer.sanitizeUrl(request.url.toString())} " +
+                    "ua=${request.header("User-Agent") != null} referer=${request.header("Referer") != null} " +
+                    "cookie=${request.header("Cookie") != null} auth=${request.header("Authorization") != null} " +
+                    "xua=${request.header("X-User-Agent") != null} range=${request.header("Range") != null} " +
+                    "acceptEncoding=${request.header("Accept-Encoding")?.take(24).orEmpty()} cookieKeys=${request.cookieKeySummary()}"
+            )
         }
-        Log.d(
-            TAG,
-            "Playback request actual method=${request.method} target=${PlaybackLogSanitizer.sanitizeUrl(request.url.toString())} " +
-                "ua=${request.header("User-Agent") != null} referer=${request.header("Referer") != null} " +
-                "cookie=${request.header("Cookie") != null} auth=${request.header("Authorization") != null} " +
-                "xua=${request.header("X-User-Agent") != null} range=${request.header("Range") != null} " +
-                "acceptEncoding=${request.header("Accept-Encoding")?.take(24).orEmpty()} cookieKeys=${request.cookieKeySummary()}"
-        )
         val response = chain.proceed(request)
-        Log.d(
-            TAG,
-            "Playback response actual target=${PlaybackLogSanitizer.sanitizeUrl(request.url.toString())} " +
-                "code=${response.code} length=${response.header("Content-Length").orEmpty()} " +
-                "type=${response.header("Content-Type").orEmpty()}"
-        )
+        if (shouldLog) {
+            Log.d(
+                TAG,
+                "Playback response actual target=${PlaybackLogSanitizer.sanitizeUrl(request.url.toString())} " +
+                    "code=${response.code} length=${response.header("Content-Length").orEmpty()} " +
+                    "type=${response.header("Content-Type").orEmpty()}"
+            )
+        }
         return response
     }
 
