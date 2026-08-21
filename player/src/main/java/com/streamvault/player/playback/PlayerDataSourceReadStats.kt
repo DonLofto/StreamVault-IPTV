@@ -37,7 +37,7 @@ private class PlayerDataSourceReadStatsDataSource(
     private val clockMs: () -> Long
 ) : DataSource {
     private val tracker = PlayerDataSourceReadStatsTracker()
-    private var target = PlaybackLogSanitizer.sanitizeUrl(initialTargetUrl)
+    private var initialTargetUrl: String = initialTargetUrl
     private var opened = false
 
     override fun addTransferListener(transferListener: TransferListener) {
@@ -46,14 +46,16 @@ private class PlayerDataSourceReadStatsDataSource(
 
     @Throws(IOException::class)
     override fun open(dataSpec: DataSpec): Long {
-        target = PlaybackLogSanitizer.sanitizeUrl(dataSpec.uri.toString())
+        // M3: keep the raw URL; sanitize only when a sample is actually logged.
+        initialTargetUrl = dataSpec.uri.toString()
         val length = upstream.open(dataSpec)
         tracker.open(clockMs())
         opened = true
         if (readStatsLoggingEnabled()) {
             Log.d(
                 TAG,
-                "read-open streamType=$resolvedStreamType position=${dataSpec.position} length=$length target=$target"
+                "read-open streamType=$resolvedStreamType position=${dataSpec.position} " +
+                    "length=$length target=${sanitizeTarget()}"
             )
         }
         return length
@@ -84,13 +86,16 @@ private class PlayerDataSourceReadStatsDataSource(
         }
     }
 
+    private fun sanitizeTarget(): String =
+        PlaybackLogSanitizer.sanitizeUrl(initialTargetUrl)
+
     private fun logProgress(snapshot: PlayerDataSourceReadStatsSnapshot) {
         Log.d(
             TAG,
             "read-progress streamType=$resolvedStreamType bytes=${snapshot.totalBytes} " +
                 "deltaBytes=${snapshot.deltaBytes} elapsedMs=${snapshot.elapsedMs} " +
                 "intervalMs=${snapshot.intervalMs} avgKbps=${snapshot.averageKbps} " +
-                "intervalKbps=${snapshot.intervalKbps} target=$target"
+                "intervalKbps=${snapshot.intervalKbps} target=${sanitizeTarget()}"
         )
     }
 
@@ -98,7 +103,7 @@ private class PlayerDataSourceReadStatsDataSource(
         Log.d(
             TAG,
             "read-close streamType=$resolvedStreamType bytes=${snapshot.totalBytes} " +
-                "elapsedMs=${snapshot.elapsedMs} avgKbps=${snapshot.averageKbps} target=$target"
+                "elapsedMs=${snapshot.elapsedMs} avgKbps=${snapshot.averageKbps} target=${sanitizeTarget()}"
         )
     }
 

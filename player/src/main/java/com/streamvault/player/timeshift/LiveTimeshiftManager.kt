@@ -3,10 +3,20 @@ package com.streamvault.player.timeshift
 import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.res.Configuration
+import android.net.Uri
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSourceInputStream
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import com.streamvault.domain.model.TimeshiftBackendPreference
 import com.streamvault.domain.model.StreamInfo
 import com.streamvault.domain.model.StreamType
+import com.streamvault.player.cache.AppCacheQuota
+import com.streamvault.player.cache.PlaybackCacheManager
 import com.streamvault.player.playback.applyUnsafeTlsBypass
+import com.streamvault.player.playback.effectivePlaybackRequestProperties
 import com.streamvault.player.playback.LiveTimeshiftPlaybackGate
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.ByteArrayOutputStream
@@ -26,6 +36,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -36,6 +47,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -72,11 +84,40 @@ internal fun buildDashSnapshotPlaylist(
     appendLine("#EXT-X-ENDLIST")
 }
 
+/**
+ * Infers a timeshift capture type from the parsed URI path/scheme rather than the raw
+ * whole URL, so query strings on HLS/DASH URLs (B5) no longer down-grade to progressive.
+ */
+internal fun inferTimeshiftStreamType(url: String): StreamType {
+    val uri = runCatching { java.net.URI(url) }.getOrNull()
+    val path = uri?.path?.lowercase(Locale.ROOT) ?: ""
+    val scheme = uri?.scheme?.lowercase(Locale.ROOT) ?: url.lowercase(Locale.ROOT)
+    return when {
+        path.endsWith(".m3u8") -> StreamType.HLS
+        path.endsWith(".mpd") -> StreamType.DASH
+        path.contains(".isml/manifest") || path.contains(".ism/manifest") || path.endsWith(".ism") || path.endsWith(".isml") ->
+            StreamType.SMOOTH_STREAMING
+        path.endsWith(".ts") -> StreamType.MPEG_TS
+        scheme.startsWith("rtsp") -> StreamType.RTSP
+        else -> StreamType.PROGRESSIVE
+    }
+}
+
+/**
+ * B2: a capture failure only reaches FAILED state when the emitting session is still the
+ * active one and the throwable is a genuine error (not cooperative cancellation).
+ */
+internal fun shouldPublishCaptureFailure(isActive: Boolean, throwable: Throwable): Boolean =
+    isActive && throwable !is CancellationException
+
+@OptIn(UnstableApi::class)
 @Singleton
 internal class DefaultLiveTimeshiftManager @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val okHttpClient: OkHttpClient,
-    private val playbackGate: LiveTimeshiftPlaybackGate = LiveTimeshiftPlaybackGate()
+    private val playbackGate: LiveTimeshiftPlaybackGate = LiveTimeshiftPlaybackGate(),
+    private val appCacheQuota: AppCacheQuota,
+    private val playbackCacheManager: PlaybackCacheManager? = null
 ) : LiveTimeshiftManager, ComponentCallbacks2 {
     private val unsafeOkHttpClient: OkHttpClient by lazy {
         okHttpClient.newBuilder()
@@ -113,7 +154,10 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
     private val mutex = Mutex()
     private val _state = MutableStateFlow(LiveTimeshiftState())
     override val state: StateFlow<LiveTimeshiftState> = _state.asStateFlow()
-    private val diskManager = TimeshiftDiskManager(context)
+    private val diskManager = TimeshiftDiskManager(
+        context,
+        maxBudgetBytes = appCacheQuota.budgets.timeshiftBudgetBytes
+    )
 
     private var activeSession: Session? = null
     private val retiredSnapshotDirs = ArrayDeque<File>()
@@ -210,18 +254,27 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                 session.job = scope.launch {
                     try {
                         session.capture()
-                    } catch (t: Throwable) {
-                        _state.value = _state.value.copy(
-                            enabled = true,
-                            supported = true,
-                            backend = session.backend,
-                            status = LiveTimeshiftStatus.FAILED,
-                            message = t.message ?: "Local live rewind failed."
-                        )
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Throwable) {
+                        // B2: only the session that is still active may publish failure.
+                        if (shouldPublishCaptureFailure(activeSession === session, error)) {
+                            publishFailure(session, error)
+                        }
                     }
                 }
             }
         }
+    }
+
+    private fun publishFailure(session: Session, error: Throwable) {
+        _state.value = _state.value.copy(
+            enabled = true,
+            supported = true,
+            backend = session.backend,
+            status = LiveTimeshiftStatus.FAILED,
+            message = error.message ?: "Local live rewind failed."
+        )
     }
 
     override suspend fun stopSession() {
@@ -263,8 +316,14 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
     private suspend fun stopSessionLocked() {
         retiredSnapshotDirs.forEach { it.deleteRecursively() }
         retiredSnapshotDirs.clear()
-        activeSession?.stop()
-        activeSession = null
+        activeSession?.let { session ->
+            // Mark it non-active first so a late capture error cannot publish FAILED.
+            activeSession = null
+            session.stop()
+            // Await the external capture job before removing its files.
+            session.job?.cancelAndJoin()
+            session.sessionDir.deleteRecursively()
+        }
     }
 
     private fun chooseBackend(config: TimeshiftConfig): LiveTimeshiftBackend? =
@@ -315,16 +374,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
 
     private fun inferType(streamInfo: StreamInfo): StreamType {
         if (streamInfo.streamType != StreamType.UNKNOWN) return streamInfo.streamType
-        val url = streamInfo.url.lowercase(Locale.ROOT)
-        return when {
-            url.endsWith(".m3u8") -> StreamType.HLS
-            url.endsWith(".mpd") -> StreamType.DASH
-            url.contains(".isml/manifest") || url.contains(".ism/manifest") || url.endsWith(".ism") || url.endsWith(".isml") ->
-                StreamType.SMOOTH_STREAMING
-            url.endsWith(".ts") -> StreamType.MPEG_TS
-            url.startsWith("rtsp") -> StreamType.RTSP
-            else -> StreamType.PROGRESSIVE
-        }
+        return inferTimeshiftStreamType(streamInfo.url)
     }
 
     private inner class SupportResult(
@@ -352,7 +402,6 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
         open suspend fun stop() {
             activeCall?.cancel()
             job?.cancel()
-            sessionDir.deleteRecursively()
         }
 
         protected fun makeRequest(url: String) = Request.Builder().url(url).apply {
@@ -400,6 +449,76 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                 call.execute().use(block)
             } finally {
                 clearTrackedCall(call)
+            }
+        }
+
+        protected fun streamSegmentToDisk(url: String, target: File) {
+            val cacheManager = playbackCacheManager
+            if (cacheManager != null) {
+                try {
+                    val cache = cacheManager.getCache()
+                    val client = httpClientFor(streamInfo)
+                    val upstreamFactory = OkHttpDataSource.Factory(client).apply {
+                        val headers = effectivePlaybackRequestProperties(
+                            headers = streamInfo.headers,
+                            userAgent = streamInfo.userAgent
+                        )
+                        if (headers.isNotEmpty()) {
+                            setDefaultRequestProperties(headers)
+                        }
+                    }
+                    val cacheDataSource = CacheDataSource.Factory()
+                        .setCache(cache)
+                        .setUpstreamDataSourceFactory(upstreamFactory)
+                        .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+                        .createDataSource()
+                    val dataSpec = DataSpec(Uri.parse(url))
+                    DataSourceInputStream(cacheDataSource, dataSpec).use { input ->
+                        target.outputStream().use { output ->
+                            input.copyTo(output, bufferSize = PROGRESSIVE_READ_BUFFER_SIZE)
+                        }
+                    }
+                    return
+                } catch (t: Throwable) {
+                    if (t is CancellationException) throw t
+                }
+            }
+            executeRequest(makeRequest(url)) { response ->
+                if (!response.isSuccessful) throw IOException("Timeshift segment failed with HTTP ${response.code}")
+                val body = response.body ?: throw IOException("Timeshift segment returned an empty body")
+                body.byteStream().use { input -> target.outputStream().use { output -> input.copyTo(output, bufferSize = PROGRESSIVE_READ_BUFFER_SIZE) } }
+            }
+        }
+
+        protected fun fetchBytes(url: String): ByteArray {
+            val cacheManager = playbackCacheManager
+            if (cacheManager != null) {
+                try {
+                    val cache = cacheManager.getCache()
+                    val client = httpClientFor(streamInfo)
+                    val upstreamFactory = OkHttpDataSource.Factory(client).apply {
+                        val headers = effectivePlaybackRequestProperties(
+                            headers = streamInfo.headers,
+                            userAgent = streamInfo.userAgent
+                        )
+                        if (headers.isNotEmpty()) {
+                            setDefaultRequestProperties(headers)
+                        }
+                    }
+                    val cacheDataSource = CacheDataSource.Factory()
+                        .setCache(cache)
+                        .setUpstreamDataSourceFactory(upstreamFactory)
+                        .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+                        .createDataSource()
+                    val dataSpec = DataSpec(Uri.parse(url))
+                    return DataSourceInputStream(cacheDataSource, dataSpec).use { it.readBytes() }
+                } catch (t: Throwable) {
+                    if (t is CancellationException) throw t
+                }
+            }
+            return executeRequest(makeRequest(url)) { response ->
+                if (!response.isSuccessful) throw IOException("Timeshift segment failed with HTTP ${response.code}")
+                response.body?.bytes() ?: ByteArray(0)
             }
         }
 
@@ -691,14 +810,6 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             }
         }
 
-        private fun streamSegmentToDisk(url: String, target: File) {
-            executeRequest(makeRequest(url)) { response ->
-                if (!response.isSuccessful) throw IOException("Timeshift segment failed with HTTP ${response.code}")
-                val body = response.body ?: throw IOException("Timeshift segment returned an empty body")
-                body.byteStream().use { input -> target.outputStream().use { output -> input.copyTo(output, bufferSize = PROGRESSIVE_READ_BUFFER_SIZE) } }
-            }
-        }
-
         private fun pruneHlsSegmentsLocked() {
             while (runningSegmentDurationMs > effectiveDepthMs && segments.isNotEmpty()) {
                 val removed = segments.removeFirst()
@@ -711,13 +822,6 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             return executeRequest(makeRequest(url)) { response ->
                 if (!response.isSuccessful) throw IOException("Timeshift playlist failed with HTTP ${response.code}")
                 response.body?.string().orEmpty()
-            }
-        }
-
-        private fun fetchBytes(url: String): ByteArray {
-            return executeRequest(makeRequest(url)) { response ->
-                if (!response.isSuccessful) throw IOException("Timeshift segment failed with HTTP ${response.code}")
-                response.body?.bytes() ?: ByteArray(0)
             }
         }
 
@@ -807,12 +911,51 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
         var bytesWritten: Long = 0L
     )
 
-    private class HlsSegmentSnapshot(
+    internal class HlsSegmentSnapshot(
         val remoteUrl: String,
         val durationMs: Long,
         val file: File?,
         val payload: ByteArray?
     )
+
+    /**
+     * B1: a DASH rolling window that keeps the init segment separate from the media
+     * queue, so the zero-duration init can never block media pruning.
+     */
+    internal class DashWindow(
+        private val depthMs: Long,
+        private val onEvict: (HlsSegmentSnapshot) -> Unit = {}
+    ) {
+        private var init: HlsSegmentSnapshot? = null
+        private val media = ArrayDeque<HlsSegmentSnapshot>()
+        private var mediaDurationMs = 0L
+
+        fun addInit(segment: HlsSegmentSnapshot) {
+            init = segment
+        }
+
+        fun addMedia(segment: HlsSegmentSnapshot) {
+            media.addLast(segment)
+            mediaDurationMs += segment.durationMs
+            prune()
+        }
+
+        fun initSegment(): HlsSegmentSnapshot? = init
+
+        fun mediaSegments(): List<HlsSegmentSnapshot> = media.toList()
+
+        fun mediaDurationMs(): Long = mediaDurationMs
+
+        fun allSegments(): List<HlsSegmentSnapshot> = listOfNotNull(init) + media
+
+        private fun prune() {
+            while (mediaDurationMs > depthMs && media.isNotEmpty()) {
+                val removed = media.removeFirst()
+                mediaDurationMs -= removed.durationMs
+                onEvict(removed)
+            }
+        }
+    }
 
     private data class RemoteHlsSegment(
         val uri: String,
@@ -844,10 +987,15 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
         sessionDir: File
     ) : Session(streamInfo, config, backend, sessionDir) {
 
-        private val segments = ArrayDeque<HlsSegmentSnapshot>()
         private val segmentMutex = Mutex()
         private val seenSegments = linkedSetOf<String>()
-        private var runningSegmentDurationMs = 0L
+        private val window = DashWindow(
+            depthMs = effectiveDepthMs,
+            onEvict = { evicted ->
+                seenSegments.remove(evicted.remoteUrl)
+                evicted.file?.delete()
+            }
+        )
 
         override suspend fun capture() {
             var consecutiveErrors = 0
@@ -863,7 +1011,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                         if (seenSegments.add("__init__:$initUrl")) {
                             if (backend == LiveTimeshiftBackend.DISK) checkDiskAndBudget()
                             val retained = retainSegment(RemoteHlsSegment(initUrl, 0L), isInit = true)
-                            segmentMutex.withLock { segments += retained }
+                            segmentMutex.withLock { window.addInit(retained) }
                         }
                     }
 
@@ -874,10 +1022,8 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                         if (backend == LiveTimeshiftBackend.DISK) checkDiskAndBudget()
                         val retained = retainSegment(remote, isInit = false)
                         val windowDuration = segmentMutex.withLock {
-                            runningSegmentDurationMs += retained.durationMs
-                            segments += retained
-                            pruneSegmentsLocked()
-                            runningSegmentDurationMs
+                            window.addMedia(retained)
+                            window.mediaDurationMs()
                         }
                         updateWindow(windowDuration)
                     }
@@ -897,8 +1043,8 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             val snapshotId = sequence.incrementAndGet()
             val snapshotDir = File(sessionDir, "snapshot-$snapshotId").apply { mkdirs() }
             activeSnapshotDir = snapshotDir
-            val snapshotSegments = segmentMutex.withLock { segments.toList() }
-                .filter { it.durationMs > 0L }  // exclude init segment from HLS timing
+            val all = segmentMutex.withLock { window.allSegments() }
+            val snapshotSegments = all.filter { it.durationMs > 0L }  // media only for HLS timing
             if (snapshotSegments.isEmpty()) return null
 
             // Re-package captured DASH segments as a static HLS playlist.
@@ -906,7 +1052,6 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             // is built around HLS output, so DASH snapshots follow the same pattern.
             val playlist = File(snapshotDir, "index.m3u8")
             val targetDurationSeconds = snapshotSegments.maxOf { ((it.durationMs + 999L) / 1000L).toInt().coerceAtLeast(1) }
-            val all = segmentMutex.withLock { segments.toList() }  // includes init
             var mediaIndex = 0
             val playlistSegments = all.mapIndexed { index, segment ->
                 val isInit = segment.durationMs == 0L
@@ -947,36 +1092,10 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             }
         }
 
-        private fun pruneSegmentsLocked() {
-            while (runningSegmentDurationMs > effectiveDepthMs && segments.isNotEmpty()) {
-                val candidate = segments.first()
-                if (candidate.durationMs == 0L) break  // never prune the init segment
-                val removed = segments.removeFirst()
-                seenSegments.remove(removed.remoteUrl)
-                removed.file?.delete()
-                runningSegmentDurationMs -= removed.durationMs
-            }
-        }
-
-        private fun streamSegmentToDisk(url: String, target: File) {
-            executeRequest(makeRequest(url)) { response ->
-                if (!response.isSuccessful) throw IOException("DASH segment fetch failed: HTTP ${response.code}")
-                val body = response.body ?: throw IOException("DASH segment returned empty body")
-                body.byteStream().use { input -> target.outputStream().use { out -> input.copyTo(out, bufferSize = PROGRESSIVE_READ_BUFFER_SIZE) } }
-            }
-        }
-
         private fun fetchText(url: String): String {
             return executeRequest(makeRequest(url)) { response ->
                 if (!response.isSuccessful) throw IOException("MPD fetch failed: HTTP ${response.code}")
                 response.body?.string().orEmpty()
-            }
-        }
-
-        private fun fetchBytes(url: String): ByteArray {
-            return executeRequest(makeRequest(url)) { response ->
-                if (!response.isSuccessful) throw IOException("DASH segment fetch failed: HTTP ${response.code}")
-                response.body?.bytes() ?: ByteArray(0)
             }
         }
 

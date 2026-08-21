@@ -942,6 +942,91 @@ class MovieRepositoryImplTest {
         verify(movieDao, never()).getByProviderCursorPage(any(), any())
     }
 
+    @Test
+    fun `browseMovies favorites page after first 200 returns requested rows`() = runTest {
+        whenever(preferencesRepository.parentalControlLevel).thenReturn(flowOf(0))
+        whenever(preferencesRepository.xtreamBase64TextCompatibility).thenReturn(flowOf(false))
+        val favoriteRows = (1..220).map { index ->
+            MovieBrowseEntity(
+                id = index.toLong(),
+                streamId = index.toLong(),
+                name = "Favorite Movie $index",
+                providerId = 7L,
+                streamUrl = "https://example.com/$index.m3u8"
+            )
+        }
+        whenever(movieDao.getFavoritesByProviderPage(eq(7L), any(), any())).thenAnswer { invocation ->
+            val limit = invocation.getArgument<Int>(1)
+            flowOf(favoriteRows.take(limit))
+        }
+        whenever(movieDao.getFavoriteCountByProvider(7L)).thenReturn(flowOf(220))
+        whenever(favoriteDao.getAllByType(7L, ContentType.MOVIE.name)).thenReturn(
+            flowOf((1..220).map { index ->
+                FavoriteEntity(
+                    id = index.toLong(),
+                    providerId = 7L,
+                    contentId = index.toLong(),
+                    contentType = ContentType.MOVIE,
+                    position = index,
+                    addedAt = index.toLong()
+                )
+            })
+        )
+        whenever(playbackHistoryDao.getByProvider(7L)).thenReturn(flowOf(emptyList()))
+
+        val repository = createRepository()
+
+        val page = repository.browseMovies(
+            LibraryBrowseQuery(
+                providerId = 7L,
+                filterBy = LibraryFilterBy(LibraryFilterType.FAVORITES),
+                sortBy = LibrarySortBy.LIBRARY,
+                offset = 200,
+                limit = 20
+            )
+        ).first()
+
+        assertThat(page.items.map { it.id }).containsExactlyElementsIn((201L..220L).toList()).inOrder()
+        assertThat(page.totalCount).isEqualTo(220)
+    }
+
+    @Test
+    fun `browseMovies unwatched page after first 200 returns requested rows`() = runTest {
+        whenever(preferencesRepository.parentalControlLevel).thenReturn(flowOf(0))
+        whenever(preferencesRepository.xtreamBase64TextCompatibility).thenReturn(flowOf(false))
+        val unwatchedRows = (1..220).map { index ->
+            MovieBrowseEntity(
+                id = index.toLong(),
+                streamId = index.toLong(),
+                name = "Unwatched Movie $index",
+                providerId = 7L,
+                streamUrl = "https://example.com/$index.m3u8"
+            )
+        }
+        whenever(movieDao.getUnwatchedByProviderPage(eq(7L), any(), any())).thenAnswer { invocation ->
+            val limit = invocation.getArgument<Int>(1)
+            flowOf(unwatchedRows.take(limit))
+        }
+        whenever(movieDao.getUnwatchedCountByProvider(7L)).thenReturn(flowOf(220))
+        whenever(favoriteDao.getAllByType(7L, ContentType.MOVIE.name)).thenReturn(flowOf(emptyList()))
+        whenever(playbackHistoryDao.getByProvider(7L)).thenReturn(flowOf(emptyList()))
+
+        val repository = createRepository()
+
+        val page = repository.browseMovies(
+            LibraryBrowseQuery(
+                providerId = 7L,
+                filterBy = LibraryFilterBy(LibraryFilterType.UNWATCHED),
+                sortBy = LibrarySortBy.LIBRARY,
+                offset = 200,
+                limit = 20
+            )
+        ).first()
+
+        assertThat(page.items.map { it.id }).containsExactlyElementsIn((201L..220L).toList()).inOrder()
+        assertThat(page.totalCount).isEqualTo(220)
+    }
+
     private fun createRepository(
         duplicateHandlingMode: VodDuplicateHandlingMode = VodDuplicateHandlingMode.SHOW_ALL,
         variantPreferenceMode: VodVariantPreferenceMode = VodVariantPreferenceMode.BALANCED,

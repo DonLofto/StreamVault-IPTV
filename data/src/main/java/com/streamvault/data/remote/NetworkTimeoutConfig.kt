@@ -7,6 +7,10 @@ object NetworkTimeoutConfig {
     // EPG files can be large and served from slow hosts — allow more time per read.
     const val EPG_READ_TIMEOUT_SECONDS = 120L
     const val EPG_MAX_SIZE_BYTES = 200L * 1_048_576 // 200 MB
+    // H5: decompressed-byte ceiling for gzip XMLTV (a 200 MB compressed body may expand
+    // far beyond itself) and a programme-count ceiling for oversized feeds.
+    const val EPG_MAX_DECOMPRESSED_BYTES = 400L * 1_048_576 // 400 MB expanded
+    const val EPG_MAX_PROGRAMMES = 2_000_000
     const val XTREAM_SEGMENTED_READ_TIMEOUT_SECONDS = 45L
     const val XTREAM_SEGMENTED_WRITE_TIMEOUT_SECONDS = 45L
     const val XTREAM_SEGMENTED_CALL_TIMEOUT_SECONDS = 50L

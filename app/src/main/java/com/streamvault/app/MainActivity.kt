@@ -403,8 +403,10 @@ class MainActivity : ComponentActivity() {
             else -> null
         } ?: return null
         if (!isBackupJsonCandidate(targetUri)) return null
-        return BackupFileBridge.copyToImportInbox(this@MainActivity, targetUri)?.toString()
-            ?: targetUri.toString()
+        // H1: do not copy bytes here. Intent parsing must stay cheap so the first
+        // Compose frame renders before any document-provider copy work. The import copy
+        // runs on Dispatchers.IO in the navigation handler.
+        return targetUri.toString()
     }
 
     @Suppress("DEPRECATION")

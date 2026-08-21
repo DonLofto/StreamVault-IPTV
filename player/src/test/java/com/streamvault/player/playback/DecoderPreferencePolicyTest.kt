@@ -88,4 +88,20 @@ class DecoderPreferencePolicyTest {
             )
         ).isFalse()
     }
+
+    @Test
+    fun `explicit modes still use managed selectors with matching policy`() {
+        assertThat(
+            shouldUseManagedCodecSelector(
+                requestedMode = DecoderMode.SOFTWARE,
+                decoderPolicy = ActiveDecoderPolicy.SOFTWARE_PREFERRED
+            )
+        ).isTrue()
+        assertThat(
+            shouldUseManagedCodecSelector(
+                requestedMode = DecoderMode.HARDWARE,
+                decoderPolicy = ActiveDecoderPolicy.HARDWARE_PREFERRED
+            )
+        ).isTrue()
+    }
 }

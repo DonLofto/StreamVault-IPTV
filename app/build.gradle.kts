@@ -57,8 +57,8 @@ android {
         applicationId = "com.streamvault.app"
         minSdk = 25
         targetSdk = 36
-        versionCode = 17
-        versionName = "1.0.16"
+        versionCode = 18
+        versionName = "1.0.17"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "OFFICIAL_APPLICATION_ID", "\"com.streamvault.app\"")
         buildConfigField("String", "OFFICIAL_SIGNING_CERT_SHA256", "\"$officialSigningCertSha256\"")
@@ -92,7 +92,13 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".debug"
+            // Override with -PstreamvaultDebugPackage=com.streamvault.app to install over
+            // the release app (same signature, same data) for on-device debugging.
+            if (project.findProperty("streamvaultDebugPackage")?.toString()?.isNotBlank() == true) {
+                applicationIdSuffix = ""
+            } else {
+                applicationIdSuffix = ".debug"
+            }
             versionNameSuffix = "-debug"
             buildConfigField("String", "XTREAM_DEV_SERVER", "\"${localProp("xtream.dev.server")}\"")
             buildConfigField("String", "XTREAM_DEV_USERNAME", "\"${localProp("xtream.dev.username")}\"")

@@ -366,6 +366,7 @@ class SyncManagerTest {
         epgRepository = epgRepo,
         epgSourceRepository = epgSourceRepo,
         okHttpClient = xtreamBackend.okHttpClient(),
+        backgroundSyncHttpClient = xtreamBackend.okHttpClient(),
         credentialCrypto = credentialCrypto,
         syncMetadataRepository = syncMetadataRepo,
         transactionRunner = transactionRunner,

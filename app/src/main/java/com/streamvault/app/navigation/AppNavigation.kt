@@ -21,6 +21,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.streamvault.app.backup.BackupFileBridge
 import com.streamvault.app.ui.model.isArchivePlayable
 import com.streamvault.domain.model.Channel
 import com.streamvault.domain.model.Episode
@@ -48,8 +49,10 @@ import com.streamvault.domain.model.SeriesDetailPresentationHint
 import com.streamvault.domain.model.VirtualCategoryIds
 import java.io.Serializable
 import kotlin.coroutines.resume
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 
 
 private const val PLAYER_REQUEST_KEY = "player_request"
@@ -114,10 +117,12 @@ object Routes {
     fun epg(categoryId: Long? = null, anchorTime: Long? = null, favoritesOnly: Boolean? = null): String {
         val resolvedCategoryId = categoryId ?: -1L
         val resolvedAnchorTime = anchorTime ?: -1L
-        val resolvedFavoritesOnly = favoritesOnly ?: false
-        return "$EPG?categoryId=$resolvedCategoryId&anchorTime=$resolvedAnchorTime&favoritesOnly=$resolvedFavoritesOnly"
+        return if (favoritesOnly == null) {
+            "$EPG?categoryId=$resolvedCategoryId&anchorTime=$resolvedAnchorTime"
+        } else {
+            "$EPG?categoryId=$resolvedCategoryId&anchorTime=$resolvedAnchorTime&favoritesOnly=$favoritesOnly"
+        }
     }
-
     fun livePlayer(
         channel: Channel,
         categoryId: Long? = channel.categoryId,
@@ -423,7 +428,15 @@ fun AppNavigation(mainActivity: MainActivity) {
             }
 
             is ExternalNavigationRequest.ImportBackup -> {
-                if (navController.navigateIfResumed(Routes.settings(backupUri = request.uri)) { launchSingleTop = true }) {
+                // H1: copy the incoming backup off the main thread before navigating, so a
+                // slow document provider never blocks the first frame or navigation.
+                val copiedUri = withContext(Dispatchers.IO) {
+                    runCatching {
+                        BackupFileBridge.copyToImportInbox(mainActivity, Uri.parse(request.uri))
+                    }.getOrNull()
+                }
+                val targetUri = copiedUri?.toString() ?: request.uri
+                if (navController.navigateIfResumed(Routes.settings(backupUri = targetUri)) { launchSingleTop = true }) {
                     mainActivity.clearExternalNavigationRequest()
                 }
             }
@@ -647,12 +660,15 @@ fun AppNavigation(mainActivity: MainActivity) {
             arguments = listOf(
                 navArgument("categoryId") { type = NavType.LongType; defaultValue = -1L },
                 navArgument("anchorTime") { type = NavType.LongType; defaultValue = -1L },
-                navArgument("favoritesOnly") { type = NavType.BoolType; defaultValue = false }
+                // B8: BoolType cannot be nullable in Navigation Compose, so the route
+                // encodes the tri-state as an optional string ("true"/"false"/absent).
+                navArgument("favoritesOnly") { type = NavType.StringType; nullable = true }
             )
         ) { backStackEntry ->
             val epgCategoryId = backStackEntry.arguments?.getLong("categoryId")?.takeIf { it != -1L }
             val epgAnchorTime = backStackEntry.arguments?.getLong("anchorTime")?.takeIf { it != -1L }
-            val epgFavoritesOnly = backStackEntry.arguments?.getBoolean("favoritesOnly") ?: false
+            val epgFavoritesOnly = backStackEntry.arguments?.getString("favoritesOnly")
+                ?.toBooleanStrictOrNull()
             com.streamvault.app.ui.screens.epg.FullEpgScreen(
                 currentRoute = Routes.EPG,
                 initialCategoryId = epgCategoryId,

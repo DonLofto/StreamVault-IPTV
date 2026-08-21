@@ -229,6 +229,11 @@ fun PlayerTransparentGuideOverlay(
                             density = uiState.selectedDensity,
                             transparentOverlay = true,
                             initialFocusedChannelId = currentPlayerChannelId.takeIf { it > 0L },
+                            guideSessionKey = buildString {
+                                append(uiState.selectedCategoryId)
+                                append(':')
+                                append(uiState.combinedProfileId ?: "none")
+                            },
                             onChannelClick = { channel ->
                                 onWatchChannel(channel)
                                 onDismiss()

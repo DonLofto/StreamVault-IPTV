@@ -123,7 +123,6 @@ class SyncCatalogStoreTest {
         store().applyStagedMovieCatalog(providerId, sessionId, categories = null)
 
         verify(catalogSyncDao).updateChangedMoviesFromStage(providerId, sessionId)
-        verify(catalogSyncDao).rebuildMovieFts()
         verify(movieDao).restoreWatchProgress(providerId)
     }
 
@@ -134,21 +133,21 @@ class SyncCatalogStoreTest {
         store().applyStagedSeriesCatalog(providerId, sessionId, categories = null)
 
         verify(catalogSyncDao).updateChangedSeriesFromStage(providerId, sessionId)
-        verify(catalogSyncDao).rebuildSeriesFts()
     }
 
     @Test
-    fun `applyStagedLiveCatalog rebuilds channel fts inside transaction`() = runTest {
+    fun `applyStagedLiveCatalog runs apply inside transaction`() = runTest {
         val runner = TrackingTransactionRunner()
         doAnswer {
             assertThat(runner.isInTransaction).isTrue()
             Unit
-        }.whenever(catalogSyncDao).rebuildChannelFts()
+        }.whenever(catalogSyncDao).deleteStaleChannelsForStage(any(), any())
 
         store(transactionRunner = runner).applyStagedLiveCatalog(providerId = 7L, sessionId = 55L, categories = null)
 
         assertThat(runner.calls).isEqualTo(1)
-        verify(catalogSyncDao).rebuildChannelFts()
+        verify(catalogSyncDao).updateChangedChannelsFromStage(eq(7L), eq(55L))
+        verify(catalogSyncDao).deleteStaleChannelsForStage(eq(7L), eq(55L))
     }
 
     @Test
@@ -188,6 +187,7 @@ class SyncCatalogStoreTest {
         val providerId = 7L
         whenever(seriesDao.getByProviderSync(providerId)).thenReturn(emptyList())
         whenever(catalogSyncDao.getSeriesStages(eq(providerId), any())).thenReturn(emptyList())
+        whenever(catalogSyncDao.countSeriesStages(eq(providerId), any())).thenReturn(1)
 
         val acceptedCount = store().replaceSeriesCatalog(
             providerId = providerId,
@@ -498,7 +498,6 @@ class SyncCatalogStoreTest {
         val insertedChannels = argumentCaptor<List<ChannelImportStageEntity>>()
         verify(catalogSyncDao).insertChannelStages(insertedChannels.capture())
         assertThat(insertedChannels.firstValue.map { it.streamId }).containsExactly(1002L, 1003L).inOrder()
-        verify(catalogSyncDao).rebuildChannelFts()
     }
 
     @Test
@@ -506,6 +505,7 @@ class SyncCatalogStoreTest {
         val providerId = 11L
         whenever(movieDao.getByProviderSync(providerId)).thenReturn(emptyList())
         whenever(catalogSyncDao.getMovieStages(eq(providerId), any())).thenReturn(emptyList())
+        whenever(catalogSyncDao.countMovieStages(eq(providerId), any())).thenReturn(3)
 
         val limitedStore = store(CatalogSizeLimits(maxMoviesPerProvider = 2))
         val movies = sequenceOf(
@@ -517,27 +517,21 @@ class SyncCatalogStoreTest {
         val acceptedCount = limitedStore.replaceMovieCatalog(providerId, categories = null, movies = movies)
 
         assertThat(acceptedCount).isEqualTo(2)
+        // All 3 distinct rows are streamed into staging (bounded batches); the overflow
+        // is applied in SQL by trimming to the top `limit` by rating.
         val insertedMovies = argumentCaptor<List<MovieImportStageEntity>>()
         verify(catalogSyncDao).insertMovieStages(insertedMovies.capture())
-        assertThat(insertedMovies.firstValue.map { it.streamId }).containsExactly(2002L, 2003L).inOrder()
-        verify(catalogSyncDao).rebuildMovieFts()
+        assertThat(insertedMovies.firstValue.map { it.streamId }).containsExactly(2001L, 2002L, 2003L).inOrder()
+        verify(catalogSyncDao).deleteMovieStagesBeyondTop(eq(providerId), any(), eq(2))
     }
 
     @Test
-    fun `finalizeStagedImport rebuilds live and movie fts inside transaction`() = runTest {
+    fun `finalizeStagedImport applies live and movie catalogs inside transaction`() = runTest {
         val runner = TrackingTransactionRunner()
         whenever(categoryDao.getByProviderAndTypeSync(7L, ContentType.LIVE.name)).thenReturn(emptyList())
         whenever(categoryDao.getByProviderAndTypeSync(7L, ContentType.MOVIE.name)).thenReturn(emptyList())
         whenever(catalogSyncDao.getCategoryStages(eq(7L), any(), eq(ContentType.LIVE.name))).thenReturn(emptyList())
         whenever(catalogSyncDao.getCategoryStages(eq(7L), any(), eq(ContentType.MOVIE.name))).thenReturn(emptyList())
-        doAnswer {
-            assertThat(runner.isInTransaction).isTrue()
-            Unit
-        }.whenever(catalogSyncDao).rebuildChannelFts()
-        doAnswer {
-            assertThat(runner.isInTransaction).isTrue()
-            Unit
-        }.whenever(catalogSyncDao).rebuildMovieFts()
 
         store(transactionRunner = runner).finalizeStagedImport(
             providerId = 7L,
@@ -548,9 +542,10 @@ class SyncCatalogStoreTest {
             includeMovies = true
         )
 
-        verify(catalogSyncDao).rebuildChannelFts()
-        verify(catalogSyncDao).rebuildMovieFts()
+        verify(catalogSyncDao).deleteStaleChannelsForStage(eq(7L), eq(66L))
+        verify(catalogSyncDao).deleteStaleMoviesForStage(eq(7L), eq(66L))
         verify(movieDao).restoreWatchProgress(7L)
+        assertThat(runner.calls).isEqualTo(1)
     }
 
     private class TrackingTransactionRunner : DatabaseTransactionRunner {

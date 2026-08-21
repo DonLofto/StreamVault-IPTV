@@ -1118,7 +1118,10 @@ private fun PlayerVodInfo(
         add(PlayerActionSpec(stringResource(R.string.player_picture_in_picture), onEnterPictureInPicture))
         add(PlayerActionSpec(stringResource(R.string.player_aspect_ratio_label, aspectRatioLabel), onToggleAspectRatio))
     }
-    var sliderValue by remember(duration, currentPosition) {
+    // B13: keep slider state keyed only on duration, NOT currentPosition, so a playback
+    // position update mid-drag never resets the thumb. Position sync happens only when
+    // not scrubbing (see LaunchedEffect below); release commits the user's seek.
+    var sliderValue by remember(duration) {
         mutableStateOf(if (duration > 0) currentPosition.toFloat() / duration.toFloat() else 0f)
     }
     var isScrubbing by remember { mutableStateOf(false) }
@@ -1128,7 +1131,7 @@ private fun PlayerVodInfo(
 
     LaunchedEffect(duration, currentPosition, isScrubbing) {
         if (!isScrubbing) {
-            sliderValue = if (duration > 0) currentPosition.toFloat() / duration.toFloat() else 0f
+            sliderValue = syncSliderValue(currentPosition, duration)
         }
     }
 
@@ -1421,6 +1424,21 @@ private fun PlayerSeekPreviewCard(
             }
         }
     }
+}
+
+/**
+ * B13: slider sync helper. Returns the normalized playback position, or the current drag
+ * value unchanged while scrubbing so playback ticks never reset the thumb mid-drag.
+ */
+internal fun syncSliderValue(
+    currentPosition: Long,
+    duration: Long,
+    isScrubbing: Boolean = false,
+    currentDragValue: Float = 0f
+): Float = when {
+    isScrubbing -> currentDragValue
+    duration > 0 -> currentPosition.toFloat() / duration.toFloat()
+    else -> 0f
 }
 
 private fun formatPlaybackSpeedLabel(speed: Float): String {

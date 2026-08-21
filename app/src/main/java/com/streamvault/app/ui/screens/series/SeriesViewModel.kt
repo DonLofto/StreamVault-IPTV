@@ -380,23 +380,22 @@ class SeriesViewModel @Inject constructor(
         viewModelScope.launch {
             providerRepository.getActiveProvider()
                 .filterNotNull()
-                .collectLatest { provider ->
-                    launch {
-                        getContinueWatching(
-                            providerId = provider.id,
-                            limit = 20,
-                            scope = ContinueWatchingScope.SERIES
-                        )
-                            .collect { result ->
-                                _uiState.update {
-                                    it.copy(
-                                        continueWatching = when (result) {
-                                            is ContinueWatchingResult.Items -> result.items
-                                            ContinueWatchingResult.Degraded -> emptyList()
-                                        }
-                                    )
-                                }
+                .distinctUntilChangedBy { it.id }
+                .flatMapLatest { provider ->
+                    getContinueWatching(
+                        providerId = provider.id,
+                        limit = 20,
+                        scope = ContinueWatchingScope.SERIES
+                    )
+                }
+                .collect { result ->
+                    _uiState.update {
+                        it.copy(
+                            continueWatching = when (result) {
+                                is ContinueWatchingResult.Items -> result.items
+                                ContinueWatchingResult.Degraded -> emptyList()
                             }
+                        )
                     }
                 }
         }

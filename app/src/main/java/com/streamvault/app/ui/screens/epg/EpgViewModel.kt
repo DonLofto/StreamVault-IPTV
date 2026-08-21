@@ -316,6 +316,13 @@ class EpgViewModel @Inject constructor(
     private var previewPlaybackJob: Job? = null
     private var previewErrorJob: Job? = null
 
+    // B8: route-supplied guide fields win over restored preferences. Markers are set by
+    // applyNavigationContext and consulted by the asynchronous restore so a deep link
+    // (including explicit favoritesOnly=false) can never be overwritten by saved state.
+    private var navigationSuppliedCategoryId = false
+    private var navigationSuppliedAnchorTime = false
+    private var navigationSuppliedFavoritesOnly = false
+
     init {
         restoreGuidePreferences()
         observeGuideBase()
@@ -970,14 +977,19 @@ class EpgViewModel @Inject constructor(
         anchorTime: Long?,
         favoritesOnly: Boolean?
     ) {
+        // B8: track which fields the route supplied explicitly so the asynchronous
+        // preference restore cannot overwrite them after process death.
         categoryId?.let { requested ->
+            navigationSuppliedCategoryId = true
             startupCategoryId.value = null
             selectedCategoryId.value = requested
         }
         anchorTime?.takeIf { it > 0L }?.let { requested ->
+            navigationSuppliedAnchorTime = true
             guideAnchorTime.value = requested
         }
         favoritesOnly?.let { requested ->
+            navigationSuppliedFavoritesOnly = true
             showFavoritesOnly.value = requested
         }
     }
@@ -1486,12 +1498,19 @@ class EpgViewModel @Inject constructor(
                         selectedChannelMode.value = mode
                     }
                 }
-            startupCategoryId.value = preferencesRepository.guideDefaultCategoryId.first() ?: VirtualCategoryIds.FAVORITES
-            showFavoritesOnly.value = preferencesRepository.guideFavoritesOnly.first()
+            // B8: restored preferences fill only fields the navigation route did not supply.
+            if (!navigationSuppliedCategoryId) {
+                startupCategoryId.value = preferencesRepository.guideDefaultCategoryId.first() ?: VirtualCategoryIds.FAVORITES
+            }
+            if (!navigationSuppliedFavoritesOnly) {
+                showFavoritesOnly.value = preferencesRepository.guideFavoritesOnly.first()
+            }
             showScheduledOnly.value = preferencesRepository.guideScheduledOnly.first()
-            preferencesRepository.guideAnchorTime.first()
-                ?.takeIf { it > 0L }
-                ?.let { guideAnchorTime.value = it }
+            if (!navigationSuppliedAnchorTime) {
+                preferencesRepository.guideAnchorTime.first()
+                    ?.takeIf { it > 0L }
+                    ?.let { guideAnchorTime.value = it }
+            }
         }
     }
 

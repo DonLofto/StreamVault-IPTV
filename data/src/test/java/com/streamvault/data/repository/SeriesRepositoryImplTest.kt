@@ -13,6 +13,7 @@ import com.streamvault.data.local.dao.XtreamContentIndexDao
 import com.streamvault.data.local.dao.XtreamIndexJobDao
 import com.streamvault.data.local.entity.EpisodeBrowseEntity
 import com.streamvault.data.local.entity.EpisodeEntity
+import com.streamvault.data.local.entity.FavoriteEntity
 import com.streamvault.data.local.entity.SeriesEntity
 import com.streamvault.data.local.entity.SeriesBrowseEntity
 import com.streamvault.data.local.entity.ProviderEntity
@@ -984,6 +985,89 @@ class SeriesRepositoryImplTest {
         assertThat(result).hasSize(1)
         assertThat(result.single().selectedVariantId).isEqualTo(18L)
         assertThat(result.single().variants.map { it.rawSeriesId }).containsExactly(18L, 17L).inOrder()
+    }
+
+    @Test
+    fun `browseSeries favorites page after first 200 returns requested rows`() = runTest {
+        whenever(preferencesRepository.parentalControlLevel).thenReturn(flowOf(0))
+        whenever(preferencesRepository.xtreamBase64TextCompatibility).thenReturn(flowOf(false))
+        val favoriteRows = (1..220).map { index ->
+            SeriesBrowseEntity(
+                id = index.toLong(),
+                seriesId = index.toLong(),
+                name = "Favorite Series $index",
+                providerId = 7L
+            )
+        }
+        whenever(seriesDao.getFavoritesByProviderPage(eq(7L), any(), any())).thenAnswer { invocation ->
+            val limit = invocation.getArgument<Int>(1)
+            flowOf(favoriteRows.take(limit))
+        }
+        whenever(seriesDao.getFavoriteCountByProvider(7L)).thenReturn(flowOf(220))
+        whenever(favoriteDao.getAllByType(7L, ContentType.SERIES.name)).thenReturn(
+            flowOf((1..220).map { index ->
+                FavoriteEntity(
+                    id = index.toLong(),
+                    providerId = 7L,
+                    contentId = index.toLong(),
+                    contentType = ContentType.SERIES,
+                    position = index,
+                    addedAt = index.toLong()
+                )
+            })
+        )
+        whenever(playbackHistoryDao.getByProvider(7L)).thenReturn(flowOf(emptyList()))
+
+        val repository = createRepository()
+
+        val page = repository.browseSeries(
+            LibraryBrowseQuery(
+                providerId = 7L,
+                filterBy = LibraryFilterBy(LibraryFilterType.FAVORITES),
+                sortBy = LibrarySortBy.LIBRARY,
+                offset = 200,
+                limit = 20
+            )
+        ).first()
+
+        assertThat(page.items.map { it.id }).containsExactlyElementsIn((201L..220L).toList()).inOrder()
+        assertThat(page.totalCount).isEqualTo(220)
+    }
+
+    @Test
+    fun `browseSeries unwatched page after first 200 returns requested rows`() = runTest {
+        whenever(preferencesRepository.parentalControlLevel).thenReturn(flowOf(0))
+        whenever(preferencesRepository.xtreamBase64TextCompatibility).thenReturn(flowOf(false))
+        val unwatchedRows = (1..220).map { index ->
+            SeriesBrowseEntity(
+                id = index.toLong(),
+                seriesId = index.toLong(),
+                name = "Unwatched Series $index",
+                providerId = 7L
+            )
+        }
+        whenever(seriesDao.getUnwatchedByProviderPage(eq(7L), any(), any())).thenAnswer { invocation ->
+            val limit = invocation.getArgument<Int>(1)
+            flowOf(unwatchedRows.take(limit))
+        }
+        whenever(seriesDao.getUnwatchedCountByProvider(7L)).thenReturn(flowOf(220))
+        whenever(favoriteDao.getAllByType(7L, ContentType.SERIES.name)).thenReturn(flowOf(emptyList()))
+        whenever(playbackHistoryDao.getByProvider(7L)).thenReturn(flowOf(emptyList()))
+
+        val repository = createRepository()
+
+        val page = repository.browseSeries(
+            LibraryBrowseQuery(
+                providerId = 7L,
+                filterBy = LibraryFilterBy(LibraryFilterType.UNWATCHED),
+                sortBy = LibrarySortBy.LIBRARY,
+                offset = 200,
+                limit = 20
+            )
+        ).first()
+
+        assertThat(page.items.map { it.id }).containsExactlyElementsIn((201L..220L).toList()).inOrder()
+        assertThat(page.totalCount).isEqualTo(220)
     }
 
     private fun createRepository(

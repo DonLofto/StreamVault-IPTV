@@ -34,7 +34,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.InetSocketAddress
 import java.net.Proxy
-import java.util.concurrent.ConcurrentHashMap
 import okhttp3.OkHttpClient
 import javax.inject.Inject
 
@@ -47,7 +46,11 @@ class StreamVaultTvInputService : TvInputService() {
     @Inject
     lateinit var okHttpClient: OkHttpClient
 
-    private val playbackClients = ConcurrentHashMap<PlaybackClientKey, OkHttpClient>()
+    // B6: bounded LRU of per-proxy-config clients; cleared when the session releases.
+    private val playbackClients = object : java.util.LinkedHashMap<PlaybackClientKey, OkHttpClient>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<PlaybackClientKey, OkHttpClient>?): Boolean =
+            size > MAX_PLAYBACK_CLIENTS
+    }
 
     override fun onCreateSession(inputId: String): Session = StreamVaultSession(this)
 
@@ -67,10 +70,17 @@ class StreamVaultTvInputService : TvInputService() {
 
         private val mainHandler = Handler(Looper.getMainLooper())
 
+        // B6: monotonic tune generation. Only the tune with the latest generation may
+        // apply player state; older tunes that finish late are discarded.
+        private val tuneSequencer = TuneSequencer()
+        private var tuneJob: kotlinx.coroutines.Job? = null
+
         override fun onTune(channelUri: Uri): Boolean {
             notifyVideoUnavailable(TvInputManager.VIDEO_UNAVAILABLE_REASON_TUNING)
-            scope.launch {
-                tune(channelUri)
+            val generation = tuneSequencer.next()
+            tuneJob?.cancel()
+            tuneJob = scope.launch {
+                tune(channelUri, generation)
             }
             return true
         }
@@ -87,28 +97,39 @@ class StreamVaultTvInputService : TvInputService() {
         override fun onSetCaptionEnabled(enabled: Boolean) = Unit
 
         override fun onRelease() {
+            tuneJob?.cancel()
             scope.cancel()
             player.release()
+            playbackClients.clear()
         }
 
-        private suspend fun tune(channelUri: Uri) {
+        private suspend fun tune(channelUri: Uri, generation: Long) {
             val channelRef = withContext(Dispatchers.IO) { loadChannelRef(channelUri) }
             if (channelRef == null) {
-                notifyVideoUnavailable(TvInputManager.VIDEO_UNAVAILABLE_REASON_UNKNOWN)
+                if (tuneSequencer.isCurrent(generation)) {
+                    notifyVideoUnavailable(TvInputManager.VIDEO_UNAVAILABLE_REASON_UNKNOWN)
+                }
                 return
             }
 
             val channel = channelRepository.getChannel(channelRef.channelId)
             if (channel == null) {
-                notifyVideoUnavailable(TvInputManager.VIDEO_UNAVAILABLE_REASON_UNKNOWN)
+                if (tuneSequencer.isCurrent(generation)) {
+                    notifyVideoUnavailable(TvInputManager.VIDEO_UNAVAILABLE_REASON_UNKNOWN)
+                }
                 return
             }
 
             val streamInfo = channelRepository.getStreamInfo(channel).getOrNull()
             if (streamInfo == null) {
-                notifyVideoUnavailable(TvInputManager.VIDEO_UNAVAILABLE_REASON_UNKNOWN)
+                if (tuneSequencer.isCurrent(generation)) {
+                    notifyVideoUnavailable(TvInputManager.VIDEO_UNAVAILABLE_REASON_UNKNOWN)
+                }
                 return
             }
+
+            // B6: an older tune that resolves after a newer one must not apply player state.
+            if (!tuneSequencer.isCurrent(generation)) return
 
             notifyContentAllowed()
             notifyChannelRetuned(channelUri)
@@ -221,5 +242,6 @@ class StreamVaultTvInputService : TvInputService() {
         const val DEFAULT_USER_AGENT = "StreamVaultTvInput"
         const val CHANNEL_COLUMN_INTERNAL_PROVIDER_DATA = "internal_provider_data"
         const val ENTRY_SEPARATOR = ":"
+        const val MAX_PLAYBACK_CLIENTS = 4
     }
 }

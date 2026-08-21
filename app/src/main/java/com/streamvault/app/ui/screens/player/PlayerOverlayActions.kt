@@ -74,6 +74,13 @@ fun PlayerViewModel.closeFullGuideOverlay() {
     playerEngine.setScrubbingMode(false)
 }
 
+/** B10: restore the transport controls after the transparent guide is dismissed. */
+fun PlayerViewModel.showControlsForFullGuideClose() {
+    showFullGuideOverlayFlow.value = false
+    showControlsFlow.value = true
+    playerEngine.setScrubbingMode(false)
+}
+
 fun PlayerViewModel.playChannelFromGuideOverlay(
     channel: Channel,
     selectedGuideCategoryId: Long,

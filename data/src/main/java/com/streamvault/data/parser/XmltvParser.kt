@@ -230,6 +230,7 @@ class XmltvParser {
     suspend fun parseStreaming(
         inputStream: InputStream,
         timezoneId: String? = null,
+        maxProgrammes: Int = Int.MAX_VALUE,
         onProgram: suspend (Program) -> Unit
     ) {
         val parser = newPullParser(inputStream)
@@ -256,6 +257,9 @@ class XmltvParser {
                     XmlPullParser.START_TAG -> {
                         when (parser.name) {
                             "programme" -> {
+                                if (parsedCount >= maxProgrammes) {
+                                    throw EpgInputLimitException("EPG programme count exceeds limit")
+                                }
                                 inProgramme = true
                                 currentChannelId = parser.getAttributeValue(null, "channel")
                                 currentStart = parseDate(parser.getAttributeValue(null, "start"), parsingZoneId)
@@ -349,6 +353,7 @@ class XmltvParser {
     suspend fun parseStreamingWithChannels(
         inputStream: InputStream,
         timezoneId: String? = null,
+        maxProgrammes: Int = Int.MAX_VALUE,
         onChannel: suspend (XmltvChannel) -> Unit,
         onProgramme: suspend (XmltvProgramme) -> Unit
     ) {
@@ -402,6 +407,9 @@ class XmltvParser {
                                 }
                             }
                             "programme" -> {
+                                if (programmeCount >= maxProgrammes) {
+                                    throw EpgInputLimitException("EPG programme count exceeds limit")
+                                }
                                 inProgramme = true
                                 currentChannelId = parser.getAttributeValue(null, "channel")
                                 currentStart = parseDate(parser.getAttributeValue(null, "start"), parsingZoneId)

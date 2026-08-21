@@ -6,8 +6,12 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.TransferListener
+import androidx.media3.datasource.cache.CacheDataSource
 import com.streamvault.domain.model.VodHttpProtocolMode
 import com.streamvault.domain.model.StreamInfo
+import com.streamvault.player.cache.PlaybackCacheManager
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.URI
@@ -20,10 +24,21 @@ import okhttp3.Protocol
 internal fun shouldUsePlatformHttpDataSource(resolvedStreamType: ResolvedStreamType): Boolean =
     false
 
+// M3: read-stats instrumentation is opt-in; the default build does not pay per-read
+// bookkeeping or URL sanitization on the playback path.
+internal const val PLAYER_READ_DIAGNOSTICS_DEFAULT = false
+
+internal fun readStatsWrappingEnabled(
+    readDiagnosticsEnabled: Boolean,
+    resolvedStreamType: ResolvedStreamType
+): Boolean = readDiagnosticsEnabled && shouldWrapDataSourceReadStats(resolvedStreamType)
+
 @UnstableApi
 class PlayerDataSourceFactoryProvider(
     private val context: Context,
-    private val baseClient: OkHttpClient
+    private val baseClient: OkHttpClient,
+    private val readDiagnosticsEnabled: Boolean = PLAYER_READ_DIAGNOSTICS_DEFAULT,
+    val cacheManager: PlaybackCacheManager? = null
 ) {
     private companion object {
         private const val TAG = "PlayerDataSource"
@@ -74,6 +89,18 @@ class PlayerDataSourceFactoryProvider(
             }
             builder
                 .addInterceptor(StalkerPlaybackRequestLoggingInterceptor)
+                // Some IPTV edges (Cloudflare-protected origins) answer 407 Proxy
+                // Authentication Required to requests carrying Accept-Encoding: gzip.
+                // Pinning identity prevents OkHttp's transparent gzip from adding the
+                // header, matching what AVFoundation/VLC-style clients send.
+                .addInterceptor { chain ->
+                    val request = chain.request()
+                    if (request.header("Accept-Encoding") == null) {
+                        chain.proceed(request.newBuilder().header("Accept-Encoding", "identity").build())
+                    } else {
+                        chain.proceed(request)
+                    }
+                }
                 .connectTimeout(profile.connectTimeoutMs, TimeUnit.MILLISECONDS)
                 .readTimeout(profile.readTimeoutMs, TimeUnit.MILLISECONDS)
                 .writeTimeout(profile.writeTimeoutMs, TimeUnit.MILLISECONDS)
@@ -96,14 +123,32 @@ class PlayerDataSourceFactoryProvider(
             }
         }
         val defaultFactory = DefaultDataSource.Factory(context, upstreamFactory)
-        val factory = if (shouldWrapDataSourceReadStats(resolvedStreamType)) {
+        val mediaFactory = if (cacheManager != null) {
+            val cache = cacheManager.getCache()
+            val cacheDataSourceFactory = CacheDataSource.Factory()
+                .setCache(cache)
+                .setUpstreamDataSourceFactory(defaultFactory)
+                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+            DataSource.Factory {
+                LivePlaylistBypassDataSource(
+                    cacheDataSource = cacheDataSourceFactory.createDataSource(),
+                    upstreamDataSource = defaultFactory.createDataSource()
+                )
+            }
+        } else {
+            defaultFactory
+        }
+        // M3: read-stats wrapping is opt-in via an explicit diagnostics session. When
+        // disabled, HLS/MPEG-TS sources go straight to the upstream factory with no
+        // per-read bookkeeping or URL sanitization on the playback path.
+        val factory = if (readStatsWrappingEnabled(readDiagnosticsEnabled, resolvedStreamType)) {
             PlayerDataSourceReadStatsFactory(
-                upstream = defaultFactory,
+                upstream = mediaFactory,
                 resolvedStreamType = resolvedStreamType,
                 initialTargetUrl = streamInfo.url
             )
         } else {
-            defaultFactory
+            mediaFactory
         }
         return profile to factory
     }
@@ -169,24 +214,28 @@ private object StalkerPlaybackRequestLoggingInterceptor : Interceptor {
 
     override fun intercept(chain: Interceptor.Chain): okhttp3.Response {
         val request = chain.request()
-        if (!request.hasStalkerPlaybackShape()) {
-            return chain.proceed(request)
+        // Debug aid: log every playback request header set (not just stalker-shaped ones),
+        // so Xtream/M3U TS and HLS requests are visible in logcat for 407/403 diagnosis.
+        val shouldLog = request.hasStalkerPlaybackShape() || request.url.toString().contains("/live/")
+        if (shouldLog) {
+            Log.d(
+                TAG,
+                "Playback request actual method=${request.method} target=${PlaybackLogSanitizer.sanitizeUrl(request.url.toString())} " +
+                    "ua=${request.header("User-Agent") != null} referer=${request.header("Referer") != null} " +
+                    "cookie=${request.header("Cookie") != null} auth=${request.header("Authorization") != null} " +
+                    "xua=${request.header("X-User-Agent") != null} range=${request.header("Range") != null} " +
+                    "acceptEncoding=${request.header("Accept-Encoding")?.take(24).orEmpty()} cookieKeys=${request.cookieKeySummary()}"
+            )
         }
-        Log.d(
-            TAG,
-            "Playback request actual method=${request.method} target=${PlaybackLogSanitizer.sanitizeUrl(request.url.toString())} " +
-                "ua=${request.header("User-Agent") != null} referer=${request.header("Referer") != null} " +
-                "cookie=${request.header("Cookie") != null} auth=${request.header("Authorization") != null} " +
-                "xua=${request.header("X-User-Agent") != null} range=${request.header("Range") != null} " +
-                "acceptEncoding=${request.header("Accept-Encoding")?.take(24).orEmpty()} cookieKeys=${request.cookieKeySummary()}"
-        )
         val response = chain.proceed(request)
-        Log.d(
-            TAG,
-            "Playback response actual target=${PlaybackLogSanitizer.sanitizeUrl(request.url.toString())} " +
-                "code=${response.code} length=${response.header("Content-Length").orEmpty()} " +
-                "type=${response.header("Content-Type").orEmpty()}"
-        )
+        if (shouldLog) {
+            Log.d(
+                TAG,
+                "Playback response actual target=${PlaybackLogSanitizer.sanitizeUrl(request.url.toString())} " +
+                    "code=${response.code} length=${response.header("Content-Length").orEmpty()} " +
+                    "type=${response.header("Content-Type").orEmpty()}"
+            )
+        }
         return response
     }
 
@@ -207,3 +256,38 @@ private object StalkerPlaybackRequestLoggingInterceptor : Interceptor {
             .joinToString("|")
     }
 }
+
+@UnstableApi
+internal class LivePlaylistBypassDataSource(
+    private val cacheDataSource: DataSource,
+    private val upstreamDataSource: DataSource
+) : DataSource {
+    private var activeDataSource: DataSource = cacheDataSource
+
+    override fun addTransferListener(transferListener: TransferListener) {
+        cacheDataSource.addTransferListener(transferListener)
+        upstreamDataSource.addTransferListener(transferListener)
+    }
+
+    override fun open(dataSpec: DataSpec): Long {
+        val path = dataSpec.uri.path.orEmpty().lowercase()
+        activeDataSource = if (path.endsWith(".m3u8") || path.endsWith(".mpd")) {
+            upstreamDataSource
+        } else {
+            cacheDataSource
+        }
+        return activeDataSource.open(dataSpec)
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
+        activeDataSource.read(buffer, offset, length)
+
+    override fun getUri(): android.net.Uri? = activeDataSource.uri
+
+    override fun getResponseHeaders(): Map<String, List<String>> = activeDataSource.responseHeaders
+
+    override fun close() {
+        activeDataSource.close()
+    }
+}
+

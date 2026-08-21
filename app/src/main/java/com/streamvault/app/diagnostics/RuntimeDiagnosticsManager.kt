@@ -29,8 +29,9 @@ class RuntimeDiagnosticsManager(
     private val activityManager = application.getSystemService(ActivityManager::class.java)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val formatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
+    private val rotation = DiagnosticLogRotation()
     private val outputFile by lazy {
-        File(application.filesDir, "diagnostics/runtime-memory.log").also { file ->
+        File(application.filesDir, "diagnostics/${DiagnosticLogRotation.PREFIX}").also { file ->
             file.parentFile?.mkdirs()
         }
     }
@@ -118,7 +119,8 @@ class RuntimeDiagnosticsManager(
         scope.launch(Dispatchers.IO) {
             val snapshot = captureSnapshot(reason)
             runCatching {
-                outputFile.appendText(snapshot + System.lineSeparator())
+                // L2: bounded append with byte rotation — the log can never grow unbounded.
+                rotation.append(outputFile, snapshot)
             }.onFailure { error ->
                 Log.w(TAG, "Failed to append runtime diagnostics snapshot: ${error.message}")
             }
