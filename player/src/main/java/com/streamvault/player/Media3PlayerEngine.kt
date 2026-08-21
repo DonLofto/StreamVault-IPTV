@@ -63,6 +63,7 @@ import com.streamvault.player.playback.PlaybackLogSanitizer
 import com.streamvault.player.playback.PlaybackPreparationPlan
 import com.streamvault.player.playback.PlaybackExtensionRendererMode
 import com.streamvault.player.playback.PlaybackRetryContext
+import com.streamvault.player.cache.PlaybackCacheManager
 import com.streamvault.player.playback.PlayerDataSourceFactoryProvider
 import com.streamvault.player.playback.PlayerErrorClassifier
 import com.streamvault.player.playback.PlayerMediaSourceFactory
@@ -319,7 +320,8 @@ class Media3PlayerEngine @Inject constructor(
     ).also {
         it.bind { exoPlayer }
     }
-    private val dataSourceFactoryProvider = PlayerDataSourceFactoryProvider(context, okHttpClient)
+    private val playbackCacheManager = PlaybackCacheManager(context)
+    private val dataSourceFactoryProvider = PlayerDataSourceFactoryProvider(context, okHttpClient, cacheManager = playbackCacheManager)
     private val mediaSourceFactory = PlayerMediaSourceFactory(dataSourceFactoryProvider)
     private val preloadCoordinator = PreloadCoordinator()
     private val compatibilityProfile: PlaybackCompatibilityProfile = DefaultPlaybackCompatibilityProfile

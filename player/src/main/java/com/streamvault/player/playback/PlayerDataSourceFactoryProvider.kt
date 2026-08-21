@@ -6,8 +6,12 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.TransferListener
+import androidx.media3.datasource.cache.CacheDataSource
 import com.streamvault.domain.model.VodHttpProtocolMode
 import com.streamvault.domain.model.StreamInfo
+import com.streamvault.player.cache.PlaybackCacheManager
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.URI
@@ -33,7 +37,8 @@ internal fun readStatsWrappingEnabled(
 class PlayerDataSourceFactoryProvider(
     private val context: Context,
     private val baseClient: OkHttpClient,
-    private val readDiagnosticsEnabled: Boolean = PLAYER_READ_DIAGNOSTICS_DEFAULT
+    private val readDiagnosticsEnabled: Boolean = PLAYER_READ_DIAGNOSTICS_DEFAULT,
+    val cacheManager: PlaybackCacheManager? = null
 ) {
     private companion object {
         private const val TAG = "PlayerDataSource"
@@ -118,17 +123,32 @@ class PlayerDataSourceFactoryProvider(
             }
         }
         val defaultFactory = DefaultDataSource.Factory(context, upstreamFactory)
+        val mediaFactory = if (cacheManager != null) {
+            val cache = cacheManager.getCache()
+            val cacheDataSourceFactory = CacheDataSource.Factory()
+                .setCache(cache)
+                .setUpstreamDataSourceFactory(defaultFactory)
+                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+            DataSource.Factory {
+                LivePlaylistBypassDataSource(
+                    cacheDataSource = cacheDataSourceFactory.createDataSource(),
+                    upstreamDataSource = defaultFactory.createDataSource()
+                )
+            }
+        } else {
+            defaultFactory
+        }
         // M3: read-stats wrapping is opt-in via an explicit diagnostics session. When
         // disabled, HLS/MPEG-TS sources go straight to the upstream factory with no
         // per-read bookkeeping or URL sanitization on the playback path.
         val factory = if (readStatsWrappingEnabled(readDiagnosticsEnabled, resolvedStreamType)) {
             PlayerDataSourceReadStatsFactory(
-                upstream = defaultFactory,
+                upstream = mediaFactory,
                 resolvedStreamType = resolvedStreamType,
                 initialTargetUrl = streamInfo.url
             )
         } else {
-            defaultFactory
+            mediaFactory
         }
         return profile to factory
     }
@@ -236,3 +256,38 @@ private object StalkerPlaybackRequestLoggingInterceptor : Interceptor {
             .joinToString("|")
     }
 }
+
+@UnstableApi
+internal class LivePlaylistBypassDataSource(
+    private val cacheDataSource: DataSource,
+    private val upstreamDataSource: DataSource
+) : DataSource {
+    private var activeDataSource: DataSource = cacheDataSource
+
+    override fun addTransferListener(transferListener: TransferListener) {
+        cacheDataSource.addTransferListener(transferListener)
+        upstreamDataSource.addTransferListener(transferListener)
+    }
+
+    override fun open(dataSpec: DataSpec): Long {
+        val path = dataSpec.uri.path.orEmpty().lowercase()
+        activeDataSource = if (path.endsWith(".m3u8") || path.endsWith(".mpd")) {
+            upstreamDataSource
+        } else {
+            cacheDataSource
+        }
+        return activeDataSource.open(dataSpec)
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
+        activeDataSource.read(buffer, offset, length)
+
+    override fun getUri(): android.net.Uri? = activeDataSource.uri
+
+    override fun getResponseHeaders(): Map<String, List<String>> = activeDataSource.responseHeaders
+
+    override fun close() {
+        activeDataSource.close()
+    }
+}
+
