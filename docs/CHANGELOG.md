@@ -1,6 +1,37 @@
-﻿# Changelog
+# Changelog
 
 All notable product changes are recorded in this document.
+
+## [1.0.17] - 2026-08-09
+
+### Fixed
+
+- Fixed DASH timeshift rolling buffer pruning by isolating initialization segments from the media segment queue, preventing unbounded storage/memory growth on live DASH streams.
+- Fixed timeshift cancellation and reset state transitions so stopped or replaced capture jobs no longer emit stale `FAILED` status updates.
+- Fixed movie and series library pagination beyond offset 200 by correctly forwarding pagination offset parameters to filtered DAO queries.
+- Fixed EPG reactive updates for lineups with over 500 channels by combining chunked observation flows into a unified reactive stream.
+- Fixed stream format inference for live URLs with query string tokens by evaluating the clean URI path.
+- Fixed TV Input Framework (TIF) tuning race conditions by deterministically canceling previous asynchronous tune tasks.
+- Fixed EPG grid pagination resetting focus and scroll position to the first channel upon appending additional channels.
+- Fixed EPG deep link navigation argument precedence over asynchronously restored guide DataStore preferences.
+- Fixed movie and series continue-watching flow leaks across provider switches using `flatMapLatest`.
+- Fixed player DPAD Up/Down navigation while control chrome is visible so remote navigation moves focus through visible controls instead of triggering immediate channel zapping.
+- Fixed software decoder error recovery by activating managed `MediaCodecSelector` when falling back to software decoders.
+- Fixed VOD seek bar drag state resetting when player position StateFlow emits updates.
+- Fixed external backup import on the main thread during app launch by moving file operations to background I/O with progress indication.
+- Fixed duplicate FTS4 rebuild triggers during large catalog synchronization, reducing database write amplification and WAL growth.
+- Fixed XMLTV decompression memory usage by enforcing decompressed-byte quotas and storage-not-low admission gates.
+- Fixed playback network contention by introducing priority-aware network admission for player requests.
+- Fixed Cloudflare IPTV origin 407 Proxy Authentication errors by setting `Accept-Encoding: identity` for live stream requests.
+
+### Added
+
+- Added full transparent guide overlay integration in the live player with direct DPAD activation.
+- Added composite database indexes `(provider_id, number)` and `(provider_id, category_id, number)` for accelerated channel browsing.
+- Added coordinated multi-subsystem storage cache budgeting across timeshift, HTTP response cache, and image caches.
+- Added shared Media3 `SimpleCache` and `CacheDataSource` between ExoPlayer and `LiveTimeshiftManager` to eliminate duplicate network bandwidth consumption during live rewind capture.
+- Added single-worker coalesced seek thumbnail generation with byte-capped LRU bitmap caching.
+- Added bounded rolling ring-buffer logs for debug runtime diagnostics.
 
 ## [1.0.16] - 2026-06-19
 

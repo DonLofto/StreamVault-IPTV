@@ -83,3 +83,9 @@ final_narrow_*.log
 gradle_*_test*.log
 gradle_*_rerun.log
 .worktrees/
+.serena/
+.superpowers/
+*.apk
+*.idsig
+HANDOFF.md
+MEMORY.md
