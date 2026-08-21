@@ -277,8 +277,9 @@ class Media3PlayerEngine @Inject constructor(
     private val _renderSurfaceType = MutableStateFlow(PlayerRenderSurfaceType.SURFACE_VIEW)
     override val renderSurfaceType: StateFlow<PlayerRenderSurfaceType> = _renderSurfaceType.asStateFlow()
 
+    private val playbackCacheManager = PlaybackCacheManager(context)
     private val timeshiftPlaybackGate = LiveTimeshiftPlaybackGate()
-    private val liveTimeshiftManager = DefaultLiveTimeshiftManager(context, okHttpClient, timeshiftPlaybackGate, appCacheQuota)
+    private val liveTimeshiftManager = DefaultLiveTimeshiftManager(context, okHttpClient, timeshiftPlaybackGate, appCacheQuota, playbackCacheManager = playbackCacheManager)
     private val _timeshiftState = MutableStateFlow(LiveTimeshiftState())
     override val timeshiftState: StateFlow<LiveTimeshiftState> = _timeshiftState.asStateFlow()
 
@@ -320,7 +321,6 @@ class Media3PlayerEngine @Inject constructor(
     ).also {
         it.bind { exoPlayer }
     }
-    private val playbackCacheManager = PlaybackCacheManager(context)
     private val dataSourceFactoryProvider = PlayerDataSourceFactoryProvider(context, okHttpClient, cacheManager = playbackCacheManager)
     private val mediaSourceFactory = PlayerMediaSourceFactory(dataSourceFactoryProvider)
     private val preloadCoordinator = PreloadCoordinator()

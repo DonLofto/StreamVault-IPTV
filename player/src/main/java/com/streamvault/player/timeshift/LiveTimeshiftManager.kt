@@ -3,11 +3,20 @@ package com.streamvault.player.timeshift
 import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.res.Configuration
+import android.net.Uri
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSourceInputStream
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import com.streamvault.domain.model.TimeshiftBackendPreference
 import com.streamvault.domain.model.StreamInfo
 import com.streamvault.domain.model.StreamType
 import com.streamvault.player.cache.AppCacheQuota
+import com.streamvault.player.cache.PlaybackCacheManager
 import com.streamvault.player.playback.applyUnsafeTlsBypass
+import com.streamvault.player.playback.effectivePlaybackRequestProperties
 import com.streamvault.player.playback.LiveTimeshiftPlaybackGate
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.ByteArrayOutputStream
@@ -101,12 +110,14 @@ internal fun inferTimeshiftStreamType(url: String): StreamType {
 internal fun shouldPublishCaptureFailure(isActive: Boolean, throwable: Throwable): Boolean =
     isActive && throwable !is CancellationException
 
+@OptIn(UnstableApi::class)
 @Singleton
 internal class DefaultLiveTimeshiftManager @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val okHttpClient: OkHttpClient,
     private val playbackGate: LiveTimeshiftPlaybackGate = LiveTimeshiftPlaybackGate(),
-    private val appCacheQuota: AppCacheQuota
+    private val appCacheQuota: AppCacheQuota,
+    private val playbackCacheManager: PlaybackCacheManager? = null
 ) : LiveTimeshiftManager, ComponentCallbacks2 {
     private val unsafeOkHttpClient: OkHttpClient by lazy {
         okHttpClient.newBuilder()
@@ -441,6 +452,76 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             }
         }
 
+        protected fun streamSegmentToDisk(url: String, target: File) {
+            val cacheManager = playbackCacheManager
+            if (cacheManager != null) {
+                try {
+                    val cache = cacheManager.getCache()
+                    val client = httpClientFor(streamInfo)
+                    val upstreamFactory = OkHttpDataSource.Factory(client).apply {
+                        val headers = effectivePlaybackRequestProperties(
+                            headers = streamInfo.headers,
+                            userAgent = streamInfo.userAgent
+                        )
+                        if (headers.isNotEmpty()) {
+                            setDefaultRequestProperties(headers)
+                        }
+                    }
+                    val cacheDataSource = CacheDataSource.Factory()
+                        .setCache(cache)
+                        .setUpstreamDataSourceFactory(upstreamFactory)
+                        .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+                        .createDataSource()
+                    val dataSpec = DataSpec(Uri.parse(url))
+                    DataSourceInputStream(cacheDataSource, dataSpec).use { input ->
+                        target.outputStream().use { output ->
+                            input.copyTo(output, bufferSize = PROGRESSIVE_READ_BUFFER_SIZE)
+                        }
+                    }
+                    return
+                } catch (t: Throwable) {
+                    if (t is CancellationException) throw t
+                }
+            }
+            executeRequest(makeRequest(url)) { response ->
+                if (!response.isSuccessful) throw IOException("Timeshift segment failed with HTTP ${response.code}")
+                val body = response.body ?: throw IOException("Timeshift segment returned an empty body")
+                body.byteStream().use { input -> target.outputStream().use { output -> input.copyTo(output, bufferSize = PROGRESSIVE_READ_BUFFER_SIZE) } }
+            }
+        }
+
+        protected fun fetchBytes(url: String): ByteArray {
+            val cacheManager = playbackCacheManager
+            if (cacheManager != null) {
+                try {
+                    val cache = cacheManager.getCache()
+                    val client = httpClientFor(streamInfo)
+                    val upstreamFactory = OkHttpDataSource.Factory(client).apply {
+                        val headers = effectivePlaybackRequestProperties(
+                            headers = streamInfo.headers,
+                            userAgent = streamInfo.userAgent
+                        )
+                        if (headers.isNotEmpty()) {
+                            setDefaultRequestProperties(headers)
+                        }
+                    }
+                    val cacheDataSource = CacheDataSource.Factory()
+                        .setCache(cache)
+                        .setUpstreamDataSourceFactory(upstreamFactory)
+                        .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+                        .createDataSource()
+                    val dataSpec = DataSpec(Uri.parse(url))
+                    return DataSourceInputStream(cacheDataSource, dataSpec).use { it.readBytes() }
+                } catch (t: Throwable) {
+                    if (t is CancellationException) throw t
+                }
+            }
+            return executeRequest(makeRequest(url)) { response ->
+                if (!response.isSuccessful) throw IOException("Timeshift segment failed with HTTP ${response.code}")
+                response.body?.bytes() ?: ByteArray(0)
+            }
+        }
+
         protected fun updateWindow(windowDurationMs: Long, message: String? = null) {
             val now = System.currentTimeMillis()
             _state.value = _state.value.copy(
@@ -729,14 +810,6 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             }
         }
 
-        private fun streamSegmentToDisk(url: String, target: File) {
-            executeRequest(makeRequest(url)) { response ->
-                if (!response.isSuccessful) throw IOException("Timeshift segment failed with HTTP ${response.code}")
-                val body = response.body ?: throw IOException("Timeshift segment returned an empty body")
-                body.byteStream().use { input -> target.outputStream().use { output -> input.copyTo(output, bufferSize = PROGRESSIVE_READ_BUFFER_SIZE) } }
-            }
-        }
-
         private fun pruneHlsSegmentsLocked() {
             while (runningSegmentDurationMs > effectiveDepthMs && segments.isNotEmpty()) {
                 val removed = segments.removeFirst()
@@ -749,13 +822,6 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             return executeRequest(makeRequest(url)) { response ->
                 if (!response.isSuccessful) throw IOException("Timeshift playlist failed with HTTP ${response.code}")
                 response.body?.string().orEmpty()
-            }
-        }
-
-        private fun fetchBytes(url: String): ByteArray {
-            return executeRequest(makeRequest(url)) { response ->
-                if (!response.isSuccessful) throw IOException("Timeshift segment failed with HTTP ${response.code}")
-                response.body?.bytes() ?: ByteArray(0)
             }
         }
 
@@ -1026,25 +1092,10 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             }
         }
 
-        private fun streamSegmentToDisk(url: String, target: File) {
-            executeRequest(makeRequest(url)) { response ->
-                if (!response.isSuccessful) throw IOException("DASH segment fetch failed: HTTP ${response.code}")
-                val body = response.body ?: throw IOException("DASH segment returned empty body")
-                body.byteStream().use { input -> target.outputStream().use { out -> input.copyTo(out, bufferSize = PROGRESSIVE_READ_BUFFER_SIZE) } }
-            }
-        }
-
         private fun fetchText(url: String): String {
             return executeRequest(makeRequest(url)) { response ->
                 if (!response.isSuccessful) throw IOException("MPD fetch failed: HTTP ${response.code}")
                 response.body?.string().orEmpty()
-            }
-        }
-
-        private fun fetchBytes(url: String): ByteArray {
-            return executeRequest(makeRequest(url)) { response ->
-                if (!response.isSuccessful) throw IOException("DASH segment fetch failed: HTTP ${response.code}")
-                response.body?.bytes() ?: ByteArray(0)
             }
         }
 
