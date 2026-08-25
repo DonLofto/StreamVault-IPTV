@@ -14,6 +14,13 @@ import com.streamvault.app.tvinput.TvInputChannelSyncManager
 import com.streamvault.app.ui.model.LiveTvChannelMode
 import com.streamvault.app.ui.model.LiveTvQuickFilterVisibilityMode
 import com.streamvault.app.ui.model.VodViewMode
+import com.streamvault.domain.trakt.TraktAuthState
+import com.streamvault.domain.trakt.TraktRepository
+import com.streamvault.domain.vpn.VpnConfig
+import com.streamvault.domain.vpn.VpnRepository
+import com.streamvault.domain.vpn.VpnStatus
+import com.streamvault.domain.stremio.StremioManifest
+import com.streamvault.domain.stremio.StremioRepository
 import com.streamvault.app.update.AppUpdateInstaller
 import com.streamvault.app.update.GitHubReleaseChecker
 import com.streamvault.app.update.isRemoteVersionNewer
@@ -124,7 +131,11 @@ class SettingsViewModel @Inject constructor(
     private val gitHubReleaseChecker: GitHubReleaseChecker,
     private val appUpdateInstaller: AppUpdateInstaller,
     private val getCustomCategories: GetCustomCategories,
-    private val audioCompatibilityMemoryStore: AudioCompatibilityMemoryStore
+    private val audioCompatibilityMemoryStore: AudioCompatibilityMemoryStore,
+    private val traktRepository: TraktRepository,
+    private val vpnRepository: VpnRepository,
+    private val stremioRepository: StremioRepository,
+    private val databaseMaintenanceManager: com.streamvault.data.sync.DatabaseMaintenanceManager
 ) : ViewModel() {
     private val appContext = application
     private val exportBackup = ExportBackup(backupManager)
@@ -138,6 +149,22 @@ class SettingsViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = LiveStreamFormatMode.AUTO
         )
+
+    val traktAuthState: StateFlow<TraktAuthState> = traktRepository.authState
+
+    val vpnStatus: StateFlow<VpnStatus> = vpnRepository.status
+
+    val vpnProfiles: StateFlow<List<VpnConfig>> = vpnRepository.getProfiles().stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = emptyList()
+    )
+
+    val stremioAddons: StateFlow<List<StremioManifest>> = stremioRepository.getInstalledAddons().stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = emptyList()
+    )
     private val activeProviderIdFlow = providerRepository.getActiveProvider().map { it?.id }
     private val appUpdateActions = SettingsAppUpdateActions(
         appContext = application,
@@ -703,6 +730,12 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun setMaxConcurrentStreams(count: Int) {
+        viewModelScope.launch {
+            preferencesRepository.setMaxConcurrentStreams(count)
+        }
+    }
+
     fun unhideCategory(category: Category) {
         val providerId = _uiState.value.activeProviderId ?: return
         viewModelScope.launch {
@@ -749,6 +782,100 @@ class SettingsViewModel @Inject constructor(
     fun setMultiViewRespectProviderConnectionLimit(enabled: Boolean) {
         viewModelScope.launch {
             preferencesRepository.setMultiViewRespectProviderConnectionLimit(enabled)
+        }
+    }
+
+    fun setMultiViewPerformanceMode(mode: String) {
+        viewModelScope.launch {
+            preferencesRepository.setMultiViewPerformanceMode(mode)
+        }
+    }
+
+    fun setGuideDensity(density: String) {
+        viewModelScope.launch {
+            preferencesRepository.setGuideDensity(density)
+        }
+    }
+
+    fun setGuideChannelMode(mode: String) {
+        viewModelScope.launch {
+            preferencesRepository.setGuideChannelMode(mode)
+        }
+    }
+
+    fun runDatabaseMaintenance() {
+        if (_uiState.value.isRunningDatabaseMaintenance) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isRunningDatabaseMaintenance = true) }
+            try {
+                val report = databaseMaintenanceManager.runDailyMaintenance()
+                val snapshot = com.streamvault.data.preferences.DatabaseMaintenanceSnapshot(
+                    ranAt = System.currentTimeMillis(),
+                    deletedPrograms = report.deletedPrograms,
+                    deletedExternalProgrammes = report.deletedExternalProgrammes,
+                    deletedOrphanEpisodes = report.deletedOrphanEpisodes,
+                    deletedStaleFavorites = report.deletedStaleFavorites,
+                    vacuumRan = report.vacuumRan,
+                    mainDbBytes = report.statsAfterVacuum.mainDbBytes,
+                    walBytes = report.statsAfterVacuum.walBytes,
+                    reclaimableBytes = (report.statsBeforeVacuum.mainDbBytes + report.statsBeforeVacuum.walBytes) -
+                        (report.statsAfterVacuum.mainDbBytes + report.statsAfterVacuum.walBytes),
+                    channelRows = report.tableStats.channels,
+                    movieRows = report.tableStats.movies,
+                    seriesRows = report.tableStats.series,
+                    episodeRows = report.tableStats.episodes,
+                    programRows = report.tableStats.programs,
+                    epgProgrammeRows = report.tableStats.epgProgrammes,
+                    playbackHistoryRows = report.tableStats.playbackHistory,
+                    favoriteRows = report.tableStats.favorites
+                )
+                preferencesRepository.setLastMaintenanceSnapshot(snapshot)
+                _uiState.update {
+                    it.copy(
+                        isRunningDatabaseMaintenance = false,
+                        userMessage = "Database optimization completed successfully"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isRunningDatabaseMaintenance = false,
+                        userMessage = "Database optimization failed: ${e.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun syncTvInputChannels() {
+        if (_uiState.value.isRunningTvInputSync) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isRunningTvInputSync = true) }
+            try {
+                val result = tvInputChannelSyncManager.refreshTvInputCatalogResult()
+                if (result.isSuccess) {
+                    _uiState.update {
+                        it.copy(
+                            isRunningTvInputSync = false,
+                            userMessage = "Android TV system channels synchronized"
+                        )
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            isRunningTvInputSync = false,
+                            userMessage = "Android TV sync failed: ${result.exceptionOrNull()?.message}"
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isRunningTvInputSync = false,
+                        userMessage = "Android TV sync failed: ${e.message}"
+                    )
+                }
+            }
         }
     }
 
@@ -1294,6 +1421,77 @@ class SettingsViewModel @Inject constructor(
 
     fun moveEpgSourceAssignmentDown(providerId: Long, epgSourceId: Long) {
         epgActions.moveEpgSourceAssignmentDown(viewModelScope, providerId, epgSourceId)
+    }
+
+    fun startTraktPairing() {
+        viewModelScope.launch {
+            val result = traktRepository.generateDeviceCode()
+            result.onSuccess { state ->
+                val code = state.userCode
+                if (state.isPendingAuthorization && code != null) {
+                    traktRepository.pollForAuthorization(
+                        deviceCode = code,
+                        intervalSeconds = state.intervalSeconds,
+                        expiresInSeconds = state.expiresInSeconds
+                    )
+                }
+            }
+        }
+    }
+
+    fun cancelTraktPairing() {
+        viewModelScope.launch {
+            traktRepository.cancelDeviceCodeAuth()
+        }
+    }
+
+    fun disconnectTrakt() {
+        viewModelScope.launch {
+            traktRepository.disconnect()
+        }
+    }
+
+    fun toggleVpn(profileId: Long, enable: Boolean) {
+        viewModelScope.launch {
+            vpnRepository.setActiveProfile(profileId, enable)
+        }
+    }
+
+    fun importWireGuardConfig(name: String, rawText: String, onResult: (Boolean, String?) -> Unit) {
+        viewModelScope.launch {
+            when (val result = vpnRepository.parseWireGuardConfig(rawText, name)) {
+                is com.streamvault.domain.model.Result.Success -> {
+                    vpnRepository.saveProfile(result.data)
+                    onResult(true, null)
+                }
+                is com.streamvault.domain.model.Result.Error -> {
+                    onResult(false, result.message)
+                }
+                else -> onResult(false, "Unexpected error")
+            }
+        }
+    }
+
+    fun deleteVpnProfile(profileId: Long) {
+        viewModelScope.launch {
+            vpnRepository.deleteProfile(profileId)
+        }
+    }
+
+    fun installStremioAddon(url: String, onResult: (Boolean, String?) -> Unit) {
+        viewModelScope.launch {
+            when (val result = stremioRepository.installAddon(url)) {
+                is com.streamvault.domain.model.Result.Success -> onResult(true, null)
+                is com.streamvault.domain.model.Result.Error -> onResult(false, result.message)
+                else -> onResult(false, "Unexpected error")
+            }
+        }
+    }
+
+    fun uninstallStremioAddon(addonId: String) {
+        viewModelScope.launch {
+            stremioRepository.uninstallAddon(addonId)
+        }
     }
 
 }

@@ -56,6 +56,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -306,6 +308,13 @@ class EpgViewModel @Inject constructor(
     val overrideUiState: StateFlow<EpgOverrideUiState> = _overrideUiState.asStateFlow()
     private val _programReminderUiState = MutableStateFlow(ProgramReminderUiState())
     val programReminderUiState: StateFlow<ProgramReminderUiState> = _programReminderUiState.asStateFlow()
+    val upcomingReminders: StateFlow<List<com.streamvault.domain.model.ProgramReminder>> =
+        programReminderManager.observeUpcomingReminders()
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = emptyList<com.streamvault.domain.model.ProgramReminder>()
+            )
     private var overrideSearchJob: Job? = null
     private var guideFallbackJob: Job? = null
     private var prefetchJob: Deferred<GuidePrefetchedPage?>? = null
@@ -761,6 +770,17 @@ class EpgViewModel @Inject constructor(
                 )
             }
             loadProgramReminderState(channel, program)
+        }
+    }
+
+    fun cancelReminder(reminder: com.streamvault.domain.model.ProgramReminder) {
+        viewModelScope.launch {
+            programReminderManager.cancelReminder(
+                providerId = reminder.providerId,
+                channelId = reminder.channelId,
+                programTitle = reminder.programTitle,
+                programStartTime = reminder.programStartTime
+            )
         }
     }
 

@@ -148,12 +148,14 @@ fun FullEpgScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val overrideUiState by viewModel.overrideUiState.collectAsStateWithLifecycle()
     val programReminderUiState by viewModel.programReminderUiState.collectAsStateWithLifecycle()
+    val upcomingReminders by viewModel.upcomingReminders.collectAsStateWithLifecycle()
     var selectedProgram by remember { mutableStateOf<Pair<Channel, Program>?>(null) }
     var focusedChannel by remember { mutableStateOf<Channel?>(null) }
     var focusedProgram by remember { mutableStateOf<Program?>(null) }
     var topNavVisible by rememberSaveable { mutableStateOf(true) }
     var showCategoryPicker by rememberSaveable { mutableStateOf(false) }
     var showGuideOptions by rememberSaveable { mutableStateOf(false) }
+    var showRemindersDialog by rememberSaveable { mutableStateOf(false) }
     var showSearchOverlay by rememberSaveable { mutableStateOf(false) }
     var showPinDialog by rememberSaveable { mutableStateOf(false) }
     var pinError by rememberSaveable { mutableStateOf<String?>(null) }
@@ -591,7 +593,20 @@ fun FullEpgScreen(
                     showGuideOptions = false
                     viewModel.openEpgOverride(ch)
                 }
-            }
+            },
+            onManageReminders = {
+                showGuideOptions = false
+                showRemindersDialog = true
+            },
+            upcomingRemindersCount = upcomingReminders.size
+        )
+    }
+
+    if (showRemindersDialog) {
+        ProgramRemindersDialog(
+            reminders = upcomingReminders,
+            onDismiss = { showRemindersDialog = false },
+            onCancelReminder = viewModel::cancelReminder
         )
     }
 

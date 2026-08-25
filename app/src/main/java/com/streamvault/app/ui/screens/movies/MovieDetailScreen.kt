@@ -50,6 +50,7 @@ import androidx.compose.runtime.remember
 import androidx.tv.material3.Border
 import androidx.tv.material3.Button
 import androidx.tv.material3.ButtonDefaults
+import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.Icon
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
@@ -131,6 +132,7 @@ fun MovieDetailScreen(
                 externalRatings = uiState.externalRatings,
                 isLoadingExternalRatings = uiState.isLoadingExternalRatings,
                 relatedContent = uiState.relatedContent,
+                stremioStreams = uiState.stremioStreams,
                 onPlay = { onPlay(movie) },
                 onCopyUrl = {
                     when (val result = viewModel.resolveCopyStreamUrl()) {
@@ -139,7 +141,8 @@ fun MovieDetailScreen(
                         Result.Loading -> null
                     }
                 },
-                onDownload = {},
+                onDownload = { viewModel.downloadMovie(context) },
+                onOpenExternalPlayer = { viewModel.openInExternalPlayer(context) },
                 onCast = viewModel::castMovie,
                 onToggleFavorite = viewModel::toggleFavorite,
                 onSelectVariant = viewModel::selectMovieVariant,
@@ -160,9 +163,11 @@ private fun MovieDetailContent(
     externalRatings: ExternalRatings,
     isLoadingExternalRatings: Boolean,
     relatedContent: List<Movie>,
+    stremioStreams: List<com.streamvault.domain.stremio.StremioStream>,
     onPlay: () -> Unit,
     onCopyUrl: suspend () -> String?,
     onDownload: () -> Unit,
+    onOpenExternalPlayer: () -> Unit,
     onCast: () -> Unit,
     onToggleFavorite: () -> Unit,
     onSelectVariant: (Long) -> Unit,
@@ -174,7 +179,6 @@ private fun MovieDetailContent(
     val coroutineScope = rememberCoroutineScope()
     val isTelevisionDevice = rememberIsTelevisionDevice()
     val playButtonFocusRequester = remember { FocusRequester() }
-    val onDownload: () -> Unit = { viewModel.downloadMovie(context) }
 
     LaunchedEffect(movie.id) {
         playButtonFocusRequester.requestFocusSafely(
@@ -260,6 +264,7 @@ private fun MovieDetailContent(
                                 }
                             },
                             onDownload = onDownload,
+                            onOpenExternalPlayer = onOpenExternalPlayer,
                             onCast = onCast,
                             onToggleFavorite = onToggleFavorite,
                             onSelectVariant = onSelectVariant,
@@ -270,7 +275,9 @@ private fun MovieDetailContent(
                                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(trailerUrl)))
                                     }
                                 }
-                            }
+                            },
+                            onMarkWatched = { viewModel.markMovieWatched(it) },
+                            onRemoveFromHistory = { viewModel.removeFromHistory() }
                         )
                     }
                 } else {
@@ -293,6 +300,7 @@ private fun MovieDetailContent(
                                 }
                             },
                             onDownload = onDownload,
+                            onOpenExternalPlayer = onOpenExternalPlayer,
                             onCast = onCast,
                             onToggleFavorite = onToggleFavorite,
                             onSelectVariant = onSelectVariant,
@@ -304,8 +312,61 @@ private fun MovieDetailContent(
                                     }
                                 }
                             },
+                            onMarkWatched = { viewModel.markMovieWatched(it) },
+                            onRemoveFromHistory = { viewModel.removeFromHistory() },
                             modifier = Modifier.fillMaxWidth()
                         )
+                    }
+                }
+            }
+
+            if (stremioStreams.isNotEmpty()) {
+                item {
+                    Text(
+                        text = "Add-on Streams",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = AppColors.TextPrimary
+                    )
+                }
+                item {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(stremioStreams) { stream ->
+                            TvClickableSurface(
+                                onClick = {
+                                    stream.url?.let { url ->
+                                        com.streamvault.app.player.external.ExternalPlayerLauncher.launch(context, url)
+                                    }
+                                },
+                                shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(12.dp)),
+                                colors = ClickableSurfaceDefaults.colors(
+                                    containerColor = AppColors.SurfaceElevated,
+                                    focusedContainerColor = AppColors.Brand.copy(alpha = 0.3f)
+                                ),
+                                modifier = Modifier.width(200.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = stream.title ?: stream.name ?: "Stream",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = AppColors.TextPrimary,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    stream.quality?.let { quality ->
+                                        Text(
+                                            text = quality,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = AppColors.Brand
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -391,11 +452,14 @@ private fun MovieDetailHeroText(
     onPlay: () -> Unit,
     onCopyUrl: () -> Unit,
     onDownload: () -> Unit,
+    onOpenExternalPlayer: () -> Unit,
     onCast: () -> Unit,
     onToggleFavorite: () -> Unit,
     onSelectVariant: (Long) -> Unit,
     playButtonFocusRequester: FocusRequester,
     onPlayTrailer: () -> Unit,
+    onMarkWatched: (Boolean) -> Unit,
+    onRemoveFromHistory: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val hasTrailer = !movie.youtubeTrailer.isNullOrBlank()
@@ -464,6 +528,15 @@ private fun MovieDetailHeroText(
                 )
             }
             TvButton(
+                onClick = onOpenExternalPlayer,
+                colors = ButtonDefaults.colors(
+                    containerColor = AppColors.SurfaceEmphasis,
+                    contentColor = AppColors.TextPrimary
+                )
+            ) {
+                Text(stringResource(R.string.player_open_in_external_player))
+            }
+            TvButton(
                 onClick = onCopyUrl,
                 colors = ButtonDefaults.colors(
                     containerColor = AppColors.SurfaceEmphasis,
@@ -505,6 +578,30 @@ private fun MovieDetailHeroText(
                 ) {
                     Text(stringResource(R.string.movie_detail_trailer))
                 }
+            }
+            if (hasResume) {
+                TvButton(
+                    onClick = onRemoveFromHistory,
+                    colors = ButtonDefaults.colors(
+                        containerColor = AppColors.SurfaceEmphasis,
+                        contentColor = AppColors.TextPrimary
+                    )
+                ) {
+                    Text(stringResource(R.string.vod_remove_from_history))
+                }
+            }
+            TvButton(
+                onClick = { onMarkWatched(!hasResume) },
+                colors = ButtonDefaults.colors(
+                    containerColor = AppColors.SurfaceEmphasis,
+                    contentColor = AppColors.TextPrimary
+                )
+            ) {
+                Text(
+                    stringResource(
+                        if (hasResume) R.string.vod_mark_as_watched else R.string.vod_mark_as_unwatched
+                    )
+                )
             }
             TvIconButton(
                 onClick = onToggleFavorite,
@@ -602,6 +699,9 @@ private fun MovieFactGrid(movie: Movie) {
         MovieFactRow(label = stringResource(R.string.movie_detail_duration), value = movie.duration)
         MovieFactRow(label = stringResource(R.string.movie_detail_genre), value = movie.genre)
         MovieFactRow(label = stringResource(R.string.movie_detail_cast), value = movie.cast)
+        movie.containerExtension?.takeIf { it.isNotBlank() }?.let { ext ->
+            MovieFactRow(label = stringResource(R.string.movie_detail_format), value = ext.uppercase())
+        }
     }
 }
 

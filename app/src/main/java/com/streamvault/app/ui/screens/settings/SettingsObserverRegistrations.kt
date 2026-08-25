@@ -122,6 +122,12 @@ internal fun registerRecordingObservers(
             uiState.update { it.copy(recordingPaddingAfterMinutes = minutes) }
         }
     }
+
+    scope.launch {
+        preferencesRepository.maxConcurrentStreams.collect { count ->
+            uiState.update { it.copy(maxConcurrentStreams = count) }
+        }
+    }
 }
 
 internal fun registerEpgObservers(

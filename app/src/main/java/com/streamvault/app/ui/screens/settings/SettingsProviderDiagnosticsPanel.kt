@@ -27,13 +27,24 @@ import com.streamvault.domain.model.ProviderType
 import java.text.DateFormat
 import java.util.Locale
 
+import androidx.compose.foundation.layout.Row
+import androidx.tv.material3.ButtonDefaults
+import com.streamvault.app.ui.interaction.TvButton
+import com.streamvault.app.device.isTelevisionDevice
+
 @Composable
 internal fun ProviderDiagnosticsPanel(
     provider: Provider,
     diagnostics: ProviderDiagnosticsUiModel,
     movieIndexInProgress: Boolean,
-    databaseMaintenance: DatabaseMaintenanceUiModel?
+    databaseMaintenance: DatabaseMaintenanceUiModel?,
+    isRunningDatabaseMaintenance: Boolean = false,
+    isRunningTvInputSync: Boolean = false,
+    onRunDatabaseMaintenance: () -> Unit = {},
+    onSyncTvInputChannels: () -> Unit = {}
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val isTelevision = remember(context) { context.isTelevisionDevice() }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
             text = stringResource(R.string.settings_provider_diagnostics_title),
@@ -73,14 +84,39 @@ internal fun ProviderDiagnosticsPanel(
                 fontWeight = FontWeight.Medium
             )
         }
+        if (isTelevision) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TvButton(
+                    onClick = onSyncTvInputChannels,
+                    enabled = !isRunningTvInputSync,
+                    colors = ButtonDefaults.colors(
+                        containerColor = Primary.copy(alpha = 0.15f),
+                        contentColor = Primary
+                    )
+                ) {
+                    Text(if (isRunningTvInputSync) "Syncing Android TV Channels..." else "Sync Android TV Channels")
+                }
+            }
+        }
         databaseMaintenance?.let { report ->
-            DatabaseMaintenancePanel(report = report)
+            DatabaseMaintenancePanel(
+                report = report,
+                isRunningMaintenance = isRunningDatabaseMaintenance,
+                onRunMaintenance = onRunDatabaseMaintenance
+            )
         }
     }
 }
 
 @Composable
-private fun DatabaseMaintenancePanel(report: DatabaseMaintenanceUiModel) {
+private fun DatabaseMaintenancePanel(
+    report: DatabaseMaintenanceUiModel,
+    isRunningMaintenance: Boolean = false,
+    onRunMaintenance: () -> Unit = {}
+) {
     val appTimeFormat = LocalAppTimeFormat.current
     val dateTimeFormat = remember(appTimeFormat) { appTimeFormat.createDateTimeFormat() }
     Column(
@@ -157,6 +193,21 @@ private fun DatabaseMaintenancePanel(report: DatabaseMaintenanceUiModel) {
             style = MaterialTheme.typography.bodySmall,
             color = OnSurfaceDim
         )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+            horizontalArrangement = Arrangement.End
+        ) {
+            TvButton(
+                onClick = onRunMaintenance,
+                enabled = !isRunningMaintenance,
+                colors = ButtonDefaults.colors(
+                    containerColor = Primary.copy(alpha = 0.15f),
+                    contentColor = Primary
+                )
+            ) {
+                Text(if (isRunningMaintenance) "Optimizing Database..." else "Optimize Database Now")
+            }
+        }
     }
 }
 

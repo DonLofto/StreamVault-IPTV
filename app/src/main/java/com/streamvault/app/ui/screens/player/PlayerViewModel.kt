@@ -116,6 +116,7 @@ class PlayerViewModel @Inject constructor(
     private val downloadManager: DownloadManager,
     internal val okHttpClient: OkHttpClient,
     private val playbackNetworkAdmissionGate: com.streamvault.data.sync.PlaybackNetworkAdmissionGate,
+    internal val traktRepository: com.streamvault.domain.trakt.TraktRepository,
 ) : ViewModel() {
     companion object {
         private const val MAX_PROGRAM_HISTORY_ITEMS = 18

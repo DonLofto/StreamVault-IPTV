@@ -106,6 +106,12 @@ abstract class RepositoryModule {
     @Binds @Singleton
     abstract fun bindTraktRepository(impl: com.streamvault.data.remote.trakt.TraktRepositoryImpl): com.streamvault.domain.trakt.TraktRepository
 
+    @Binds @Singleton
+    abstract fun bindVpnRepository(impl: com.streamvault.data.vpn.VpnRepositoryImpl): com.streamvault.domain.vpn.VpnRepository
+
+    @Binds @Singleton
+    abstract fun bindStremioRepository(impl: com.streamvault.data.repository.StremioRepositoryImpl): com.streamvault.domain.stremio.StremioRepository
+
     companion object {
         @Provides
         @Singleton

@@ -29,6 +29,8 @@ import com.streamvault.domain.model.ExternalRatings
 import com.streamvault.domain.model.ExternalRatingsLookup
 import com.streamvault.domain.model.MovieDetailPresentationHint
 import com.streamvault.domain.model.Movie
+import com.streamvault.domain.model.PlaybackHistory
+import com.streamvault.domain.model.PlaybackWatchedStatus
 import com.streamvault.domain.model.Result
 import com.streamvault.domain.repository.DownloadManager
 import com.streamvault.domain.repository.ExternalRatingsRepository
@@ -45,6 +47,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -60,7 +63,8 @@ class MovieDetailViewModel @Inject constructor(
     private val pluginManager: StreamVaultPluginManager,
     private val downloadManager: DownloadManager,
     private val castMediaRequestFactory: CastMediaRequestFactory,
-    private val castPlaybackCoordinator: CastPlaybackCoordinator
+    private val castPlaybackCoordinator: CastPlaybackCoordinator,
+    private val stremioRepository: com.streamvault.domain.stremio.StremioRepository
 ) : ViewModel() {
 
     private val movieId: Long = checkNotNull(
@@ -103,6 +107,7 @@ class MovieDetailViewModel @Inject constructor(
                         applyLoadedMovie(effectiveProviderId, result.data)
                         loadExternalRatings(result.data)
                         loadRelatedContent(effectiveProviderId)
+                        loadStremioStreams(result.data)
                     }
                     is Result.Error -> _uiState.update {
                         it.copy(isLoading = false, error = result.message)
@@ -197,6 +202,45 @@ class MovieDetailViewModel @Inject constructor(
                 is Result.Error ->
                     Toast.makeText(context, context.getString(R.string.download_error_no_url), Toast.LENGTH_SHORT).show()
                 Result.Loading -> Unit
+            }
+        }
+    }
+
+    fun openInExternalPlayer(context: Context) {
+        viewModelScope.launch {
+            val result = resolveCopyStreamUrl()
+            when (result) {
+                is Result.Success -> {
+                    when (val launchResult = com.streamvault.app.player.external.ExternalPlayerLauncher.launch(context, result.data)) {
+                        is com.streamvault.app.player.external.ExternalPlayerLaunchResult.Success -> Unit
+                        is com.streamvault.app.player.external.ExternalPlayerLaunchResult.NoHandler ->
+                            Toast.makeText(context, context.getString(R.string.player_no_external_player), Toast.LENGTH_SHORT).show()
+                        is com.streamvault.app.player.external.ExternalPlayerLaunchResult.InvalidUrl ->
+                            Toast.makeText(context, context.getString(R.string.player_unsafe_stream_url), Toast.LENGTH_SHORT).show()
+                        is com.streamvault.app.player.external.ExternalPlayerLaunchResult.Failed ->
+                            Toast.makeText(context, context.getString(R.string.player_external_launch_failed), Toast.LENGTH_SHORT).show()
+                    }
+                }
+                is Result.Error -> {
+                    Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
+                }
+                Result.Loading -> Unit
+            }
+        }
+    }
+
+    private fun loadStremioStreams(movie: Movie) {
+        viewModelScope.launch {
+            try {
+                val queryId = movie.tmdbId?.let { "tmdb:$it" } ?: movie.name
+                when (val result = stremioRepository.getStreamCandidates("movie", queryId)) {
+                    is Result.Success -> {
+                        _uiState.update { it.copy(stremioStreams = result.data) }
+                    }
+                    else -> Unit
+                }
+            } catch (_: Exception) {
+                // Non-critical background enrichment
             }
         }
     }
@@ -346,6 +390,47 @@ class MovieDetailViewModel @Inject constructor(
             )
         }
     }
+
+    fun markMovieWatched(watched: Boolean) {
+        val movie = _uiState.value.movie ?: return
+        viewModelScope.launch {
+            val providerId = movie.providerId.takeIf { it > 0L }
+                ?: providerRepository.getActiveProvider().firstOrNull()?.id
+                ?: return@launch
+            if (watched) {
+                val durationMs = (movie.durationSeconds * 1000L).takeIf { it > 0 } ?: 1000L
+                playbackHistoryRepository.markAsWatched(
+                    PlaybackHistory(
+                        contentId = movie.id,
+                        contentType = ContentType.MOVIE,
+                        providerId = providerId,
+                        title = movie.name,
+                        posterUrl = movie.posterUrl,
+                        streamUrl = movie.streamUrl,
+                        resumePositionMs = durationMs,
+                        totalDurationMs = durationMs,
+                        lastWatchedAt = System.currentTimeMillis(),
+                        watchedStatus = PlaybackWatchedStatus.COMPLETED_MANUAL
+                    )
+                )
+                _uiState.update { it.copy(hasResume = false, resumePositionMs = 0L) }
+            } else {
+                playbackHistoryRepository.removeFromHistory(movie.id, ContentType.MOVIE, providerId)
+                _uiState.update { it.copy(hasResume = false, resumePositionMs = 0L) }
+            }
+        }
+    }
+
+    fun removeFromHistory() {
+        val movie = _uiState.value.movie ?: return
+        viewModelScope.launch {
+            val providerId = movie.providerId.takeIf { it > 0L }
+                ?: providerRepository.getActiveProvider().firstOrNull()?.id
+                ?: return@launch
+            playbackHistoryRepository.removeFromHistory(movie.id, ContentType.MOVIE, providerId)
+            _uiState.update { it.copy(hasResume = false, resumePositionMs = 0L) }
+        }
+    }
 }
 
 data class MovieDetailUiState(
@@ -357,5 +442,6 @@ data class MovieDetailUiState(
     val isCasting: Boolean = false,
     val isLoadingExternalRatings: Boolean = false,
     val externalRatings: ExternalRatings = ExternalRatings.unavailable(),
-    val relatedContent: List<Movie> = emptyList()
+    val relatedContent: List<Movie> = emptyList(),
+    val stremioStreams: List<com.streamvault.domain.stremio.StremioStream> = emptyList()
 )

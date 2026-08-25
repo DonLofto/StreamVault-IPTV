@@ -66,6 +66,7 @@ class ProviderRepositoryImplTest {
     private val recordingAlarmScheduler: RecordingAlarmScheduler = mock()
     private val programReminderAlarmScheduler: ProgramReminderAlarmScheduler = mock()
     private val jellyfinProvider: JellyfinProvider = mock()
+    private val embyProvider: com.streamvault.data.remote.emby.EmbyProvider = mock()
     private val transactionRunner = object : DatabaseTransactionRunner {
         override suspend fun <T> inTransaction(block: suspend () -> T): T = block()
     }
@@ -90,7 +91,8 @@ class ProviderRepositoryImplTest {
         transactionRunner = transactionRunner,
         recordingAlarmScheduler = recordingAlarmScheduler,
         programReminderAlarmScheduler = programReminderAlarmScheduler,
-        jellyfinProvider = jellyfinProvider
+        jellyfinProvider = jellyfinProvider,
+        embyProvider = embyProvider
     )
 
     private val repository = createRepository()

@@ -89,6 +89,7 @@ data class SettingsUiState(
     val playerAudioVideoOffsetMs: Int = 0,
     val centerTwoSlotMultiviewLayout: Boolean = false,
     val multiViewRespectProviderConnectionLimit: Boolean = true,
+    val multiViewPerformanceMode: String = "AUTO",
     val playerControlsTimeoutSeconds: Int = 5,
     val playerLiveOverlayTimeoutSeconds: Int = 4,
     val playerNoticeTimeoutSeconds: Int = 6,
@@ -151,6 +152,10 @@ data class SettingsUiState(
     val vodVariantPreferenceMode: VodVariantPreferenceMode = VodVariantPreferenceMode.BALANCED,
     val guideDefaultCategoryId: Long = com.streamvault.domain.model.VirtualCategoryIds.FAVORITES,
     val guideDefaultCategoryOptions: List<Category> = emptyList(),
+    val guideDensity: String = "STANDARD",
+    val guideChannelMode: String = "MODERN",
+    val isRunningDatabaseMaintenance: Boolean = false,
+    val isRunningTvInputSync: Boolean = false,
     val preventStandbyDuringPlayback: Boolean = true,
     val zapAutoRevert: Boolean = true,
     val autoPlayNextEpisode: Boolean = true,
@@ -167,5 +172,6 @@ data class SettingsUiState(
     val isCheckingForUpdates: Boolean = false,
     val appUpdate: AppUpdateUiModel = AppUpdateUiModel(),
     val crashReport: CrashReportUiModel = CrashReportUiModel(),
-    val viewedCrashReport: CrashReportUiModel? = null
+    val viewedCrashReport: CrashReportUiModel? = null,
+    val maxConcurrentStreams: Int = 2
 )

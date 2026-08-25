@@ -65,6 +65,7 @@ internal fun observeSettingsPreferenceSnapshot(
             playerAudioVideoOffsetMs = 0,
             centerTwoSlotMultiviewLayout = false,
             multiViewRespectProviderConnectionLimit = true,
+            multiViewPerformanceMode = "AUTO",
             playerControlsTimeoutSeconds = 5,
             playerLiveOverlayTimeoutSeconds = 4,
             playerNoticeTimeoutSeconds = 6,
@@ -108,6 +109,8 @@ internal fun observeSettingsPreferenceSnapshot(
             vodVariantPreferenceMode = VodVariantPreferenceMode.BALANCED,
             guideDefaultCategoryId = VirtualCategoryIds.FAVORITES,
             guideDefaultCategoryOptions = emptyList(),
+            guideDensity = "STANDARD",
+            guideChannelMode = "MODERN",
             preventStandbyDuringPlayback = true,
             zapAutoRevert = true,
             autoPlayNextEpisode = true,
@@ -164,6 +167,8 @@ internal fun observeSettingsPreferenceSnapshot(
         snapshot.copy(centerTwoSlotMultiviewLayout = centerTwoSlotLayout)
     }.combine(preferencesRepository.multiViewRespectProviderConnectionLimit) { snapshot, respectLimit ->
         snapshot.copy(multiViewRespectProviderConnectionLimit = respectLimit)
+    }.combine(preferencesRepository.multiViewPerformanceMode) { snapshot, performanceMode ->
+        snapshot.copy(multiViewPerformanceMode = performanceMode ?: "AUTO")
     }.combine(preferencesRepository.playerControlsTimeoutSeconds) { snapshot, timeoutSeconds ->
         snapshot.copy(playerControlsTimeoutSeconds = timeoutSeconds)
     }.combine(preferencesRepository.playerLiveOverlayTimeoutSeconds) { snapshot, timeoutSeconds ->
@@ -250,6 +255,10 @@ internal fun observeSettingsPreferenceSnapshot(
         snapshot.copy(vodVariantPreferenceMode = vodVariantPreferenceMode)
     }.combine(preferencesRepository.guideDefaultCategoryId) { snapshot, guideDefaultCategoryId ->
         snapshot.copy(guideDefaultCategoryId = guideDefaultCategoryId ?: VirtualCategoryIds.FAVORITES)
+    }.combine(preferencesRepository.guideDensity) { snapshot, density ->
+        snapshot.copy(guideDensity = density ?: "STANDARD")
+    }.combine(preferencesRepository.guideChannelMode) { snapshot, channelMode ->
+        snapshot.copy(guideChannelMode = channelMode ?: "MODERN")
     }.combine(preferencesRepository.preventStandbyDuringPlayback) { snapshot, preventStandby ->
         snapshot.copy(preventStandbyDuringPlayback = preventStandby)
     }.combine(preferencesRepository.zapAutoRevert) { snapshot, zapAutoRevert ->

@@ -150,7 +150,8 @@ fun PlayerScreen(
     } else {
         400.dp
     }
-    val mainActivity = LocalContext.current.findMainActivity()
+    val context = LocalContext.current
+    val mainActivity = context.findMainActivity()
     val notificationPermissionGate = rememberNotificationPermissionGate(
         onNotificationsBlocked = { message -> viewModel.showPlayerNotice(message = message) },
         reminderBlockedMessage = stringResource(R.string.notification_permission_reminder_required),
@@ -222,6 +223,7 @@ fun PlayerScreen(
     val timeshiftUiState by viewModel.timeshiftUiState.collectAsStateWithLifecycle()
     val sleepTimerUiState by viewModel.sleepTimerUiState.collectAsStateWithLifecycle()
     val sleepTimerExitEvent by viewModel.sleepTimerExitEvent.collectAsStateWithLifecycle()
+    val externalPlaybackUrl by viewModel.externalPlaybackUrl.collectAsStateWithLifecycle()
 
     var showTrackSelection by remember { mutableStateOf<TrackType?>(null) }
     var showVariantSelection by remember { mutableStateOf(false) }
@@ -1063,6 +1065,12 @@ fun PlayerScreen(
             onSetScrubbingMode = viewModel::setScrubbingMode,
             seekPreview = seekPreview,
             onSeekPreviewPositionChanged = viewModel::updateSeekPreview,
+            showExternalPlayerAction = externalPlaybackUrl.isNotBlank(),
+            onOpenExternalPlayer = {
+                if (externalPlaybackUrl.isNotBlank()) {
+                    com.streamvault.app.player.external.ExternalPlayerLauncher.launch(context, externalPlaybackUrl)
+                }
+            },
             onUserInteraction = {
                 viewModel.notifyUserActivity()
                 viewModel.refreshControlsAutoHide()
@@ -1278,6 +1286,17 @@ fun PlayerScreen(
                     )
                 },
                 onRequestMoreChannels = epgViewModel::requestMoreChannels,
+                onToggleReminder = { channel, program ->
+                    epgViewModel.toggleProgramReminder(channel, program)
+                },
+                isReminderScheduled = { program ->
+                    epgViewModel.programReminderUiState.value.let {
+                        it.programTitle == program.title && it.programStartTime == program.startTime && it.isScheduled
+                    }
+                },
+                onScheduleRecording = { channel, program, recurrence ->
+                    epgViewModel.scheduleRecording(channel, program, recurrence)
+                },
                 modifier = Modifier.align(Alignment.Center)
             )
         }
@@ -1526,6 +1545,8 @@ private fun PlayerControlsOverlayHost(
     onSetScrubbingMode: (Boolean) -> Unit,
     seekPreview: SeekPreviewState,
     onSeekPreviewPositionChanged: (Long?) -> Unit,
+    showExternalPlayerAction: Boolean = false,
+    onOpenExternalPlayer: () -> Unit = {},
     onUserInteraction: () -> Unit
 ) {
     val currentPosition by playerEngine.currentPosition.collectAsStateWithLifecycle()
@@ -1590,6 +1611,8 @@ private fun PlayerControlsOverlayHost(
         onSetScrubbingMode = onSetScrubbingMode,
         seekPreview = seekPreview,
         onSeekPreviewPositionChanged = onSeekPreviewPositionChanged,
+        showExternalPlayerAction = showExternalPlayerAction,
+        onOpenExternalPlayer = onOpenExternalPlayer,
         onUserInteraction = onUserInteraction
     )
 }

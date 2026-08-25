@@ -89,6 +89,14 @@ interface ProviderRepository {
         onProgress: ((String) -> Unit)? = null,
         id: Long? = null
     ): Result<Provider>
+    suspend fun loginEmby(
+        serverUrl: String,
+        username: String,
+        password: String,
+        name: String,
+        onProgress: ((String) -> Unit)? = null,
+        id: Long? = null
+    ): Result<Provider>
     suspend fun refreshProviderData(
         providerId: Long,
         force: Boolean = false,

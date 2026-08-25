@@ -75,6 +75,28 @@ internal fun LazyListScope.settingsBrowsingSection(
     onRemoteShortcutDialogTargetChange: (RemoteShortcutDialogTarget?) -> Unit
 ) {
     item {
+        var showGuideDensityDialog by rememberSaveable { mutableStateOf(false) }
+        var showGuideChannelModeDialog by rememberSaveable { mutableStateOf(false) }
+        if (showGuideDensityDialog) {
+            GuideDensityDialog(
+                selectedDensity = uiState.guideDensity,
+                onDismiss = { showGuideDensityDialog = false },
+                onDensitySelected = { density ->
+                    viewModel.setGuideDensity(density)
+                    showGuideDensityDialog = false
+                }
+            )
+        }
+        if (showGuideChannelModeDialog) {
+            GuideChannelModeDialog(
+                selectedMode = uiState.guideChannelMode,
+                onDismiss = { showGuideChannelModeDialog = false },
+                onModeSelected = { mode ->
+                    viewModel.setGuideChannelMode(mode)
+                    showGuideChannelModeDialog = false
+                }
+            )
+        }
         ClickableSettingsRow(
             label = stringResource(R.string.settings_live_tv_channel_mode),
             value = stringResource(uiState.liveTvChannelMode.labelResId()),
@@ -243,6 +265,16 @@ internal fun LazyListScope.settingsBrowsingSection(
             label = stringResource(R.string.settings_guide_default_category),
             value = guideDefaultCategoryLabel,
             onClick = { onShowGuideDefaultCategoryDialogChange(true) }
+        )
+        ClickableSettingsRow(
+            label = "Guide density",
+            value = formatGuideDensityLabel(uiState.guideDensity),
+            onClick = { showGuideDensityDialog = true }
+        )
+        ClickableSettingsRow(
+            label = "Guide channel mode",
+            value = formatGuideChannelModeLabel(uiState.guideChannelMode),
+            onClick = { showGuideChannelModeDialog = true }
         )
         ClickableSettingsRow(
             label = stringResource(R.string.settings_time_format),
@@ -547,4 +579,15 @@ private fun RemoteColorButton.accentColor(): Color = when (this) {
     RemoteColorButton.GREEN -> AccentGreen
     RemoteColorButton.YELLOW -> AccentAmber
     RemoteColorButton.BLUE -> AccentCyan
+}
+
+private fun formatGuideDensityLabel(density: String): String = when (density.uppercase(java.util.Locale.US)) {
+    "COMPACT" -> "Compact"
+    "SPACIOUS" -> "Spacious"
+    else -> "Standard"
+}
+
+private fun formatGuideChannelModeLabel(mode: String): String = when (mode.uppercase(java.util.Locale.US)) {
+    "CLASSIC" -> "Classic Channels"
+    else -> "Modern Grid"
 }

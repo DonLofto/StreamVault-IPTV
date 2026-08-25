@@ -46,6 +46,7 @@ import com.streamvault.app.ui.theme.Primary
 import com.streamvault.domain.model.Category
 import com.streamvault.domain.model.Channel
 import com.streamvault.domain.model.Program
+import com.streamvault.domain.model.RecordingRecurrence
 import com.streamvault.domain.model.VirtualCategoryIds
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -63,6 +64,9 @@ fun PlayerTransparentGuideOverlay(
     onWatchChannel: (Channel) -> Unit,
     onWatchArchive: (Channel, Program) -> Unit,
     onRequestMoreChannels: () -> Unit,
+    onToggleReminder: ((Channel, Program) -> Unit)? = null,
+    isReminderScheduled: ((Program) -> Boolean)? = null,
+    onScheduleRecording: ((Channel, Program, RecordingRecurrence) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var focusedChannel by remember(uiState.channels, currentPlayerChannelId) {
@@ -283,6 +287,12 @@ fun PlayerTransparentGuideOverlay(
 
         selectedProgram?.let { (channel, program) ->
             val canWatchArchive = channel.id == currentPlayerChannelId && channel.isArchivePlayable(program, now)
+            val isScheduled = isReminderScheduled?.invoke(program) == true
+            val reminderLabel = if (isScheduled) {
+                stringResource(R.string.epg_program_reminder_cancel)
+            } else {
+                stringResource(R.string.epg_program_reminder_set)
+            }
             CompactGuideProgramDialog(
                 channel = channel,
                 program = program,
@@ -303,11 +313,21 @@ fun PlayerTransparentGuideOverlay(
                 } else {
                     null
                 },
-                reminderButtonLabel = null,
-                onToggleReminder = null,
-                onScheduleRecording = null,
-                onScheduleDailyRecording = null,
-                onScheduleWeeklyRecording = null
+                reminderButtonLabel = if (onToggleReminder != null) reminderLabel else null,
+                onToggleReminder = onToggleReminder?.let { toggle ->
+                    {
+                        toggle(channel, program)
+                    }
+                },
+                onScheduleRecording = onScheduleRecording?.let { schedule ->
+                    { schedule(channel, program, RecordingRecurrence.NONE) }
+                },
+                onScheduleDailyRecording = onScheduleRecording?.let { schedule ->
+                    { schedule(channel, program, RecordingRecurrence.DAILY) }
+                },
+                onScheduleWeeklyRecording = onScheduleRecording?.let { schedule ->
+                    { schedule(channel, program, RecordingRecurrence.WEEKLY) }
+                }
             )
         }
     }

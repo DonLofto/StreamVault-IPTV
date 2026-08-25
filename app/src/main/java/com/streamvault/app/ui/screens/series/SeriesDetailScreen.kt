@@ -4,6 +4,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -154,8 +156,14 @@ fun SeriesDetailScreen(
         onDownloadEpisode = { episode ->
             viewModel.downloadEpisode(context, episode)
         },
+        onOpenExternalPlayer = { episode ->
+            viewModel.openEpisodeInExternalPlayer(context, episode)
+        },
+        stremioStreams = uiState.stremioStreams,
         onCastResumeEpisode = viewModel::castResumeEpisode,
         onCastEpisode = viewModel::castEpisode,
+        onMarkSeriesWatched = viewModel::markSeriesWatched,
+        onRemoveSeriesFromHistory = viewModel::removeSeriesFromHistory,
         onBack = onBack
     )
 }
@@ -169,6 +177,7 @@ private fun SeriesDetailContent(
     isCasting: Boolean,
     externalRatings: ExternalRatings,
     isLoadingExternalRatings: Boolean,
+    stremioStreams: List<com.streamvault.domain.stremio.StremioStream>,
     onToggleFavorite: () -> Unit,
     onSelectVariant: (Long) -> Unit,
     onSeasonSelected: (Season) -> Unit,
@@ -176,8 +185,11 @@ private fun SeriesDetailContent(
     onResumeClick: (Episode) -> Unit,
     onCopyEpisodeUrl: suspend (Episode) -> String?,
     onDownloadEpisode: (Episode) -> Unit,
+    onOpenExternalPlayer: (Episode) -> Unit,
     onCastResumeEpisode: () -> Unit,
     onCastEpisode: (Episode) -> Unit,
+    onMarkSeriesWatched: (Boolean) -> Unit,
+    onRemoveSeriesFromHistory: () -> Unit,
     onBack: () -> Unit
 ) {
     val isTelevisionDevice = rememberIsTelevisionDevice()
@@ -311,6 +323,7 @@ private fun SeriesDetailContent(
                                 ratings = externalRatings,
                                 isLoading = isLoadingExternalRatings
                             )
+                            SeriesFactGrid(series = series)
                             SeriesVersionSelector(
                                 variants = series.variants,
                                 selectedVariantId = series.selectedVariantId ?: series.id,
@@ -323,21 +336,37 @@ private fun SeriesDetailContent(
                                 maxLines = 5,
                                 overflow = TextOverflow.Ellipsis
                             )
+                            val onPlayTrailer: () -> Unit = {
+                                resolveTrailerUrl(series.youtubeTrailer)?.let { trailerUrl ->
+                                    runCatching {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(trailerUrl)))
+                                    }
+                                }
+                            }
                             resumeEpisode?.let { ep ->
                                 val hasProgress = ep.watchProgress > 5000L
                                 SeriesDetailActions(
                                     series = series,
                                     resumeEpisode = ep,
-                                     hasProgress = hasProgress,
-                                     isCasting = isCasting,
-                                     onResumeClick = onResumeClick,
-                                     onCopyUrl = { copyEpisodeUrl(ep) },
-                                     onCast = onCastResumeEpisode,
-                                     onToggleFavorite = onToggleFavorite
-                                 )
+                                    hasProgress = hasProgress,
+                                    isCasting = isCasting,
+                                    onResumeClick = onResumeClick,
+                                    onOpenExternalPlayer = { onOpenExternalPlayer(ep) },
+                                    onCopyUrl = { copyEpisodeUrl(ep) },
+                                    onCast = onCastResumeEpisode,
+                                    onToggleFavorite = onToggleFavorite,
+                                    onPlayTrailer = onPlayTrailer,
+                                    onMarkWatched = onMarkSeriesWatched,
+                                    onRemoveFromHistory = onRemoveSeriesFromHistory
+                                )
                             }
                             if (resumeEpisode == null) {
-                                SeriesDetailFavoriteAction(series = series, onToggleFavorite = onToggleFavorite)
+                                SeriesDetailFavoriteAction(
+                                    series = series,
+                                    onToggleFavorite = onToggleFavorite,
+                                    onPlayTrailer = onPlayTrailer,
+                                    onMarkWatched = onMarkSeriesWatched
+                                )
                             }
                         }
                     }
@@ -399,6 +428,7 @@ private fun SeriesDetailContent(
                                 ratings = externalRatings,
                                 isLoading = isLoadingExternalRatings
                             )
+                            SeriesFactGrid(series = series)
                             SeriesVersionSelector(
                                 variants = series.variants,
                                 selectedVariantId = series.selectedVariantId ?: series.id,
@@ -411,21 +441,37 @@ private fun SeriesDetailContent(
                                 maxLines = 5,
                                 overflow = TextOverflow.Ellipsis
                             )
+                            val onPlayTrailer: () -> Unit = {
+                                resolveTrailerUrl(series.youtubeTrailer)?.let { trailerUrl ->
+                                    runCatching {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(trailerUrl)))
+                                    }
+                                }
+                            }
                             resumeEpisode?.let { ep ->
                                 val hasProgress = ep.watchProgress > 5000L
                                 SeriesDetailActions(
                                     series = series,
                                     resumeEpisode = ep,
-                                     hasProgress = hasProgress,
-                                     isCasting = isCasting,
-                                     onResumeClick = onResumeClick,
-                                     onCopyUrl = { copyEpisodeUrl(ep) },
-                                     onCast = onCastResumeEpisode,
-                                     onToggleFavorite = onToggleFavorite
-                                 )
+                                    hasProgress = hasProgress,
+                                    isCasting = isCasting,
+                                    onResumeClick = onResumeClick,
+                                    onOpenExternalPlayer = { onOpenExternalPlayer(ep) },
+                                    onCopyUrl = { copyEpisodeUrl(ep) },
+                                    onCast = onCastResumeEpisode,
+                                    onToggleFavorite = onToggleFavorite,
+                                    onPlayTrailer = onPlayTrailer,
+                                    onMarkWatched = onMarkSeriesWatched,
+                                    onRemoveFromHistory = onRemoveSeriesFromHistory
+                                )
                             }
                             if (resumeEpisode == null) {
-                                SeriesDetailFavoriteAction(series = series, onToggleFavorite = onToggleFavorite)
+                                SeriesDetailFavoriteAction(
+                                    series = series,
+                                    onToggleFavorite = onToggleFavorite,
+                                    onPlayTrailer = onPlayTrailer,
+                                    onMarkWatched = onMarkSeriesWatched
+                                )
                             }
                         }
                     }
@@ -479,6 +525,7 @@ private fun SeriesDetailContent(
                         episode = episode,
                         fallbackImageUrl = fallbackCover,
                         onClick = { onEpisodeClick(episode) },
+                        onOpenExternalPlayer = { onOpenExternalPlayer(episode) },
                         onCopyUrl = { copyEpisodeUrl(episode) },
                         onDownload = { onDownloadEpisode(episode) },
                         onCast = { onCastEpisode(episode) },
@@ -500,6 +547,57 @@ private fun SeriesDetailContent(
                                     season.episodes.size
                                 )
                             )
+                        }
+                    }
+                }
+            }
+
+            if (stremioStreams.isNotEmpty()) {
+                item {
+                    Text(
+                        text = "Add-on Streams",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = AppColors.TextPrimary
+                    )
+                }
+                item {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(stremioStreams) { stream ->
+                            TvClickableSurface(
+                                onClick = {
+                                    stream.url?.let { url ->
+                                        com.streamvault.app.player.external.ExternalPlayerLauncher.launch(context, url)
+                                    }
+                                },
+                                shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(12.dp)),
+                                colors = ClickableSurfaceDefaults.colors(
+                                    containerColor = AppColors.SurfaceElevated,
+                                    focusedContainerColor = AppColors.Brand.copy(alpha = 0.3f)
+                                ),
+                                modifier = Modifier.width(200.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = stream.title ?: stream.name ?: "Stream",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = AppColors.TextPrimary,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    stream.quality?.let { quality ->
+                                        Text(
+                                            text = quality,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = AppColors.Brand
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -549,10 +647,15 @@ private fun SeriesDetailActions(
     hasProgress: Boolean,
     isCasting: Boolean,
     onResumeClick: (Episode) -> Unit,
+    onOpenExternalPlayer: () -> Unit,
     onCopyUrl: () -> Unit,
     onCast: () -> Unit,
-    onToggleFavorite: () -> Unit
+    onToggleFavorite: () -> Unit,
+    onPlayTrailer: () -> Unit,
+    onMarkWatched: (Boolean) -> Unit,
+    onRemoveFromHistory: () -> Unit
 ) {
+    val hasTrailer = !series.youtubeTrailer.isNullOrBlank()
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
         TvButton(
             onClick = { onResumeClick(resumeEpisode) },
@@ -579,6 +682,15 @@ private fun SeriesDetailActions(
             )
         }
         TvButton(
+            onClick = onOpenExternalPlayer,
+            colors = ButtonDefaults.colors(
+                containerColor = AppColors.SurfaceEmphasis,
+                contentColor = AppColors.TextPrimary
+            )
+        ) {
+            Text(stringResource(R.string.player_open_in_external_player))
+        }
+        TvButton(
             onClick = onCopyUrl,
             colors = ButtonDefaults.colors(
                 containerColor = AppColors.SurfaceEmphasis,
@@ -601,28 +713,93 @@ private fun SeriesDetailActions(
                 )
             )
         }
-        SeriesDetailFavoriteAction(series = series, onToggleFavorite = onToggleFavorite)
+        if (hasTrailer) {
+            TvButton(
+                onClick = onPlayTrailer,
+                colors = ButtonDefaults.colors(
+                    containerColor = AppColors.SurfaceEmphasis,
+                    contentColor = AppColors.TextPrimary
+                )
+            ) {
+                Text(stringResource(R.string.series_trailer_button))
+            }
+        }
+        if (hasProgress) {
+            TvButton(
+                onClick = onRemoveFromHistory,
+                colors = ButtonDefaults.colors(
+                    containerColor = AppColors.SurfaceEmphasis,
+                    contentColor = AppColors.TextPrimary
+                )
+            ) {
+                Text(stringResource(R.string.vod_remove_from_history))
+            }
+        }
+        TvButton(
+            onClick = { onMarkWatched(!hasProgress) },
+            colors = ButtonDefaults.colors(
+                containerColor = AppColors.SurfaceEmphasis,
+                contentColor = AppColors.TextPrimary
+            )
+        ) {
+            Text(
+                stringResource(
+                    if (hasProgress) R.string.vod_mark_as_watched else R.string.vod_mark_as_unwatched
+                )
+            )
+        }
+        SeriesDetailFavoriteAction(
+            series = series,
+            onToggleFavorite = onToggleFavorite,
+            onPlayTrailer = onPlayTrailer,
+            onMarkWatched = onMarkWatched
+        )
     }
 }
 
 @Composable
 private fun SeriesDetailFavoriteAction(
     series: Series,
-    onToggleFavorite: () -> Unit
+    onToggleFavorite: () -> Unit,
+    onPlayTrailer: () -> Unit = {},
+    onMarkWatched: (Boolean) -> Unit = {}
 ) {
-    TvIconButton(
-        onClick = onToggleFavorite,
-        colors = ButtonDefaults.colors(
-            containerColor = if (series.isFavorite) AppColors.Brand else AppColors.SurfaceEmphasis,
-            contentColor = if (series.isFavorite) Color.White else AppColors.TextSecondary
-        )
-    ) {
-        Icon(
-            imageVector = if (series.isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-            contentDescription = stringResource(
-                if (series.isFavorite) R.string.favorites_remove else R.string.favorites_add
+    val hasTrailer = !series.youtubeTrailer.isNullOrBlank()
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (hasTrailer) {
+            TvButton(
+                onClick = onPlayTrailer,
+                colors = ButtonDefaults.colors(
+                    containerColor = AppColors.SurfaceEmphasis,
+                    contentColor = AppColors.TextPrimary
+                )
+            ) {
+                Text(stringResource(R.string.series_trailer_button))
+            }
+        }
+        TvButton(
+            onClick = { onMarkWatched(true) },
+            colors = ButtonDefaults.colors(
+                containerColor = AppColors.SurfaceEmphasis,
+                contentColor = AppColors.TextPrimary
             )
-        )
+        ) {
+            Text(stringResource(R.string.vod_mark_as_watched))
+        }
+        TvIconButton(
+            onClick = onToggleFavorite,
+            colors = ButtonDefaults.colors(
+                containerColor = if (series.isFavorite) AppColors.Brand else AppColors.SurfaceEmphasis,
+                contentColor = if (series.isFavorite) Color.White else AppColors.TextSecondary
+            )
+        ) {
+            Icon(
+                imageVector = if (series.isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                contentDescription = stringResource(
+                    if (series.isFavorite) R.string.favorites_remove else R.string.favorites_add
+                )
+            )
+        }
     }
 }
 
@@ -665,6 +842,7 @@ fun EpisodeItem(
     episode: Episode,
     fallbackImageUrl: String? = null,
     onClick: () -> Unit,
+    onOpenExternalPlayer: () -> Unit,
     onCopyUrl: () -> Unit,
     onDownload: () -> Unit,
     onCast: () -> Unit,
@@ -691,6 +869,15 @@ fun EpisodeItem(
             )
         }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            TvButton(
+                onClick = onOpenExternalPlayer,
+                colors = ButtonDefaults.colors(
+                    containerColor = AppColors.SurfaceEmphasis,
+                    contentColor = AppColors.TextPrimary
+                )
+            ) {
+                Text(stringResource(R.string.player_open_in_external_player))
+            }
             TvButton(
                 onClick = onDownload,
                 colors = ButtonDefaults.colors(
@@ -732,3 +919,49 @@ private tailrec fun Context.findMainActivity(): MainActivity? = when (this) {
     is ContextWrapper -> baseContext.findMainActivity()
     else -> null
 }
+
+private fun resolveTrailerUrl(rawTrailer: String?): String? {
+    val trailer = rawTrailer?.trim().orEmpty()
+    if (trailer.isBlank()) return null
+    return when {
+        trailer.startsWith("http://", ignoreCase = true) || trailer.startsWith("https://", ignoreCase = true) -> trailer
+        trailer.startsWith("youtu.be/", ignoreCase = true) -> "https://$trailer"
+        trailer.startsWith("www.youtube.com/", ignoreCase = true) || trailer.startsWith("youtube.com/", ignoreCase = true) -> "https://$trailer"
+        else -> "https://www.youtube.com/watch?v=$trailer"
+    }
+}
+
+@Composable
+private fun SeriesFactGrid(series: Series) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SeriesFactRow(label = stringResource(R.string.series_detail_director), value = series.director)
+        SeriesFactRow(label = stringResource(R.string.series_detail_release_date), value = series.releaseDate)
+        SeriesFactRow(label = stringResource(R.string.series_detail_episode_runtime), value = series.episodeRunTime)
+        SeriesFactRow(label = stringResource(R.string.series_detail_genre), value = series.genre)
+        SeriesFactRow(label = stringResource(R.string.series_detail_cast), value = series.cast)
+    }
+}
+
+@Composable
+private fun SeriesFactRow(
+    label: String,
+    value: String?
+) {
+    val resolvedValue = value?.takeIf { it.isNotBlank() } ?: stringResource(R.string.series_detail_unknown)
+    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleMedium,
+            color = AppColors.TextPrimary,
+            modifier = Modifier.width(180.dp)
+        )
+        Text(
+            text = resolvedValue,
+            style = MaterialTheme.typography.bodyLarge,
+            color = AppColors.TextSecondary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+

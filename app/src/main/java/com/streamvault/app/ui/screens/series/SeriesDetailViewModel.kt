@@ -27,6 +27,8 @@ import com.streamvault.domain.model.DownloadRequest
 import com.streamvault.domain.model.Episode
 import com.streamvault.domain.model.ExternalRatings
 import com.streamvault.domain.model.ExternalRatingsLookup
+import com.streamvault.domain.model.PlaybackHistory
+import com.streamvault.domain.model.PlaybackWatchedStatus
 import com.streamvault.domain.model.Result
 import com.streamvault.domain.model.Season
 import com.streamvault.domain.model.Series
@@ -48,6 +50,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -64,7 +67,8 @@ class SeriesDetailViewModel @Inject constructor(
     private val pluginManager: StreamVaultPluginManager,
     private val downloadManager: DownloadManager,
     private val castMediaRequestFactory: CastMediaRequestFactory,
-    private val castPlaybackCoordinator: CastPlaybackCoordinator
+    private val castPlaybackCoordinator: CastPlaybackCoordinator,
+    private val stremioRepository: com.streamvault.domain.stremio.StremioRepository
 ) : ViewModel() {
 
     private val seriesId: Long = checkNotNull(
@@ -119,6 +123,7 @@ class SeriesDetailViewModel @Inject constructor(
                     }
                     loadExternalRatings(result.data)
                     startUnwatchedCountCollection(providerId, result.data.id)
+                    loadStremioStreams(result.data)
                     val selectedSeasonNumber = _uiState.value.selectedSeason?.seasonNumber
                     _uiState.update {
                         it.copy(
@@ -271,6 +276,45 @@ class SeriesDetailViewModel @Inject constructor(
         }
     }
 
+    fun openEpisodeInExternalPlayer(context: Context, episode: Episode) {
+        viewModelScope.launch {
+            val result = resolveCopyStreamUrl(episode)
+            when (result) {
+                is Result.Success -> {
+                    when (val launchResult = com.streamvault.app.player.external.ExternalPlayerLauncher.launch(context, result.data)) {
+                        is com.streamvault.app.player.external.ExternalPlayerLaunchResult.Success -> Unit
+                        is com.streamvault.app.player.external.ExternalPlayerLaunchResult.NoHandler ->
+                            Toast.makeText(context, context.getString(R.string.player_no_external_player), Toast.LENGTH_SHORT).show()
+                        is com.streamvault.app.player.external.ExternalPlayerLaunchResult.InvalidUrl ->
+                            Toast.makeText(context, context.getString(R.string.player_unsafe_stream_url), Toast.LENGTH_SHORT).show()
+                        is com.streamvault.app.player.external.ExternalPlayerLaunchResult.Failed ->
+                            Toast.makeText(context, context.getString(R.string.player_external_launch_failed), Toast.LENGTH_SHORT).show()
+                    }
+                }
+                is Result.Error -> {
+                    Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
+                }
+                Result.Loading -> Unit
+            }
+        }
+    }
+
+    private fun loadStremioStreams(series: Series) {
+        viewModelScope.launch {
+            try {
+                val queryId = series.tmdbId?.let { "tmdb:$it" } ?: series.name
+                when (val result = stremioRepository.getStreamCandidates("series", queryId)) {
+                    is Result.Success -> {
+                        _uiState.update { it.copy(stremioStreams = result.data) }
+                    }
+                    else -> Unit
+                }
+            } catch (_: Exception) {
+                // Non-critical background enrichment
+            }
+        }
+    }
+
     fun castResumeEpisode() {
         _uiState.value.resumeEpisode?.let(::castEpisode)
     }
@@ -377,6 +421,57 @@ class SeriesDetailViewModel @Inject constructor(
         // Fall back to the first episode that has never been started
         return ordered.firstOrNull { ep -> ep.lastWatchedAt == 0L }
     }
+
+    fun markSeriesWatched(watched: Boolean) {
+        val series = _uiState.value.series ?: return
+        viewModelScope.launch {
+            val defaultProviderId = series.providerId.takeIf { it > 0L }
+                ?: providerRepository.getActiveProvider().firstOrNull()?.id
+                ?: return@launch
+            series.seasons.forEach { season ->
+                season.episodes.forEach { ep ->
+                    val providerId = ep.providerId.takeIf { it > 0L } ?: defaultProviderId
+                    if (watched) {
+                        val durationMs = (ep.durationSeconds * 1000L).takeIf { it > 0 } ?: 1000L
+                        playbackHistoryRepository.markAsWatched(
+                            PlaybackHistory(
+                                contentId = ep.id,
+                                contentType = ContentType.SERIES,
+                                providerId = providerId,
+                                title = ep.title,
+                                posterUrl = ep.coverUrl ?: series.posterUrl,
+                                streamUrl = ep.streamUrl,
+                                seriesId = series.id,
+                                seasonNumber = season.seasonNumber,
+                                episodeNumber = ep.episodeNumber,
+                                resumePositionMs = durationMs,
+                                totalDurationMs = durationMs,
+                                lastWatchedAt = System.currentTimeMillis(),
+                                watchedStatus = PlaybackWatchedStatus.COMPLETED_MANUAL
+                            )
+                        )
+                    } else {
+                        playbackHistoryRepository.removeFromHistory(ep.id, ContentType.SERIES, providerId)
+                    }
+                }
+            }
+        }
+    }
+
+    fun removeSeriesFromHistory() {
+        val series = _uiState.value.series ?: return
+        viewModelScope.launch {
+            val defaultProviderId = series.providerId.takeIf { it > 0L }
+                ?: providerRepository.getActiveProvider().firstOrNull()?.id
+                ?: return@launch
+            series.seasons.forEach { season ->
+                season.episodes.forEach { ep ->
+                    val providerId = ep.providerId.takeIf { it > 0L } ?: defaultProviderId
+                    playbackHistoryRepository.removeFromHistory(ep.id, ContentType.SERIES, providerId)
+                }
+            }
+        }
+    }
 }
 
 data class SeriesDetailUiState(
@@ -388,5 +483,6 @@ data class SeriesDetailUiState(
     val error: String? = null,
     val isCasting: Boolean = false,
     val isLoadingExternalRatings: Boolean = false,
-    val externalRatings: ExternalRatings = ExternalRatings.unavailable()
+    val externalRatings: ExternalRatings = ExternalRatings.unavailable(),
+    val stremioStreams: List<com.streamvault.domain.stremio.StremioStream> = emptyList()
 )

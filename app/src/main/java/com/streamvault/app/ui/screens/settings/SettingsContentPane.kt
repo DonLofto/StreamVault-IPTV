@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.streamvault.domain.model.Provider
@@ -39,6 +41,11 @@ internal fun SettingsContentPane(
     onOpenUri: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val traktState by viewModel.traktAuthState.collectAsStateWithLifecycle()
+    val vpnStatus by viewModel.vpnStatus.collectAsStateWithLifecycle()
+    val vpnProfiles by viewModel.vpnProfiles.collectAsStateWithLifecycle()
+    val stremioAddons by viewModel.stremioAddons.collectAsStateWithLifecycle()
+
     LazyColumn(
         modifier = modifier
             .fillMaxHeight()
@@ -187,6 +194,27 @@ internal fun SettingsContentPane(
                 viewModel = viewModel
             )
         } else if (dialogState.selectedCategory == 7) {
+            settingsTraktSection(
+                traktState = traktState,
+                onStartPairing = viewModel::startTraktPairing,
+                onCancelPairing = viewModel::cancelTraktPairing,
+                onDisconnect = viewModel::disconnectTrakt
+            )
+        } else if (dialogState.selectedCategory == 8) {
+            settingsVpnSection(
+                vpnStatus = vpnStatus,
+                vpnProfiles = vpnProfiles,
+                onToggleVpn = viewModel::toggleVpn,
+                onImportConfig = viewModel::importWireGuardConfig,
+                onDeleteProfile = viewModel::deleteVpnProfile
+            )
+        } else if (dialogState.selectedCategory == 9) {
+            settingsStremioSection(
+                addons = stremioAddons,
+                onInstallAddon = viewModel::installStremioAddon,
+                onUninstallAddon = viewModel::uninstallStremioAddon
+            )
+        } else if (dialogState.selectedCategory == 10) {
             settingsAboutSection(
                 uiState = uiState,
                 context = context,

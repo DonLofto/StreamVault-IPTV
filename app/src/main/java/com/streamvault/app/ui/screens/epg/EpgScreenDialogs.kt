@@ -66,6 +66,7 @@ import com.streamvault.domain.model.EpgMatchType
 import com.streamvault.domain.model.EpgOverrideCandidate
 import com.streamvault.domain.model.EpgSourceType
 import com.streamvault.domain.model.Program
+import com.streamvault.domain.model.ProgramReminder
 import java.util.Date
 
 @Composable
@@ -200,7 +201,9 @@ internal fun GuideOptionsOverlay(
     onToggleScheduledOnly: () -> Unit,
     onToggleFavoritesOnly: () -> Unit,
     onRefresh: () -> Unit,
-    onManageEpgMatch: (() -> Unit)? = null
+    onManageEpgMatch: (() -> Unit)? = null,
+    onManageReminders: (() -> Unit)? = null,
+    upcomingRemindersCount: Int = 0
 ) {
     val optionsFocusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) {
@@ -285,6 +288,12 @@ internal fun GuideOptionsOverlay(
                         .padding(horizontal = 24.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
                 ) {
+                    if (onManageReminders != null) {
+                        GuideShortcutChip(
+                            label = stringResource(R.string.epg_reminders_button_label, upcomingRemindersCount),
+                            onClick = onManageReminders
+                        )
+                    }
                     if (onManageEpgMatch != null) {
                         GuideShortcutChip(
                             label = stringResource(R.string.epg_override_manage),
@@ -361,6 +370,18 @@ internal fun CompactGuideProgramDialog(
                         style = MaterialTheme.typography.labelMedium,
                         color = Primary
                     )
+                }
+                val programBadges = listOfNotNull(
+                    program.rating?.takeIf { it.isNotBlank() }?.let { stringResource(R.string.epg_program_rating_badge, it) },
+                    program.genre?.takeIf { it.isNotBlank() },
+                    program.category?.takeIf { it.isNotBlank() }
+                )
+                if (programBadges.isNotEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        programBadges.forEach { badge ->
+                            GuideHeroBadge(text = badge)
+                        }
+                    }
                 }
                 if (now in program.startTime until program.endTime) {
                     LinearProgressIndicator(
@@ -857,4 +878,112 @@ internal fun GuideCategoryPickerDialog(
 internal fun epgCategoryKey(category: Category, index: Int): String {
     return "category:${category.id}:${category.name.trim()}:$index"
 }
+
+@Composable
+internal fun ProgramRemindersDialog(
+    reminders: List<ProgramReminder>,
+    onDismiss: () -> Unit,
+    onCancelReminder: (ProgramReminder) -> Unit
+) {
+    val appTimeFormat = LocalAppTimeFormat.current
+    val format = remember(appTimeFormat) { appTimeFormat.createTimeFormat() }
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    GuideModalDialog(onDismiss = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .widthIn(min = 460.dp, max = 680.dp)
+                .focusGroup(),
+            colors = SurfaceDefaults.colors(containerColor = SurfaceElevated),
+            shape = RoundedCornerShape(20.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = stringResource(R.string.epg_reminders_manage_title),
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = OnSurface
+                    )
+                    GuideShortcutChip(
+                        label = stringResource(R.string.settings_cancel),
+                        onClick = onDismiss,
+                        modifier = Modifier.focusRequester(focusRequester)
+                    )
+                }
+
+                if (reminders.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.epg_reminders_empty),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = OnSurfaceDim,
+                        modifier = Modifier.padding(vertical = 24.dp)
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 340.dp)
+                            .focusGroup(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(reminders, key = { "${it.providerId}:${it.channelId}:${it.programStartTime}" }) { reminder ->
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = SurfaceDefaults.colors(containerColor = SurfaceHighlight)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = reminder.programTitle,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = OnSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "${reminder.channelName} • ${format.format(Date(reminder.programStartTime))}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = OnSurfaceDim
+                                        )
+                                    }
+                                    TvButton(
+                                        onClick = { onCancelReminder(reminder) },
+                                        scale = ButtonDefaults.scale(focusedScale = 1f),
+                                        colors = ButtonDefaults.colors(
+                                            containerColor = SurfaceElevated,
+                                            contentColor = com.streamvault.app.ui.theme.AccentRed
+                                        )
+                                    ) {
+                                        Text(stringResource(R.string.epg_reminder_cancel))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 

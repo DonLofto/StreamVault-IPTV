@@ -108,7 +108,7 @@ import kotlin.coroutines.resume
 
 // ??? Source type ?????????????????????????????????????????????????????????????
 
-private enum class SourceType { XTREAM, STALKER, M3U_URL, M3U_FILE, JELLYFIN }
+private enum class SourceType { XTREAM, STALKER, M3U_URL, M3U_FILE, JELLYFIN, EMBY }
 
 private data class StalkerRequestRuleUiState(
     val action: String = "",
@@ -355,6 +355,7 @@ fun ProviderSetupScreen(
         selectedTab == 0 -> SourceType.XTREAM
         selectedTab == 1 -> SourceType.STALKER
         selectedTab == 3 -> SourceType.JELLYFIN
+        selectedTab == 4 -> SourceType.EMBY
         uiState.m3uTab == 1 -> SourceType.M3U_FILE
         else -> SourceType.M3U_URL
     }
@@ -383,6 +384,10 @@ fun ProviderSetupScreen(
             SourceType.JELLYFIN -> {
                 selectedTab = 3
                 viewModel.applySourceDefaults(ProviderSetupViewModel.SetupSourceType.JELLYFIN)
+            }
+            SourceType.EMBY -> {
+                selectedTab = 4
+                viewModel.applySourceDefaults(ProviderSetupViewModel.SetupSourceType.EMBY)
             }
         }
     }
@@ -488,6 +493,7 @@ fun ProviderSetupScreen(
                         onLoginStalker = { viewModel.loginStalker(serverUrl, stalkerMacAddress, stalkerAuthMode, username, password, name, "", httpHeaders, stalkerDeviceProfile, stalkerDeviceTimezone, stalkerDeviceLocale, stalkerSerialNumber, stalkerDeviceId, stalkerDeviceId2, stalkerSignature, buildStalkerAdvancedOptionsJson()) },
                         onAddM3u = { viewModel.addM3u(m3uUrl, name, httpUserAgent, httpHeaders) },
                         onLoginJellyfin = { viewModel.loginJellyfin(serverUrl, username, password, name) },
+                        onLoginEmby = { viewModel.loginEmby(serverUrl, username, password, name) },
                         quickConnectCode = uiState.jellyfinQuickConnectCode,
                         onQuickConnectRequest = { viewModel.loginJellyfinQuickConnect(serverUrl.trim(), name.trim()) },
                         onStartPhonePairing = viewModel::startPhonePairing,
@@ -549,6 +555,7 @@ fun ProviderSetupScreen(
                         onLoginStalker = { viewModel.loginStalker(serverUrl, stalkerMacAddress, stalkerAuthMode, username, password, name, "", httpHeaders, stalkerDeviceProfile, stalkerDeviceTimezone, stalkerDeviceLocale, stalkerSerialNumber, stalkerDeviceId, stalkerDeviceId2, stalkerSignature, buildStalkerAdvancedOptionsJson()) },
                         onAddM3u = { viewModel.addM3u(m3uUrl, name, httpUserAgent, httpHeaders) },
                         onLoginJellyfin = { viewModel.loginJellyfin(serverUrl, username, password, name) },
+                        onLoginEmby = { viewModel.loginEmby(serverUrl, username, password, name) },
                         quickConnectCode = uiState.jellyfinQuickConnectCode,
                         onQuickConnectRequest = { viewModel.loginJellyfinQuickConnect(serverUrl.trim(), name.trim()) },
                         onStartPhonePairing = viewModel::startPhonePairing,
@@ -893,6 +900,7 @@ private fun ProviderFormContent(
     onLoginStalker: () -> Unit,
     onAddM3u: () -> Unit,
     onLoginJellyfin: () -> Unit,
+    onLoginEmby: () -> Unit,
     quickConnectCode: String,
     onQuickConnectRequest: () -> Unit,
     onStartPhonePairing: () -> Unit,
@@ -1262,6 +1270,29 @@ private fun ProviderFormContent(
                         onClick = onLoginJellyfin
                     )
                 }
+
+                SourceType.EMBY -> {
+                    EmbyProviderForm(
+                        serverUrl = serverUrl,
+                        onServerUrlChange = onServerUrlChange,
+                        username = username,
+                        onUsernameChange = onUsernameChange,
+                        password = password,
+                        onPasswordChange = onPasswordChange,
+                        name = name,
+                        onNameChange = onNameChange
+                    )
+                    FormErrors(uiState.validationError, uiState.error)
+                    ActionButton(
+                        text = when {
+                            uiState.isLoading -> stringResource(R.string.setup_validating)
+                            uiState.isEditing -> stringResource(R.string.setup_save)
+                            else -> stringResource(R.string.setup_add)
+                        },
+                        isLoading = uiState.isLoading,
+                        onClick = onLoginEmby
+                    )
+                }
             }
         }
     }
@@ -1329,7 +1360,8 @@ private fun AdvancedProviderOptionsSection(
         SourceType.XTREAM,
         SourceType.M3U_URL,
         SourceType.M3U_FILE,
-        SourceType.JELLYFIN -> ProviderEpgSyncMode.UPFRONT
+        SourceType.JELLYFIN,
+        SourceType.EMBY -> ProviderEpgSyncMode.UPFRONT
     }
 
     LaunchedEffect(uiState.isEditing, uiState.epgSyncMode, uiState.xtreamLiveSyncMode, uiState.guideSourcePolicy, uiState.channelLogoSourcePolicy, sourceType) {
@@ -2216,7 +2248,8 @@ private fun supportsGuideAndLogoPolicy(sourceType: SourceType): Boolean = when (
     SourceType.STALKER,
     SourceType.M3U_URL,
     SourceType.M3U_FILE -> true
-    SourceType.JELLYFIN -> false
+    SourceType.JELLYFIN,
+    SourceType.EMBY -> false
 }
 
 @Composable
@@ -2394,6 +2427,15 @@ private fun SourceTypeSelectorPanel(
                     onClick = { onSelect(SourceType.JELLYFIN) }
                 )
             }
+            if (!isEditing || sourceType == SourceType.EMBY) {
+                SourceTypeCard(
+                    title = "Emby",
+                    subtitle = "Emby media server",
+                    selected = sourceType == SourceType.EMBY,
+                    enabled = !isEditing,
+                    onClick = { onSelect(SourceType.EMBY) }
+                )
+            }
             if (!isEditing) {
                 ImportOptionsButton(
                     text = stringResource(R.string.settings_restore_data),
@@ -2512,6 +2554,13 @@ private fun SourceTypeTabRow(
                 text = androidx.compose.ui.res.stringResource(R.string.setup_tab_jellyfin),
                 isSelected = sourceType == SourceType.JELLYFIN,
                 onClick = { if (!isEditing) onSelect(SourceType.JELLYFIN) }
+            )
+        }
+        if (!isEditing || sourceType == SourceType.EMBY) {
+            TabButton(
+                text = "Emby",
+                isSelected = sourceType == SourceType.EMBY,
+                onClick = { if (!isEditing) onSelect(SourceType.EMBY) }
             )
         }
     }
@@ -3364,5 +3413,63 @@ private fun generateJellyfinQuickConnectQrCode(serverUrl: String, code: String):
         bitmap
     } catch (e: Exception) {
         null
+    }
+}
+
+@Composable
+private fun EmbyProviderForm(
+    serverUrl: String,
+    onServerUrlChange: (String) -> Unit,
+    username: String,
+    onUsernameChange: (String) -> Unit,
+    password: String,
+    onPasswordChange: (String) -> Unit,
+    name: String,
+    onNameChange: (String) -> Unit
+) {
+    val isTelevisionDevice = rememberIsTelevisionDevice()
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = "Connect your Emby media server to access Live TV, Movies, and TV Shows.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextSecondary
+        )
+        ProviderTextField(
+            value = serverUrl,
+            onValueChange = onServerUrlChange,
+            placeholder = "http://emby-server:8096",
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.None,
+                autoCorrectEnabled = false,
+                keyboardType = if (isTelevisionDevice) KeyboardType.Ascii else KeyboardType.Uri,
+                imeAction = ImeAction.Next
+            )
+        )
+        ProviderTextField(
+            value = username,
+            onValueChange = onUsernameChange,
+            placeholder = stringResource(R.string.setup_username),
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.None,
+                autoCorrectEnabled = false,
+                keyboardType = KeyboardType.Ascii,
+                imeAction = ImeAction.Next
+            )
+        )
+        ProviderTextField(
+            value = password,
+            onValueChange = onPasswordChange,
+            placeholder = stringResource(R.string.setup_password),
+            isPassword = true
+        )
+        ProviderTextField(
+            value = name,
+            onValueChange = onNameChange,
+            placeholder = stringResource(R.string.setup_name_placeholder)
+        )
     }
 }

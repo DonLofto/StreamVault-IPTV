@@ -267,6 +267,12 @@ internal fun ImmersiveGuideHero(
                         highlight = true
                     )
                 }
+                selection?.program?.rating?.takeIf { it.isNotBlank() }?.let { rating ->
+                    GuideHeroBadge(text = stringResource(R.string.epg_program_rating_badge, rating))
+                }
+                selection?.program?.genre?.takeIf { it.isNotBlank() }?.let { genre ->
+                    GuideHeroBadge(text = genre)
+                }
                 if (isGuideStale) {
                     GuideHeroBadge(
                         text = stringResource(R.string.epg_stale_short),

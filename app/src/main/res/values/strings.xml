@@ -1781,4 +1781,29 @@
     <string name="settings_remote_selection_global_default">Use global default: %1$s</string>
     <string name="settings_remote_dialog_title">%1$s action</string>
     <string name="settings_remote_dialog_subtitle">Choose what this colored button should do in %1$s.</string>
+
+    <!-- Unwired feature extensions -->
+    <string name="settings_max_concurrent_streams">Max concurrent streams</string>
+    <string name="settings_max_concurrent_streams_subtitle">Limit active streams per provider to avoid provider account suspension.</string>
+    <string name="settings_max_concurrent_streams_entry">%1$d stream%2$s</string>
+    <string name="settings_max_concurrent_streams_default">%1$d stream%2$s (Default)</string>
+    <string name="epg_reminders_manage_title">Program Reminders</string>
+    <string name="epg_reminders_empty">No upcoming program reminders scheduled.</string>
+    <string name="epg_reminder_cancel">Cancel reminder</string>
+    <string name="epg_reminders_button_label">Reminders (%1$d)</string>
+    <string name="epg_program_rating_badge">Rating: %1$s</string>
+    <string name="epg_program_genre_badge">%1$s</string>
+    <string name="epg_program_category_badge">%1$s</string>
+    <string name="series_detail_director">Director</string>
+    <string name="series_detail_cast">Cast</string>
+    <string name="series_detail_episode_runtime">Episode runtime</string>
+    <string name="series_detail_release_date">Release date</string>
+    <string name="series_detail_genre">Genre</string>
+    <string name="series_detail_unknown">Unknown</string>
+    <string name="series_trailer_button">Watch Trailer</string>
+    <string name="vod_mark_as_watched">Mark as Watched</string>
+    <string name="vod_mark_as_unwatched">Mark as Unwatched</string>
+    <string name="vod_remove_from_history">Remove from Continue Watching</string>
+    <string name="vod_action_success">Updated successfully</string>
+    <string name="movie_detail_format">Format</string>
 </resources>

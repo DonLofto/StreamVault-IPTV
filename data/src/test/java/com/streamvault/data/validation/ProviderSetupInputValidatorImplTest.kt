@@ -212,4 +212,36 @@ class ProviderSetupInputValidatorImplTest {
         )
         assertThat(missingMac).isInstanceOf(Result.Error::class.java)
     }
+
+    @Test
+    fun `validateEmby validates serverUrl and credentials correctly`() {
+        val valid = validator.validateEmby(
+            serverUrl = "http://emby.local:8096",
+            username = "embyUser",
+            password = "embyPassword",
+            name = "My Emby"
+        )
+        assertThat(valid).isInstanceOf(Result.Success::class.java)
+        val data = (valid as Result.Success).data
+        assertThat(data.serverUrl).isEqualTo("http://emby.local:8096")
+        assertThat(data.username).isEqualTo("embyUser")
+        assertThat(data.name).isEqualTo("My Emby")
+
+        val blankUrl = validator.validateEmby(
+            serverUrl = "  ",
+            username = "embyUser",
+            password = "embyPassword",
+            name = "My Emby"
+        )
+        assertThat(blankUrl).isInstanceOf(Result.Error::class.java)
+
+        val blankPassword = validator.validateEmby(
+            serverUrl = "http://emby.local:8096",
+            username = "embyUser",
+            password = "",
+            name = "My Emby",
+            allowBlankPassword = false
+        )
+        assertThat(blankPassword).isInstanceOf(Result.Error::class.java)
+    }
 }

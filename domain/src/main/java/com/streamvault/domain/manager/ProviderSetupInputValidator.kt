@@ -50,6 +50,13 @@ data class ValidatedJellyfinQuickConnectProviderInput(
     val name: String
 )
 
+data class ValidatedEmbyProviderInput(
+    val serverUrl: String,
+    val username: String,
+    val password: String,
+    val name: String
+)
+
 interface ProviderSetupInputValidator {
     fun validateXtream(
         serverUrl: String,
@@ -100,4 +107,12 @@ interface ProviderSetupInputValidator {
         serverUrl: String,
         name: String
     ): Result<ValidatedJellyfinQuickConnectProviderInput>
+
+    fun validateEmby(
+        serverUrl: String,
+        username: String,
+        password: String,
+        name: String,
+        allowBlankPassword: Boolean = false
+    ): Result<ValidatedEmbyProviderInput>
 }

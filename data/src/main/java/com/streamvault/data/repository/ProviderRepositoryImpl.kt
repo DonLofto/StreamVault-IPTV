@@ -7,6 +7,7 @@ import com.streamvault.data.manager.recording.RecordingAlarmScheduler
 import com.streamvault.data.manager.reminder.ProgramReminderAlarmScheduler
 import com.streamvault.data.mapper.*
 import com.streamvault.data.preferences.PreferencesRepository
+import com.streamvault.data.remote.emby.EmbyProvider
 import com.streamvault.data.remote.http.buildGenericProviderRequestProfile
 import com.streamvault.data.remote.jellyfin.JellyfinProvider
 import com.streamvault.data.remote.stalker.StalkerApiService
@@ -61,7 +62,8 @@ class ProviderRepositoryImpl @Inject constructor(
     private val transactionRunner: DatabaseTransactionRunner,
     private val recordingAlarmScheduler: RecordingAlarmScheduler,
     private val programReminderAlarmScheduler: ProgramReminderAlarmScheduler,
-    private val jellyfinProvider: JellyfinProvider
+    private val jellyfinProvider: JellyfinProvider,
+    private val embyProvider: EmbyProvider
 ) : ProviderRepository {
     private companion object {
         const val XTREAM_GUIDE_BATCH_CONCURRENCY = 4
@@ -538,6 +540,69 @@ class ProviderRepositoryImpl @Inject constructor(
                 isActive = false, status = ProviderStatus.PARTIAL)
             val newId = providerDao.insert(provider.toSecureEntity())
             provider.copy(id = newId).copy(password = "")
+        }
+    }
+
+    override suspend fun loginEmby(
+        serverUrl: String,
+        username: String,
+        password: String,
+        name: String,
+        onProgress: ((String) -> Unit)?,
+        id: Long?
+    ): Result<Provider> {
+        return try {
+            val normalizedServerUrl = ProviderInputSanitizer.resolveUrlProtocol(
+                ProviderInputSanitizer.normalizeUrl(serverUrl)
+            )
+            val normalizedUsername = ProviderInputSanitizer.normalizeUsername(username)
+            val normalizedPassword = ProviderInputSanitizer.normalizePassword(password)
+            val normalizedName = ProviderInputSanitizer.normalizeProviderName(name)
+            ProviderInputSanitizer.validateUrl(normalizedServerUrl)?.let { return Result.error(it) }
+            if (normalizedUsername.isBlank()) return Result.error("Please enter Emby username")
+            val providerName = normalizedName.ifBlank {
+                normalizedServerUrl.substringAfter("//").substringBefore("/").ifBlank { "Emby" }
+            }
+            val existingProviderEntity = if (id != null) {
+                val collision = providerDao.getByUrlAndUser(normalizedServerUrl, normalizedUsername)
+                if (collision != null && collision.id != id) return Result.error("An Emby provider with this server URL and username already exists.")
+                providerDao.getById(id)
+            } else {
+                providerDao.getByUrlAndUser(normalizedServerUrl, normalizedUsername)
+            }
+            val existingProvider = existingProviderEntity?.toDomain()
+            val authResult = when {
+                normalizedPassword.isNotBlank() -> {
+                    onProgress?.invoke("Signing in to Emby...")
+                    when (val loginResult = embyProvider.authenticate(normalizedServerUrl, normalizedUsername, normalizedPassword)) {
+                        is Result.Success -> loginResult.data.accessToken
+                        is Result.Error -> return Result.error(loginResult.message, loginResult.exception)
+                        is Result.Loading -> return Result.error("Unexpected loading state")
+                    }
+                }
+                existingProvider != null -> try { credentialCrypto.decryptIfNeeded(existingProvider.password) }
+                    catch (e: CredentialDecryptionException) { return Result.error(e.message ?: CredentialDecryptionException.MESSAGE, e) }
+                else -> return Result.error("Please enter Emby password")
+            }
+            val providerData = if (existingProvider != null) {
+                val updated = existingProvider.copy(
+                    name = providerName.ifBlank { existingProvider.name }, type = ProviderType.EMBY,
+                    serverUrl = normalizedServerUrl, username = normalizedUsername, password = authResult,
+                    m3uUrl = "", epgUrl = "", httpUserAgent = "", httpHeaders = "",
+                    isActive = false, status = ProviderStatus.PARTIAL, lastSyncedAt = 0
+                )
+                providerDao.update(updated.toSecureEntity())
+                updated.copy(password = "")
+            } else {
+                val provider = Provider(name = providerName, type = ProviderType.EMBY,
+                    serverUrl = normalizedServerUrl, username = normalizedUsername, password = authResult,
+                    isActive = false, status = ProviderStatus.PARTIAL)
+                val newId = providerDao.insert(provider.toSecureEntity())
+                provider.copy(id = newId).copy(password = "")
+            }
+            Result.success(providerData)
+        } catch (e: Exception) {
+            Result.error("Failed to login to Emby: ${e.message}", e)
         }
     }
 

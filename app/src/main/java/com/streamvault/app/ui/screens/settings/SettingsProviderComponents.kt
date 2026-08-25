@@ -65,6 +65,10 @@ internal fun ProviderSettingsCard(
     xtreamIndexSectionStatuses: Map<String, ProviderCatalogCountStatus>,
     diagnostics: ProviderDiagnosticsUiModel?,
     databaseMaintenance: DatabaseMaintenanceUiModel?,
+    isRunningDatabaseMaintenance: Boolean = false,
+    isRunningTvInputSync: Boolean = false,
+    onRunDatabaseMaintenance: () -> Unit = {},
+    onSyncTvInputChannels: () -> Unit = {},
     syncWarnings: List<String>,
     onRetryWarningAction: (ProviderWarningAction) -> Unit,
     onConnect: () -> Unit,
@@ -201,7 +205,11 @@ internal fun ProviderSettingsCard(
                     ProviderCatalogCountStatus.QUEUED,
                     ProviderCatalogCountStatus.SYNCING
                 ),
-                databaseMaintenance = databaseMaintenance
+                databaseMaintenance = databaseMaintenance,
+                isRunningDatabaseMaintenance = isRunningDatabaseMaintenance,
+                isRunningTvInputSync = isRunningTvInputSync,
+                onRunDatabaseMaintenance = onRunDatabaseMaintenance,
+                onSyncTvInputChannels = onSyncTvInputChannels
             )
         }
 

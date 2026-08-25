@@ -2,8 +2,8 @@ package com.streamvault.app.ui.screens.downloads
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,17 +20,12 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -48,12 +43,25 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.tv.material3.Border
+import androidx.tv.material3.ButtonDefaults
+import androidx.tv.material3.ClickableSurfaceDefaults
+import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.streamvault.app.R
+import com.streamvault.app.ui.components.dialogs.PremiumDialog
 import com.streamvault.app.ui.components.rememberCrossfadeImageModel
 import com.streamvault.app.ui.components.shell.AppNavigationChrome
 import com.streamvault.app.ui.components.shell.AppScreenScaffold
 import com.streamvault.app.ui.design.AppColors
+import com.streamvault.app.ui.interaction.TvButton
+import com.streamvault.app.ui.interaction.TvClickableSurface
+import com.streamvault.app.ui.theme.FocusBorder
+import com.streamvault.app.ui.theme.OnSurface
+import com.streamvault.app.ui.theme.OnSurfaceDim
+import com.streamvault.app.ui.theme.Primary
+import com.streamvault.app.ui.theme.SurfaceElevated
+import com.streamvault.app.ui.theme.SurfaceHighlight
 import com.streamvault.domain.model.DownloadItem
 import com.streamvault.domain.model.DownloadStatus
 
@@ -97,7 +105,13 @@ fun DownloadsScreen(
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalAlignment = Alignment.End
                 ) {
-                    Button(onClick = { folderPicker.launch(null) }) {
+                    TvButton(
+                        onClick = { folderPicker.launch(null) },
+                        colors = ButtonDefaults.colors(
+                            containerColor = SurfaceElevated,
+                            contentColor = OnSurface
+                        )
+                    ) {
                         Text(text = stringResource(R.string.download_folder_change))
                     }
                     Text(
@@ -157,12 +171,12 @@ private fun DownloadsLoadingState() {
         ) {
             CircularProgressIndicator(
                 modifier = Modifier.size(48.dp),
-                color = AppColors.Brand
+                color = Primary
             )
             Text(
                 text = stringResource(R.string.downloads_loading),
                 style = MaterialTheme.typography.bodyLarge,
-                color = AppColors.TextPrimary
+                color = OnSurface
             )
         }
     }
@@ -181,12 +195,12 @@ private fun DownloadsEmptyState() {
             Text(
                 text = stringResource(R.string.downloads_empty_title),
                 style = MaterialTheme.typography.titleLarge,
-                color = AppColors.TextPrimary
+                color = OnSurface
             )
             Text(
                 text = stringResource(R.string.downloads_empty_hint),
                 style = MaterialTheme.typography.bodyMedium,
-                color = AppColors.TextSecondary,
+                color = OnSurfaceDim,
                 modifier = Modifier.padding(horizontal = 32.dp)
             )
         }
@@ -235,13 +249,24 @@ private fun DownloadCard(
         (download.bytesWritten.toFloat() / total.toFloat()).coerceIn(0f, 1f)
     } ?: 0f
 
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .clickable(enabled = download.status == DownloadStatus.COMPLETED, onClick = onOpenClick),
-        color = AppColors.Surface,
-        shape = RoundedCornerShape(14.dp)
+    val isCompleted = download.status == DownloadStatus.COMPLETED
+
+    TvClickableSurface(
+        onClick = { if (isCompleted) onOpenClick() else onResumeClick() },
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = SurfaceElevated,
+            focusedContainerColor = SurfaceHighlight,
+            contentColor = OnSurface,
+            focusedContentColor = OnSurface
+        ),
+        border = ClickableSurfaceDefaults.border(
+            focusedBorder = Border(
+                border = BorderStroke(2.dp, FocusBorder),
+                shape = RoundedCornerShape(14.dp)
+            )
+        ),
+        modifier = Modifier.fillMaxWidth()
     ) {
         Column(
             modifier = Modifier
@@ -253,7 +278,7 @@ private fun DownloadCard(
                     .fillMaxWidth()
                     .height(140.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(AppColors.SurfaceElevated)
+                    .background(Color.Black.copy(alpha = 0.4f))
             ) {
                 if (download.posterUrl != null) {
                     AsyncImage(
@@ -266,7 +291,7 @@ private fun DownloadCard(
                     Text(
                         text = stringResource(R.string.downloads_no_thumb),
                         style = MaterialTheme.typography.bodySmall,
-                        color = AppColors.TextTertiary,
+                        color = OnSurfaceDim,
                         modifier = Modifier.align(Alignment.Center)
                     )
                 }
@@ -284,7 +309,7 @@ private fun DownloadCard(
             Text(
                 text = download.contentName.ifBlank { stringResource(R.string.downloads_item_title) },
                 style = MaterialTheme.typography.titleSmall,
-                color = AppColors.TextPrimary,
+                color = OnSurface,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
@@ -293,7 +318,7 @@ private fun DownloadCard(
                 Text(
                     text = path,
                     style = MaterialTheme.typography.labelSmall,
-                    color = AppColors.TextTertiary,
+                    color = OnSurfaceDim,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 4.dp)
@@ -306,7 +331,7 @@ private fun DownloadCard(
                 Text(
                     text = formatFileSize(size),
                     style = MaterialTheme.typography.labelSmall,
-                    color = AppColors.TextTertiary,
+                    color = OnSurfaceDim,
                     modifier = Modifier.padding(top = 4.dp)
                 )
             }
@@ -315,14 +340,26 @@ private fun DownloadCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 8.dp),
-                horizontalArrangement = Arrangement.End
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
             ) {
                 if (download.status == DownloadStatus.FAILED) {
-                    TextButton(onClick = onResumeClick) {
+                    TvButton(
+                        onClick = onResumeClick,
+                        colors = ButtonDefaults.colors(
+                            containerColor = Primary,
+                            contentColor = Color.White
+                        )
+                    ) {
                         Text(text = stringResource(R.string.download_resume))
                     }
                 }
-                TextButton(onClick = onDeleteClick) {
+                TvButton(
+                    onClick = onDeleteClick,
+                    colors = ButtonDefaults.colors(
+                        containerColor = SurfaceHighlight,
+                        contentColor = com.streamvault.app.ui.theme.AccentRed
+                    )
+                ) {
                     Text(text = stringResource(R.string.download_delete))
                 }
             }
@@ -334,10 +371,10 @@ private fun DownloadCard(
 private fun StatusBadge(status: DownloadStatus, modifier: Modifier = Modifier) {
     val color = when (status) {
         DownloadStatus.COMPLETED -> AppColors.Success
-        DownloadStatus.DOWNLOADING -> AppColors.Brand
+        DownloadStatus.DOWNLOADING -> Primary
         DownloadStatus.PAUSED -> AppColors.Warning
         DownloadStatus.FAILED -> AppColors.Live
-        DownloadStatus.PENDING -> AppColors.TextTertiary
+        DownloadStatus.PENDING -> OnSurfaceDim
         DownloadStatus.CANCELLED -> AppColors.TextDisabled
     }
 
@@ -371,13 +408,13 @@ private fun DownloadProgress(status: DownloadStatus, progress: Float) {
                     modifier = Modifier
                         .weight(1f)
                         .height(4.dp),
-                    color = AppColors.Brand,
-                    trackColor = AppColors.SurfaceElevated
+                    color = Primary,
+                    trackColor = SurfaceHighlight
                 )
                 Text(
                     text = "${(progress * 100).toInt()}%",
                     style = MaterialTheme.typography.labelSmall,
-                    color = AppColors.TextSecondary
+                    color = OnSurfaceDim
                 )
             }
         }
@@ -390,7 +427,7 @@ private fun DownloadProgress(status: DownloadStatus, progress: Float) {
             Text(
                 text = statusLabel(status),
                 style = MaterialTheme.typography.labelSmall,
-                color = AppColors.TextSecondary,
+                color = OnSurfaceDim,
                 modifier = Modifier.padding(top = 8.dp)
             )
         }
@@ -415,30 +452,38 @@ private fun DeleteConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
+    PremiumDialog(
+        title = stringResource(R.string.downloads_delete_confirm_title),
+        subtitle = stringResource(
+            R.string.downloads_delete_confirm_msg,
+            item.contentName.ifBlank { stringResource(R.string.downloads_item_title) }
+        ),
         onDismissRequest = onDismiss,
-        title = {
-            Text(text = stringResource(R.string.downloads_delete_confirm_title))
-        },
-        text = {
-            Text(
-                text = stringResource(
-                    R.string.downloads_delete_confirm_msg,
-                    item.contentName.ifBlank { stringResource(R.string.downloads_item_title) }
-                )
-            )
-        },
-        confirmButton = {
-            Button(
-                onClick = onConfirm,
-                colors = ButtonDefaults.buttonColors(containerColor = AppColors.Live)
+        widthFraction = 0.48f,
+        content = {},
+        footer = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)
             ) {
-                Text(text = stringResource(R.string.downloads_delete_confirm_delete))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(text = stringResource(R.string.settings_cancel))
+                TvButton(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.colors(
+                        containerColor = Color.Transparent,
+                        contentColor = OnSurface
+                    )
+                ) {
+                    Text(text = stringResource(R.string.settings_cancel))
+                }
+                TvButton(
+                    onClick = onConfirm,
+                    colors = ButtonDefaults.colors(
+                        containerColor = com.streamvault.app.ui.theme.AccentRed,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text(text = stringResource(R.string.downloads_delete_confirm_delete))
+                }
             }
         }
     )

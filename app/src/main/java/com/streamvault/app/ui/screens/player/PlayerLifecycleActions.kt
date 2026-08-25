@@ -35,6 +35,27 @@ internal suspend fun PlayerViewModel.persistPlaybackProgress() {
         )
         watchNextManager.refreshWatchNext()
         launcherRecommendationsManager.refreshRecommendations()
+
+        if (traktRepository.authState.value.isAuthenticated && (currentContentType == ContentType.MOVIE || currentContentType == ContentType.SERIES)) {
+            val progress = ((pos.toDouble() / dur.toDouble()) * 100.0).coerceIn(0.0, 100.0)
+            val action = if (progress >= 80.0) com.streamvault.domain.trakt.TraktScrobbleAction.STOP else com.streamvault.domain.trakt.TraktScrobbleAction.START
+            val payload = if (currentContentType == ContentType.MOVIE) {
+                com.streamvault.domain.trakt.TraktScrobblePayload(
+                    movie = com.streamvault.domain.trakt.TraktMovie(title = currentTitle),
+                    progress = progress
+                )
+            } else {
+                com.streamvault.domain.trakt.TraktScrobblePayload(
+                    show = com.streamvault.domain.trakt.TraktShow(title = currentTitle),
+                    episode = com.streamvault.domain.trakt.TraktEpisode(
+                        season = currentSeasonNumber ?: 1,
+                        number = currentEpisodeNumber ?: 1
+                    ),
+                    progress = progress
+                )
+            }
+            traktRepository.scrobble(action, payload)
+        }
     }
 }
 

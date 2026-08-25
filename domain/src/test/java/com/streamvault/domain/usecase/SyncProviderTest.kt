@@ -187,6 +187,15 @@ private class FakeSyncProviderRepository(
         id: Long?
     ): Result<Provider> = error("Not used in test")
 
+    override suspend fun loginEmby(
+        serverUrl: String,
+        username: String,
+        password: String,
+        name: String,
+        onProgress: ((String) -> Unit)?,
+        id: Long?
+    ): Result<Provider> = error("Not used in test")
+
     override suspend fun refreshProviderData(
         providerId: Long,
         force: Boolean,

@@ -79,6 +79,14 @@ data class JellyfinQuickConnectProviderSetupCommand(
     val existingProviderId: Long? = null
 )
 
+data class EmbyProviderSetupCommand(
+    val serverUrl: String,
+    val username: String,
+    val password: String,
+    val name: String,
+    val existingProviderId: Long? = null
+)
+
 sealed class ValidateAndAddProviderResult {
     data class Success(val provider: Provider) : ValidateAndAddProviderResult()
     data class SavedWithWarning(val provider: Provider, val warning: String) : ValidateAndAddProviderResult()
@@ -358,6 +366,33 @@ class ValidateAndAddProvider @Inject constructor(
                 serverUrl = validated.data.serverUrl,
                 name = validated.data.name,
                 onCode = onCode,
+                onProgress = onProgress,
+                id = command.existingProviderId
+            ).toUseCaseResult()
+
+            is Result.Error -> ValidateAndAddProviderResult.ValidationError(validated.message)
+            is Result.Loading -> ValidateAndAddProviderResult.Error("Unexpected loading state")
+        }
+    }
+
+    suspend fun loginEmby(
+        command: EmbyProviderSetupCommand,
+        onProgress: ((String) -> Unit)? = null
+    ): ValidateAndAddProviderResult {
+        return when (
+            val validated = providerSetupInputValidator.validateEmby(
+                serverUrl = command.serverUrl,
+                username = command.username,
+                password = command.password,
+                allowBlankPassword = command.existingProviderId != null,
+                name = command.name
+            )
+        ) {
+            is Result.Success -> providerRepository.loginEmby(
+                serverUrl = validated.data.serverUrl,
+                username = validated.data.username,
+                password = validated.data.password,
+                name = validated.data.name,
                 onProgress = onProgress,
                 id = command.existingProviderId
             ).toUseCaseResult()

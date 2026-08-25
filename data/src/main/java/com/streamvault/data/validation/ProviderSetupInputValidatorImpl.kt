@@ -3,6 +3,7 @@ package com.streamvault.data.validation
 import com.streamvault.data.util.ProviderInputSanitizer
 import com.streamvault.data.util.UrlSecurityPolicy
 import com.streamvault.domain.manager.ProviderSetupInputValidator
+import com.streamvault.domain.manager.ValidatedEmbyProviderInput
 import com.streamvault.domain.manager.ValidatedJellyfinProviderInput
 import com.streamvault.domain.manager.ValidatedJellyfinQuickConnectProviderInput
 import com.streamvault.domain.manager.ValidatedM3uProviderInput
@@ -295,6 +296,22 @@ class ProviderSetupInputValidatorImpl @Inject constructor() : ProviderSetupInput
         val url = if (trimmedUrl.contains("://")) trimmedUrl else "https://$trimmedUrl"
         val trimmedName = name.trim().ifBlank { url.substringAfter("//").substringBefore("/").ifBlank { "Jellyfin" } }
         return Result.success(ValidatedJellyfinQuickConnectProviderInput(serverUrl = url, name = trimmedName))
+    }
+
+    override fun validateEmby(
+        serverUrl: String,
+        username: String,
+        password: String,
+        name: String,
+        allowBlankPassword: Boolean
+    ): Result<ValidatedEmbyProviderInput> {
+        val trimmedUrl = serverUrl.trim()
+        if (trimmedUrl.isBlank()) return Result.error("Server URL is required")
+        val url = if (trimmedUrl.contains("://")) trimmedUrl else "http://$trimmedUrl"
+        val trimmedName = name.trim().ifBlank { url.substringAfter("//").substringBefore("/").ifBlank { "Emby" } }
+        val trimmedUser = username.trim()
+        if (!allowBlankPassword && password.isBlank()) return Result.error("Password is required")
+        return Result.success(ValidatedEmbyProviderInput(serverUrl = url, username = trimmedUser, password = password.trim(), name = trimmedName))
     }
 
     private companion object {

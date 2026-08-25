@@ -211,7 +211,8 @@ class SeriesDetailViewModelCastingTest {
             pluginManager = mock<StreamVaultPluginManager>(),
             downloadManager = mock<DownloadManager>(),
             castMediaRequestFactory = CastMediaRequestFactory(),
-            castPlaybackCoordinator = coordinator
+            castPlaybackCoordinator = coordinator,
+            stremioRepository = mock<com.streamvault.domain.stremio.StremioRepository>()
         )
     }
 

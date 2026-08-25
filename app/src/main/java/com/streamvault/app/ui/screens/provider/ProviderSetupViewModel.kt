@@ -75,7 +75,8 @@ class ProviderSetupViewModel @Inject constructor(
         XTREAM,
         STALKER,
         M3U,
-        JELLYFIN
+        JELLYFIN,
+        EMBY
     }
 
     private val _uiState = MutableStateFlow(ProviderSetupState())
@@ -658,6 +659,79 @@ class ProviderSetupViewModel @Inject constructor(
         }
     }
 
+    fun loginEmby(
+        serverUrl: String,
+        username: String,
+        password: String,
+        name: String
+    ) {
+        _uiState.update {
+            it.copy(
+                validationError = null,
+                error = null,
+                completionWarning = null,
+                onboardingCompletion = OnboardingCompletion.NONE,
+                loginSuccess = false
+            )
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, validationError = null, syncProgress = "Connecting to Emby...") }
+            val existingId = if (_uiState.value.isEditing) _uiState.value.existingProviderId else null
+
+            when (val result = validateAndAddProvider.loginEmby(
+                com.streamvault.domain.usecase.EmbyProviderSetupCommand(
+                    serverUrl = serverUrl,
+                    username = username,
+                    password = password,
+                    name = name,
+                    existingProviderId = existingId
+                ),
+                onProgress = { msg -> _uiState.update { it.copy(syncProgress = msg) } }
+            )) {
+                is ValidateAndAddProviderResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            loginSuccess = true,
+                            onboardingCompletion = OnboardingCompletion.READY,
+                            error = null,
+                            completionWarning = null,
+                            syncProgress = null
+                        )
+                    }
+                }
+                is ValidateAndAddProviderResult.SavedWithWarning -> {
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            loginSuccess = true,
+                            onboardingCompletion = OnboardingCompletion.READY,
+                            error = null,
+                            completionWarning = result.warning,
+                            syncProgress = null
+                        )
+                    }
+                }
+                is ValidateAndAddProviderResult.ValidationError -> {
+                    _uiState.update {
+                        it.copy(isLoading = false, validationError = result.message, error = null, syncProgress = null)
+                    }
+                }
+                is ValidateAndAddProviderResult.Error -> {
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            error = result.message,
+                            validationError = null,
+                            syncProgress = null
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     fun loginJellyfinQuickConnect(
         serverUrl: String,
         name: String
@@ -1108,5 +1182,6 @@ private fun defaultEpgSyncModeFor(sourceType: ProviderSetupViewModel.SetupSource
     ProviderSetupViewModel.SetupSourceType.STALKER,
     ProviderSetupViewModel.SetupSourceType.XTREAM,
     ProviderSetupViewModel.SetupSourceType.M3U,
-    ProviderSetupViewModel.SetupSourceType.JELLYFIN -> ProviderEpgSyncMode.BACKGROUND
+    ProviderSetupViewModel.SetupSourceType.JELLYFIN,
+    ProviderSetupViewModel.SetupSourceType.EMBY -> ProviderEpgSyncMode.BACKGROUND
 }

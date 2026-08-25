@@ -440,3 +440,231 @@ internal fun RemoteShortcutSelectionDialog(
         }
     )
 }
+
+@Composable
+internal fun MaxConcurrentStreamsDialog(
+    currentLimit: Int,
+    onDismiss: () -> Unit,
+    onLimitSelected: (Int) -> Unit
+) {
+    val options = listOf(1, 2, 3, 4)
+    PremiumDialog(
+        title = stringResource(R.string.settings_max_concurrent_streams),
+        subtitle = stringResource(R.string.settings_max_concurrent_streams_subtitle),
+        onDismissRequest = onDismiss,
+        widthFraction = 0.52f,
+        content = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                options.forEach { count ->
+                    val isSelected = count == currentLimit
+                    val label = if (count == 2) {
+                        stringResource(R.string.settings_max_concurrent_streams_default, count, if (count == 1) "" else "s")
+                    } else {
+                        stringResource(R.string.settings_max_concurrent_streams_entry, count, if (count == 1) "" else "s")
+                    }
+                    TvClickableSurface(
+                        onClick = { onLimitSelected(count) },
+                        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
+                        colors = ClickableSurfaceDefaults.colors(
+                            containerColor = if (isSelected) Primary.copy(alpha = 0.18f) else SurfaceElevated,
+                            focusedContainerColor = Primary.copy(alpha = 0.28f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = if (isSelected) Primary else OnBackground
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        footer = {
+            PremiumDialogFooterButton(
+                label = stringResource(R.string.settings_cancel),
+                onClick = onDismiss
+            )
+        }
+    )
+}
+
+@Composable
+internal fun MultiViewPerformanceModeDialog(
+    selectedMode: String,
+    onDismiss: () -> Unit,
+    onModeSelected: (String) -> Unit
+) {
+    val modes = listOf(
+        "AUTO" to ("Automatic (Recommended)" to "Automatically adjust active slots and quality based on device capabilities and thermals."),
+        "CONSERVATIVE" to ("Conservative" to "Prioritize stability on lower-power devices by reducing concurrent streams."),
+        "BALANCED" to ("Balanced" to "Standard performance policy with balanced decoding limits."),
+        "MAXIMUM" to ("Maximum" to "Allow all slots to stream at maximum resolution without hardware throttling.")
+    )
+    PremiumDialog(
+        title = "MultiView Performance Mode",
+        subtitle = "Select performance management policy for multi-view streaming.",
+        onDismissRequest = onDismiss,
+        widthFraction = 0.52f,
+        content = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                modes.forEach { (modeKey, modeInfo) ->
+                    val (title, description) = modeInfo
+                    val isSelected = modeKey.equals(selectedMode, ignoreCase = true)
+                    TvClickableSurface(
+                        onClick = { onModeSelected(modeKey) },
+                        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
+                        colors = ClickableSurfaceDefaults.colors(
+                            containerColor = if (isSelected) Primary.copy(alpha = 0.18f) else SurfaceElevated,
+                            focusedContainerColor = Primary.copy(alpha = 0.28f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = title,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = if (isSelected) Primary else OnBackground
+                            )
+                            Text(
+                                text = description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = OnSurfaceDim
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        footer = {
+            PremiumDialogFooterButton(
+                label = stringResource(R.string.settings_cancel),
+                onClick = onDismiss
+            )
+        }
+    )
+}
+
+@Composable
+internal fun GuideDensityDialog(
+    selectedDensity: String,
+    onDismiss: () -> Unit,
+    onDensitySelected: (String) -> Unit
+) {
+    val densities = listOf(
+        "STANDARD" to ("Standard" to "Balanced row height and timeline intervals."),
+        "COMPACT" to ("Compact" to "Tighter layout showing more channels and programs on screen."),
+        "SPACIOUS" to ("Spacious" to "Larger text, posters, and increased spacing for easier viewing.")
+    )
+    PremiumDialog(
+        title = "Guide Density",
+        subtitle = "Choose layout density and timeline sizing for the TV Guide.",
+        onDismissRequest = onDismiss,
+        widthFraction = 0.52f,
+        content = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                densities.forEach { (densityKey, densityInfo) ->
+                    val (title, description) = densityInfo
+                    val isSelected = densityKey.equals(selectedDensity, ignoreCase = true)
+                    TvClickableSurface(
+                        onClick = { onDensitySelected(densityKey) },
+                        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
+                        colors = ClickableSurfaceDefaults.colors(
+                            containerColor = if (isSelected) Primary.copy(alpha = 0.18f) else SurfaceElevated,
+                            focusedContainerColor = Primary.copy(alpha = 0.28f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = title,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = if (isSelected) Primary else OnBackground
+                            )
+                            Text(
+                                text = description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = OnSurfaceDim
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        footer = {
+            PremiumDialogFooterButton(
+                label = stringResource(R.string.settings_cancel),
+                onClick = onDismiss
+            )
+        }
+    )
+}
+
+@Composable
+internal fun GuideChannelModeDialog(
+    selectedMode: String,
+    onDismiss: () -> Unit,
+    onModeSelected: (String) -> Unit
+) {
+    val modes = listOf(
+        "MODERN" to ("Modern Grid" to "Comprehensive electronic program guide grid with live previews."),
+        "CLASSIC" to ("Classic Channels" to "Traditional channel-first list view with program details.")
+    )
+    PremiumDialog(
+        title = "Guide Channel Mode",
+        subtitle = "Choose standard presentation mode for the TV Guide.",
+        onDismissRequest = onDismiss,
+        widthFraction = 0.52f,
+        content = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                modes.forEach { (modeKey, modeInfo) ->
+                    val (title, description) = modeInfo
+                    val isSelected = modeKey.equals(selectedMode, ignoreCase = true)
+                    TvClickableSurface(
+                        onClick = { onModeSelected(modeKey) },
+                        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
+                        colors = ClickableSurfaceDefaults.colors(
+                            containerColor = if (isSelected) Primary.copy(alpha = 0.18f) else SurfaceElevated,
+                            focusedContainerColor = Primary.copy(alpha = 0.28f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = title,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = if (isSelected) Primary else OnBackground
+                            )
+                            Text(
+                                text = description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = OnSurfaceDim
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        footer = {
+            PremiumDialogFooterButton(
+                label = stringResource(R.string.settings_cancel),
+                onClick = onDismiss
+            )
+        }
+    )
+}
+

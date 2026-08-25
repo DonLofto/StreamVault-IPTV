@@ -96,6 +96,28 @@ internal fun LazyListScope.settingsPlaybackSection(
                 LiveStreamFormatMode.MPEG_TS
             )
         }
+        var showMaxConcurrentStreamsDialog by rememberSaveable { mutableStateOf(false) }
+        var showMultiViewPerformanceModeDialog by rememberSaveable { mutableStateOf(false) }
+        if (showMultiViewPerformanceModeDialog) {
+            MultiViewPerformanceModeDialog(
+                selectedMode = uiState.multiViewPerformanceMode,
+                onDismiss = { showMultiViewPerformanceModeDialog = false },
+                onModeSelected = { mode ->
+                    viewModel.setMultiViewPerformanceMode(mode)
+                    showMultiViewPerformanceModeDialog = false
+                }
+            )
+        }
+        if (showMaxConcurrentStreamsDialog) {
+            MaxConcurrentStreamsDialog(
+                currentLimit = uiState.maxConcurrentStreams,
+                onDismiss = { showMaxConcurrentStreamsDialog = false },
+                onLimitSelected = { limit ->
+                    viewModel.setMaxConcurrentStreams(limit)
+                    showMaxConcurrentStreamsDialog = false
+                }
+            )
+        }
         if (showLiveStreamFormatDialog) {
             PremiumSelectionDialog(
                 title = "Live stream format",
@@ -445,6 +467,16 @@ internal fun LazyListScope.settingsPlaybackSection(
                 )
             }
         }
+        ClickableSettingsRow(
+            label = stringResource(R.string.settings_max_concurrent_streams),
+            value = stringResource(R.string.settings_max_concurrent_streams_entry, uiState.maxConcurrentStreams, if (uiState.maxConcurrentStreams == 1) "" else "s"),
+            onClick = { showMaxConcurrentStreamsDialog = true }
+        )
+        ClickableSettingsRow(
+            label = "MultiView performance mode",
+            value = formatMultiViewPerformanceModeLabel(uiState.multiViewPerformanceMode),
+            onClick = { showMultiViewPerformanceModeDialog = true }
+        )
         HorizontalDivider(color = Color.White.copy(alpha = 0.07f), modifier = Modifier.padding(vertical = 4.dp))
         TvClickableSurface(
             onClick = { viewModel.setCenterTwoSlotMultiviewLayout(!uiState.centerTwoSlotMultiviewLayout) },
@@ -533,4 +565,11 @@ internal fun LazyListScope.settingsPlaybackSection(
             onApplyEthernet = viewModel::applySpeedTestRecommendationToEthernet
         )
     }
+}
+
+private fun formatMultiViewPerformanceModeLabel(mode: String): String = when (mode.uppercase(java.util.Locale.US)) {
+    "CONSERVATIVE" -> "Conservative"
+    "BALANCED" -> "Balanced"
+    "MAXIMUM" -> "Maximum"
+    else -> "Automatic"
 }

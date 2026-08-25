@@ -66,6 +66,21 @@ internal fun SettingsNavigationRail(
             accent = Color(0xFF66BB6A)
         ),
         SettingsNavEntry(
+            label = "Trakt.tv",
+            icon = "T",
+            accent = Color(0xFFED1C24)
+        ),
+        SettingsNavEntry(
+            label = "WireGuard VPN",
+            icon = "V",
+            accent = Color(0xFF4CAF50)
+        ),
+        SettingsNavEntry(
+            label = "Stremio Add-ons",
+            icon = "S",
+            accent = Color(0xFF8E24AA)
+        ),
+        SettingsNavEntry(
             label = stringResource(R.string.settings_about),
             icon = "i",
             accent = Color(0xFF78909C)

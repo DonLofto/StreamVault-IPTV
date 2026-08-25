@@ -584,6 +584,21 @@ private class FakeProviderSetupInputValidator(
         serverUrl: String,
         name: String
     ): Result<ValidatedJellyfinQuickConnectProviderInput> = jellyfinQuickConnectResult
+
+    override fun validateEmby(
+        serverUrl: String,
+        username: String,
+        password: String,
+        name: String,
+        allowBlankPassword: Boolean
+    ): Result<com.streamvault.domain.manager.ValidatedEmbyProviderInput> = Result.success(
+        com.streamvault.domain.manager.ValidatedEmbyProviderInput(
+            serverUrl = serverUrl,
+            username = username,
+            password = password,
+            name = name
+        )
+    )
 }
 
 private data class XtreamCall(
@@ -788,6 +803,23 @@ private class FakeProviderRepository : ProviderRepository {
                 serverUrl = serverUrl,
                 username = name,
                 password = "quick-connect-token"
+            )
+        )
+    }
+
+    override suspend fun loginEmby(
+        serverUrl: String,
+        username: String,
+        password: String,
+        name: String,
+        onProgress: ((String) -> Unit)?,
+        id: Long?
+    ): Result<Provider> {
+        return Result.success(
+            provider(id = id ?: 6L, name = name, type = ProviderType.EMBY).copy(
+                serverUrl = serverUrl,
+                username = username,
+                password = password
             )
         )
     }
