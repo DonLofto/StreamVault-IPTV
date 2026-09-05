@@ -3,6 +3,7 @@ package com.streamvault.data.sync
 import android.content.Context
 import android.database.sqlite.SQLiteException
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -155,6 +156,8 @@ class ProviderSyncWorker(
             }
 
             if (sawRetryableFailure) Result.retry() else Result.success()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Provider sync worker failed", e)
             if (shouldRetry(e)) Result.retry() else Result.failure()

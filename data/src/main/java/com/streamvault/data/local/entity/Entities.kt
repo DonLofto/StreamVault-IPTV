@@ -389,6 +389,7 @@ data class SeriesFtsEntity(
     ],
     indices = [
         Index(value = ["series_id"]),
+        Index(value = ["series_id", "season_number", "episode_number"]),
         Index(value = ["provider_id"]),
         Index(value = ["provider_id", "episode_id"], unique = true)
     ]
@@ -614,6 +615,7 @@ data class CategoryImportStageEntity(
         Index(value = ["provider_id", "end_time", "channel_id"]),
         Index(value = ["provider_id", "start_time", "end_time"]),
         Index(value = ["start_time"]),
+        Index(value = ["end_time"]),
         Index(value = ["provider_id", "channel_id", "start_time"]),
         Index(value = ["provider_id", "channel_id", "start_time", "end_time"], unique = true)
     ]
@@ -670,6 +672,7 @@ data class ProgramBrowseEntity(
     indices = [
         Index(value = ["provider_id", "content_id", "content_type", "group_key"], unique = true),
         Index(value = ["provider_id", "content_type", "group_id"]),
+        Index(value = ["provider_id", "content_type", "position"]),
         Index(value = ["group_id", "position"])
     ]
 )
@@ -1003,7 +1006,8 @@ data class EpgChannelEntity(
         Index(value = ["epg_source_id", "xmltv_channel_id", "start_time"]),
         Index(value = ["epg_source_id", "xmltv_channel_id", "start_time", "end_time"], unique = true),
         Index(value = ["epg_source_id"]),
-        Index(value = ["start_time"])
+        Index(value = ["start_time"]),
+        Index(value = ["end_time"])
     ]
 )
 data class EpgProgrammeEntity(

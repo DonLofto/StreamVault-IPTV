@@ -280,6 +280,7 @@ class Media3PlayerEngine @Inject constructor(
     private val playbackCacheManager = PlaybackCacheManager(context)
     private val timeshiftPlaybackGate = LiveTimeshiftPlaybackGate()
     private val liveTimeshiftManager = DefaultLiveTimeshiftManager(context, okHttpClient, timeshiftPlaybackGate, appCacheQuota, playbackCacheManager = playbackCacheManager)
+    private var timeshiftLifecycleJob: Job? = null
     private val _timeshiftState = MutableStateFlow(LiveTimeshiftState())
     override val timeshiftState: StateFlow<LiveTimeshiftState> = _timeshiftState.asStateFlow()
 
@@ -654,7 +655,9 @@ class Media3PlayerEngine @Inject constructor(
         if (ensureNotDisposed("startLiveTimeshift")) return
         activeLiveTimeshiftStreamInfo = streamInfo
         activeLiveTimeshiftChannelKey = channelKey
-        scope.launch {
+        val prevJob = timeshiftLifecycleJob
+        timeshiftLifecycleJob = scope.launch {
+            prevJob?.join()
             liveTimeshiftManager.startSession(streamInfo, channelKey, config)
             syncTimeshiftState()
         }
@@ -674,7 +677,9 @@ class Media3PlayerEngine @Inject constructor(
             exoPlayer?.stop()
             exoPlayer?.clearMediaItems()
         }
-        scope.launch {
+        val prevJob = timeshiftLifecycleJob
+        timeshiftLifecycleJob = scope.launch {
+            prevJob?.join()
             liveTimeshiftManager.stopSession()
             if (wasSnapshot && liveInfo != null) {
                 prepareInternal(liveInfo, preserveRetryState = false, seekPositionMs = null, autoPlay = true)
@@ -926,7 +931,11 @@ class Media3PlayerEngine @Inject constructor(
             startEngineCollectors()
         }
         // File cleanup runs outside the engine scope — orphans are also cleaned on next app start
-        CoroutineScope(Dispatchers.IO).launch { liveTimeshiftManager.stopSession() }
+        val prevJob = timeshiftLifecycleJob
+        timeshiftLifecycleJob = CoroutineScope(Dispatchers.IO).launch {
+            prevJob?.join()
+            liveTimeshiftManager.stopSession()
+        }
     }
 
     private fun ensureNotDisposed(action: String): Boolean {
@@ -2401,6 +2410,9 @@ class Media3PlayerEngine @Inject constructor(
                     TAG,
                     "decoder-preference fallback=$fallbackMode mediaId=$mediaId target=${PlaybackLogSanitizer.sanitizeUrl(streamInfo.url)}"
                 )
+                exoPlayer?.let { player ->
+                    trackController.clearAudioTrackOverride(player)
+                }
                 prepareInternal(streamInfo, preserveRetryState = true, seekPositionMs = exoPlayer?.currentPosition, autoPlay = true)
                 return
             } else if (keepHardwareForLiveHls) {

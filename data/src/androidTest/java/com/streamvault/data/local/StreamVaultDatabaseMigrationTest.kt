@@ -1355,6 +1355,50 @@ class StreamVaultDatabaseMigrationTest {
         migratedDb.close()
     }
 
+    @Test
+    fun migration_63_to_64() {
+        migrationTestHelper.createDatabase("streamvault-63-64-test", 63).apply {
+            close()
+        }
+
+        val migratedDb = migrationTestHelper.runMigrationsAndValidate(
+            "streamvault-63-64-test",
+            64,
+            true,
+            StreamVaultDatabase.MIGRATION_63_64
+        )
+
+        assertEquals(
+            1,
+            countRows(
+                migratedDb,
+                "SELECT COUNT(*) FROM pragma_index_list('programs') WHERE name = 'index_programs_end_time'"
+            )
+        )
+        assertEquals(
+            1,
+            countRows(
+                migratedDb,
+                "SELECT COUNT(*) FROM pragma_index_list('epg_programmes') WHERE name = 'index_epg_programmes_end_time'"
+            )
+        )
+        assertEquals(
+            1,
+            countRows(
+                migratedDb,
+                "SELECT COUNT(*) FROM pragma_index_list('episodes') WHERE name = 'index_episodes_series_id_season_number_episode_number'"
+            )
+        )
+        assertEquals(
+            1,
+            countRows(
+                migratedDb,
+                "SELECT COUNT(*) FROM pragma_index_list('favorites') WHERE name = 'index_favorites_provider_id_content_type_position'"
+            )
+        )
+        migratedDb.close()
+    }
+
     private fun countRows(db: androidx.sqlite.db.SupportSQLiteDatabase, sql: String): Int {        db.query(sql).use { cursor ->
             if (!cursor.moveToFirst()) return 0
             return cursor.getInt(0)

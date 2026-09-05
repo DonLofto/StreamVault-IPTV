@@ -3,6 +3,7 @@ package com.streamvault.data.sync
 import android.content.Context
 import android.database.sqlite.SQLiteException
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -94,6 +95,8 @@ class BackgroundEpgSyncWorker(
                 }
                 com.streamvault.domain.model.Result.Loading -> Result.retry()
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Background EPG work failed for provider $providerId", e)
             if (shouldRetry(e)) Result.retry() else Result.failure()

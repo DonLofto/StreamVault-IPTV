@@ -36,6 +36,10 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.graphics.SolidColor
+import com.streamvault.app.ui.design.AppColors
+import com.streamvault.app.ui.design.SpecularFocusBrush
+import com.streamvault.app.ui.design.SpecularRestingBrush
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -80,23 +84,30 @@ internal fun CompactSplitLauncherButton(
     modifier: Modifier = Modifier
 ) {
     val displaySlotCount = slotCount.coerceAtMost(slotLimit)
+    var isFocused by remember { mutableStateOf(false) }
     TvClickableSurface(
         onClick = onClick,
         modifier = modifier
             .widthIn(min = 112.dp)
-            .height(34.dp),
+            .height(34.dp)
+            .onFocusChanged { isFocused = it.isFocused },
         shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(999.dp)),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = Primary.copy(alpha = 0.18f),
-            focusedContainerColor = Primary.copy(alpha = 0.3f),
-            contentColor = OnBackground
+            containerColor = AppColors.GlassThin,
+            focusedContainerColor = AppColors.FocusGlass,
+            contentColor = AppColors.TextPrimary
         ),
         border = ClickableSurfaceDefaults.border(
             border = Border(
-                border = BorderStroke(1.dp, Primary.copy(alpha = 0.55f))
+                border = BorderStroke(0.75.dp, SpecularRestingBrush),
+                shape = RoundedCornerShape(999.dp)
+            ),
+            focusedBorder = Border(
+                border = BorderStroke(1.dp, SpecularFocusBrush),
+                shape = RoundedCornerShape(999.dp)
             )
         ),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1f)
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f)
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -106,13 +117,13 @@ internal fun CompactSplitLauncherButton(
             Text(
                 text = stringResource(R.string.action_split),
                 style = MaterialTheme.typography.labelSmall,
-                color = OnBackground,
+                color = if (isFocused) AppColors.TextInverted else AppColors.TextPrimary,
                 maxLines = 1
             )
             Text(
                 text = stringResource(R.string.label_slots_count_dynamic, displaySlotCount, slotLimit),
                 style = MaterialTheme.typography.labelSmall,
-                color = PrimaryLight,
+                color = if (isFocused) AppColors.TextInverted.copy(alpha = 0.8f) else AppColors.TextSecondary,
                 maxLines = 1
             )
         }
@@ -133,8 +144,12 @@ internal fun LivePreviewPane(
 
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(18.dp),
-        colors = SurfaceDefaults.colors(containerColor = SurfaceElevated.copy(alpha = 0.72f))
+        shape = RoundedCornerShape(20.dp),
+        colors = SurfaceDefaults.colors(containerColor = AppColors.GlassRegular),
+        border = Border(
+            border = BorderStroke(0.75.dp, SpecularRestingBrush),
+            shape = RoundedCornerShape(20.dp)
+        )
     ) {
         Column(
             modifier = Modifier
@@ -300,28 +315,32 @@ internal fun CategoryItem(
                     }
                 } else false
             },
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
-        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(10.dp)),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.02f),
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = if (isSelected) Primary.copy(alpha = 0.15f) else Color.Transparent,
-            focusedContainerColor = SurfaceHighlight.copy(alpha = 0.82f),
-            contentColor = if (isSelected) Primary else OnSurface
+            containerColor = if (isSelected) Color.White.copy(alpha = 0.12f) else Color.Transparent,
+            focusedContainerColor = AppColors.FocusGlass,
+            contentColor = if (isFocused) AppColors.TextInverted else if (isSelected) AppColors.TextPrimary else AppColors.TextSecondary
         ),
         border = ClickableSurfaceDefaults.border(
+            border = Border(
+                border = BorderStroke(if (isSelected) 0.75.dp else 0.dp, if (isSelected) SpecularRestingBrush else SolidColor(Color.Transparent)),
+                shape = RoundedCornerShape(14.dp)
+            ),
             focusedBorder = Border(
-                border = BorderStroke(2.dp, Primary.copy(alpha = 0.85f)),
-                shape = RoundedCornerShape(10.dp)
+                border = BorderStroke(1.dp, SpecularFocusBrush),
+                shape = RoundedCornerShape(14.dp)
             )
         )
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             if (isPinned) {
                 PinnedCategoryGlyph(
-                    tint = if (isFocused) OnBackground else if (isSelected) Primary else OnSurfaceDim,
+                    tint = if (isFocused) AppColors.TextInverted else if (isSelected) AppColors.TextPrimary else AppColors.TextSecondary,
                     modifier = Modifier.padding(end = 8.dp)
                 )
             }
@@ -330,14 +349,14 @@ internal fun CategoryItem(
                 isFocused = isFocused,
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
-                color = if (isFocused) OnBackground else if (isSelected) Primary else OnSurface,
+                color = if (isFocused) AppColors.TextInverted else if (isSelected) AppColors.TextPrimary else AppColors.TextSecondary,
                 modifier = Modifier.weight(1f)
             )
 
             Text(
                 text = category.count.toString(),
                 style = MaterialTheme.typography.labelMedium,
-                color = if (isFocused) OnBackground else OnSurfaceDim,
+                color = if (isFocused) AppColors.TextInverted else if (isSelected) AppColors.TextPrimary else AppColors.TextTertiary,
                 modifier = Modifier.padding(start = 10.dp)
             )
 
@@ -345,7 +364,7 @@ internal fun CategoryItem(
                 Text(
                     text = stringResource(R.string.home_locked_short),
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (isFocused) OnBackground else OnSurfaceDim,
+                    color = if (isFocused) AppColors.TextInverted else if (isSelected) AppColors.TextPrimary else AppColors.TextTertiary,
                     modifier = Modifier.padding(start = 8.dp)
                 )
             }

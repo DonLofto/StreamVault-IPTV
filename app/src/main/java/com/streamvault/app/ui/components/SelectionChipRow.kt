@@ -32,6 +32,11 @@ import com.streamvault.app.ui.theme.OnSurfaceDim
 import com.streamvault.app.ui.theme.Primary
 import com.streamvault.app.ui.theme.SurfaceElevated
 import com.streamvault.app.ui.theme.SurfaceHighlight
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import com.streamvault.app.ui.design.AppColors
+import com.streamvault.app.ui.design.SpecularFocusBrush
+import com.streamvault.app.ui.design.SpecularRestingBrush
 import com.streamvault.app.ui.interaction.mouseClickable
 import com.streamvault.app.ui.interaction.rememberTvInteractionSounds
 
@@ -120,22 +125,29 @@ fun ChipRowSection(
                             wasFocused = it.isFocused
                         },
                     colors = ClickableSurfaceDefaults.colors(
-                        containerColor = if (isSelected) Primary.copy(alpha = 0.18f) else SurfaceElevated,
-                        focusedContainerColor = if (isSelected && focusedContainerBoostWhenSelected) Primary.copy(alpha = 0.28f) else SurfaceHighlight,
-                        contentColor = if (isSelected) Primary else OnSurface,
-                        focusedContentColor = OnSurface
+                        containerColor = if (isSelected) Color.White.copy(alpha = 0.16f) else AppColors.GlassThin,
+                        focusedContainerColor = AppColors.FocusGlass,
+                        contentColor = if (isSelected) AppColors.TextPrimary else AppColors.TextSecondary,
+                        focusedContentColor = AppColors.TextInverted
                     ),
                     shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(999.dp)),
                     border = ClickableSurfaceDefaults.border(
+                        border = Border(
+                            border = BorderStroke(
+                                if (isSelected) 0.75.dp else 0.5.dp,
+                                if (isSelected) SpecularRestingBrush else SolidColor(AppColors.SpecularRimResting)
+                            ),
+                            shape = RoundedCornerShape(999.dp)
+                        ),
                         focusedBorder = Border(
-                            border = BorderStroke(2.dp, FocusBorder),
+                            border = BorderStroke(1.dp, SpecularFocusBrush),
                             shape = RoundedCornerShape(999.dp)
                         )
                     ),
-                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1f)
+                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f)
                 ) {
                     Column(
-                        modifier = Modifier.padding(horizontal = chipHorizontalPadding.dp, vertical = 10.dp),
+                        modifier = Modifier.padding(horizontal = chipHorizontalPadding.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         Text(
@@ -148,7 +160,7 @@ fun ChipRowSection(
                             Text(
                                 text = it,
                                 style = supportingTextStyle,
-                                color = OnSurfaceDim,
+                                color = if (wasFocused) AppColors.TextInverted.copy(alpha = 0.75f) else AppColors.TextTertiary,
                                 maxLines = supportingTextMaxLines,
                                 overflow = TextOverflow.Ellipsis
                             )

@@ -613,6 +613,7 @@ fun PlayerScreen(
                     KeyEvent.KEYCODE_DPAD_UP,
                     KeyEvent.KEYCODE_CHANNEL_UP,
                     KeyEvent.KEYCODE_DPAD_UP_RIGHT -> {
+                        if (event.nativeKeyEvent.repeatCount > 0) return@onPreviewKeyEvent true
                         if (showChannelInfoOverlay || showDiagnostics) {
                             viewModel.onLiveOverlayInteraction()
                         }
@@ -622,6 +623,7 @@ fun PlayerScreen(
                     KeyEvent.KEYCODE_DPAD_DOWN,
                     KeyEvent.KEYCODE_CHANNEL_DOWN,
                     KeyEvent.KEYCODE_DPAD_DOWN_LEFT -> {
+                        if (event.nativeKeyEvent.repeatCount > 0) return@onPreviewKeyEvent true
                         if (showChannelInfoOverlay || showDiagnostics) {
                             viewModel.onLiveOverlayInteraction()
                         }

@@ -522,9 +522,13 @@ fun EpgRow(
                     )
                 }
                 if (programs.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(stringResource(R.string.epg_no_schedule_short), color = OnSurfaceDim)
-                    }
+                    EmptyScheduleItem(
+                        totalTimelineWidth = totalTimelineWidth,
+                        transparentOverlay = transparentOverlay,
+                        density = density,
+                        onClick = onChannelClick,
+                        onFocused = { onChannelFocused(null) }
+                    )
                 } else {
                     programs.forEach { program ->
                         ProgramItem(
@@ -725,6 +729,61 @@ private fun ProgramItemCell(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun EmptyScheduleItem(
+    totalTimelineWidth: Dp,
+    transparentOverlay: Boolean,
+    density: GuideDensity,
+    onClick: () -> Unit,
+    onFocused: () -> Unit
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    val outerVerticalPadding = when (density) {
+        GuideDensity.COMPACT -> 2.dp
+        GuideDensity.COMFORTABLE -> 2.dp
+        GuideDensity.CINEMATIC -> 3.dp
+    }
+    TvClickableSurface(
+        onClick = onClick,
+        modifier = Modifier
+            .padding(top = outerVerticalPadding, bottom = outerVerticalPadding)
+            .width(totalTimelineWidth)
+            .fillMaxHeight()
+            .onFocusChanged {
+                if (it.isFocused && !isFocused) {
+                    onFocused()
+                }
+                isFocused = it.isFocused
+            },
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = if (transparentOverlay) SurfaceElevated.copy(alpha = 0.36f) else SurfaceElevated.copy(alpha = 0.6f),
+            focusedContainerColor = if (transparentOverlay) SurfaceHighlight.copy(alpha = 0.88f) else SurfaceHighlight
+        ),
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(8.dp)),
+        border = ClickableSurfaceDefaults.border(
+            border = Border(
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                shape = RoundedCornerShape(8.dp)
+            ),
+            focusedBorder = Border(
+                border = BorderStroke(2.dp, FocusBorder),
+                shape = RoundedCornerShape(8.dp)
+            )
+        )
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = stringResource(R.string.epg_no_schedule_short),
+                style = MaterialTheme.typography.labelMedium,
+                color = if (isFocused) TextPrimary else OnSurfaceDim
+            )
         }
     }
 }

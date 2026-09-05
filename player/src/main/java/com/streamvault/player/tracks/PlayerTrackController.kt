@@ -140,6 +140,13 @@ class PlayerTrackController(
             .build()
     }
 
+    fun clearAudioTrackOverride(player: ExoPlayer) {
+        player.trackSelectionParameters = player.trackSelectionParameters
+            .buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+            .build()
+    }
+
     fun selectVideoTrack(player: ExoPlayer, trackId: String) {
         if (trackId == PLAYER_TRACK_AUTO_ID) {
             player.trackSelectionParameters = player.trackSelectionParameters

@@ -157,6 +157,10 @@ kotlin {
     }
 }
 
+composeCompiler {
+    stabilityConfigurationFiles.add(rootProject.layout.projectDirectory.file("compose_stability.conf"))
+}
+
 kover {
     currentProject {
         createVariant("ci") {

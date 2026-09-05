@@ -47,6 +47,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.border
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Brush
@@ -55,6 +56,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
+import com.streamvault.app.ui.design.SpecularFocusBrush
+import com.streamvault.app.ui.design.SpecularRestingBrush
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
@@ -113,15 +116,7 @@ fun AppScreenScaffold(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(
-                        AppColors.Canvas,
-                        AppColors.CanvasElevated,
-                        AppColors.Surface
-                    )
-                )
-            )
+            .background(AppColors.Canvas)
     ) {
         if (navigationChrome == AppNavigationChrome.Rail) {
             Row(modifier = Modifier.fillMaxSize()) {
@@ -270,8 +265,12 @@ private fun TopNavigationBar(
                 focusRequesters[activeItem?.route] ?: FocusRequester.Default
             }
         },
-        shape = RoundedCornerShape(18.dp),
-        colors = SurfaceDefaults.colors(containerColor = AppColors.Surface.copy(alpha = 0.9f))
+        shape = RoundedCornerShape(999.dp),
+        colors = SurfaceDefaults.colors(containerColor = AppColors.GlassRegular),
+        border = Border(
+            border = BorderStroke(0.75.dp, SpecularRestingBrush),
+            shape = RoundedCornerShape(999.dp)
+        )
     ) {
         Row(
             modifier = Modifier
@@ -332,14 +331,14 @@ fun AppTopBarCloseAction(
         modifier = modifier,
         colors = androidx.tv.material3.IconButtonDefaults.colors(
             containerColor = Color.Transparent,
-            focusedContainerColor = AppColors.SurfaceEmphasis,
+            focusedContainerColor = AppColors.FocusGlass,
             contentColor = AppColors.TextSecondary,
-            focusedContentColor = AppColors.TextPrimary
+            focusedContentColor = AppColors.TextInverted
         ),
         border = androidx.tv.material3.IconButtonDefaults.border(
             focusedBorder = Border(
-                border = BorderStroke(FocusSpec.BorderWidth, AppColors.Focus),
-                shape = RoundedCornerShape(14.dp)
+                border = BorderStroke(1.dp, SpecularFocusBrush),
+                shape = RoundedCornerShape(999.dp)
             )
         )
     ) {
@@ -364,7 +363,7 @@ private fun TopNavigationButton(
     val sounds = rememberTvInteractionSounds()
     val scale by animateFloatAsState(
         targetValue = if (isFocused) FocusSpec.FocusedScale else 1f,
-        animationSpec = AppMotion.FocusSpec,
+        animationSpec = AppMotion.SpringFocusSpec,
         label = "topNavScale"
     )
 
@@ -393,33 +392,37 @@ private fun TopNavigationButton(
                 }
                 isFocused = it.isFocused
             },
-        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(999.dp)),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = if (selected) AppColors.BrandMuted else Color.Transparent,
-            focusedContainerColor = AppColors.SurfaceEmphasis
+            containerColor = if (selected) AppColors.GlassThin else Color.Transparent,
+            focusedContainerColor = AppColors.FocusGlass
         ),
         border = ClickableSurfaceDefaults.border(
+            border = Border(
+                border = BorderStroke(if (selected) 0.75.dp else 0.dp, if (selected) SpecularRestingBrush else SolidColor(Color.Transparent)),
+                shape = RoundedCornerShape(999.dp)
+            ),
             focusedBorder = Border(
-                border = BorderStroke(FocusSpec.BorderWidth, AppColors.Focus),
-                shape = RoundedCornerShape(14.dp)
+                border = BorderStroke(1.dp, SpecularFocusBrush),
+                shape = RoundedCornerShape(999.dp)
             )
         )
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                tint = if (selected) AppColors.Brand else AppColors.TextSecondary,
-                modifier = Modifier.size(14.dp)
+                tint = if (isFocused) AppColors.TextInverted else if (selected) AppColors.TextPrimary else AppColors.TextSecondary,
+                modifier = Modifier.size(15.dp)
             )
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = if (selected) AppColors.TextPrimary else AppColors.TextSecondary
+                style = MaterialTheme.typography.labelMedium,
+                color = if (isFocused) AppColors.TextInverted else if (selected) AppColors.TextPrimary else AppColors.TextSecondary
             )
         }
     }
@@ -540,16 +543,21 @@ fun AppSectionHeader(
 fun StatusPill(
     label: String,
     modifier: Modifier = Modifier,
-    containerColor: Color = AppColors.SurfaceEmphasis,
+    containerColor: Color = AppColors.GlassRegular,
     contentColor: Color = AppColors.TextPrimary,
     cornerRadius: Dp = 999.dp,
-    horizontalPadding: Dp = 10.dp,
-    verticalPadding: Dp = 4.dp
+    horizontalPadding: Dp = 8.dp,
+    verticalPadding: Dp = 3.dp
 ) {
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(cornerRadius))
             .background(containerColor)
+            .border(
+                width = 0.5.dp,
+                brush = SpecularRestingBrush,
+                shape = RoundedCornerShape(cornerRadius)
+            )
             .padding(horizontal = horizontalPadding, vertical = verticalPadding)
     ) {
         Text(
@@ -708,14 +716,12 @@ private fun DestinationRail(
     Box(
         modifier = modifier
             .padding(start = spacing.lg, top = spacing.safeTop, bottom = spacing.safeBottom)
-            .clip(RoundedCornerShape(28.dp))
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        AppColors.SurfaceElevated,
-                        AppColors.Surface
-                    )
-                )
+            .clip(RoundedCornerShape(24.dp))
+            .background(AppColors.GlassRegular)
+            .border(
+                width = 0.75.dp,
+                brush = SpecularRestingBrush,
+                shape = RoundedCornerShape(24.dp)
             )
             .focusProperties {
                 onEnter = {
@@ -771,7 +777,7 @@ private fun RailButton(
     val focusRequester = remember { FocusRequester() }
     val scale by animateFloatAsState(
         targetValue = if (isFocused) FocusSpec.FocusedScale else 1f,
-        animationSpec = AppMotion.FocusSpec,
+        animationSpec = AppMotion.SpringFocusSpec,
         label = "railButtonScale"
     )
 
@@ -789,15 +795,19 @@ private fun RailButton(
                 scaleY = scale
             }
             .onFocusChanged { isFocused = it.isFocused },
-        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(18.dp)),
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(16.dp)),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = if (selected) AppColors.BrandMuted else Color.Transparent,
-            focusedContainerColor = AppColors.SurfaceEmphasis
+            containerColor = if (selected) AppColors.GlassThin else Color.Transparent,
+            focusedContainerColor = AppColors.FocusGlass
         ),
         border = ClickableSurfaceDefaults.border(
+            border = Border(
+                border = BorderStroke(if (selected) 0.75.dp else 0.dp, if (selected) SpecularRestingBrush else SolidColor(Color.Transparent)),
+                shape = RoundedCornerShape(16.dp)
+            ),
             focusedBorder = Border(
-                border = BorderStroke(FocusSpec.BorderWidth, AppColors.Focus),
-                shape = RoundedCornerShape(18.dp)
+                border = BorderStroke(1.dp, SpecularFocusBrush),
+                shape = RoundedCornerShape(16.dp)
             )
         )
     ) {
@@ -811,13 +821,13 @@ private fun RailButton(
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                tint = if (selected) AppColors.Brand else AppColors.TextSecondary,
+                tint = if (isFocused) AppColors.TextInverted else if (selected) AppColors.TextPrimary else AppColors.TextSecondary,
                 modifier = Modifier.size(20.dp)
             )
             Text(
                 text = label,
                 style = MaterialTheme.typography.titleSmall,
-                color = if (selected) AppColors.TextPrimary else AppColors.TextSecondary,
+                color = if (isFocused) AppColors.TextInverted else if (selected) AppColors.TextPrimary else AppColors.TextSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

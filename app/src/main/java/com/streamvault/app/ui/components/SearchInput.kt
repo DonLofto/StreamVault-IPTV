@@ -1,8 +1,12 @@
 package com.streamvault.app.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import com.streamvault.app.ui.design.AppColors
+import com.streamvault.app.ui.design.SpecularFocusBrush
+import com.streamvault.app.ui.design.SpecularRestingBrush
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -147,9 +151,15 @@ fun SearchInput(
         pendingInputActivation = false
     }
 
-    val borderColor = if (isFocused) FocusBorder else OnSurfaceDim.copy(alpha = 0.5f)
-    val backgroundColor = if (isFocused) SurfaceHighlight else SurfaceElevated
-    val borderWidth = if (isFocused) 2.dp else 1.dp
+    val shape = RoundedCornerShape(14.dp)
+    val backgroundColor = if (isFocused) AppColors.FocusGlass else AppColors.GlassThin
+    val contentColor = if (isFocused) AppColors.TextInverted else AppColors.TextPrimary
+    val placeholderColor = if (isFocused) AppColors.TextInverted.copy(alpha = 0.6f) else AppColors.TextTertiary
+    val borderStroke = if (isFocused) {
+        BorderStroke(1.dp, SpecularFocusBrush)
+    } else {
+        BorderStroke(0.75.dp, SpecularRestingBrush)
+    }
 
     Box(
         modifier = modifier
@@ -157,8 +167,8 @@ fun SearchInput(
             .height(40.dp)
             .focusRequester(focusRequester)
             .bringIntoViewRequester(bringIntoViewRequester)
-            .background(backgroundColor, RoundedCornerShape(8.dp))
-            .border(borderWidth, borderColor, RoundedCornerShape(8.dp))
+            .background(backgroundColor, shape)
+            .border(borderStroke, shape)
             .semantics(mergeDescendants = true) {
                 contentDescription = placeholder
                 stateDescription = value.ifBlank { placeholder }
@@ -185,7 +195,7 @@ fun SearchInput(
                     Text(
                         text = placeholder,
                         style = MaterialTheme.typography.bodySmall,
-                        color = OnSurfaceDim
+                        color = placeholderColor
                     )
                 }
 
@@ -237,9 +247,9 @@ fun SearchInput(
                                 else -> false
                             }
                         },
-                    textStyle = MaterialTheme.typography.bodySmall.copy(color = OnSurface),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(color = contentColor),
                     singleLine = true,
-                    cursorBrush = SolidColor(Primary),
+                    cursorBrush = SolidColor(if (isFocused) AppColors.TextInverted else AppColors.TextPrimary),
                     enabled = enabled,
                     readOnly = isTelevisionDevice && !acceptsInput,
                     keyboardOptions = KeyboardOptions(imeAction = imeAction),
@@ -260,11 +270,7 @@ fun SearchInput(
             Icon(
                 imageVector = if (value.isBlank()) Icons.Default.Search else Icons.Default.Close,
                 contentDescription = null,
-                tint = if (value.isBlank()) {
-                    if (isFocused) Primary else OnSurfaceDim
-                } else {
-                    OnSurface
-                },
+                tint = if (isFocused) AppColors.TextInverted else AppColors.TextSecondary,
                 modifier = Modifier
                     .padding(start = 6.dp)
                     .clickable(enabled = enabled && value.isNotBlank()) {

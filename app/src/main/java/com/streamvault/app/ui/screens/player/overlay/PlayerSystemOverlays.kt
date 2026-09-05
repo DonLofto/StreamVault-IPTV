@@ -1,10 +1,16 @@
 package com.streamvault.app.ui.screens.player.overlay
 
 import android.view.KeyEvent
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.SolidColor
+import com.streamvault.app.ui.design.SpecularFocusBrush
+import com.streamvault.app.ui.design.SpecularRestingBrush
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -121,9 +127,9 @@ fun PlayerNoticeBanner(
         Column(
             modifier = Modifier
                 .widthIn(max = 760.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(containerColor)
-                .padding(horizontal = 18.dp, vertical = 12.dp)
+                .background(containerColor, RoundedCornerShape(20.dp))
+                .border(0.75.dp, SpecularRestingBrush, RoundedCornerShape(20.dp))
+                .padding(horizontal = 20.dp, vertical = 14.dp)
         ) {
             Text(
                 text = notice.message,
@@ -134,18 +140,32 @@ fun PlayerNoticeBanner(
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     notice.actions.forEach { action ->
+                        var isActionFocused by remember { mutableStateOf(false) }
                         TvClickableSurface(
                             onClick = { onAction(action) },
-                            shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(8.dp)),
+                            shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(999.dp)),
                             colors = ClickableSurfaceDefaults.colors(
-                                containerColor = Color.White.copy(alpha = 0.12f),
-                                focusedContainerColor = focusedContainerColor
-                            )
+                                containerColor = Color.White.copy(alpha = 0.14f),
+                                focusedContainerColor = AppColors.FocusGlass,
+                                contentColor = if (isActionFocused) AppColors.TextInverted else Color.White
+                            ),
+                            border = ClickableSurfaceDefaults.border(
+                                border = Border(
+                                    border = BorderStroke(0.5.dp, SolidColor(AppColors.SpecularRimResting)),
+                                    shape = RoundedCornerShape(999.dp)
+                                ),
+                                focusedBorder = Border(
+                                    border = BorderStroke(1.dp, SpecularFocusBrush),
+                                    shape = RoundedCornerShape(999.dp)
+                                )
+                            ),
+                            scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f),
+                            modifier = Modifier.onFocusChanged { isActionFocused = it.isFocused }
                         ) {
                             Text(
                                 text = playerNoticeActionLabel(action),
-                                color = Color.White,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                                color = if (isActionFocused) AppColors.TextInverted else Color.White,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                             )
                         }
                     }
@@ -283,7 +303,8 @@ fun PlayerTrackSelectionDialog(
             Column(
                 modifier = Modifier
                     .widthIn(min = 300.dp, max = 400.dp)
-                    .background(SurfaceElevated, RoundedCornerShape(12.dp))
+                    .background(AppColors.GlassRegular, RoundedCornerShape(24.dp))
+                    .border(0.75.dp, SpecularRestingBrush, RoundedCornerShape(24.dp))
                     .padding(24.dp)
                     .onPreviewKeyEvent { event ->
                         if (event.nativeKeyEvent.action != KeyEvent.ACTION_DOWN) return@onPreviewKeyEvent false
@@ -393,7 +414,8 @@ fun ChannelVariantSelectionDialog(
             Column(
                 modifier = Modifier
                     .widthIn(min = 360.dp, max = 520.dp)
-                    .background(SurfaceElevated, RoundedCornerShape(12.dp))
+                    .background(AppColors.GlassRegular, RoundedCornerShape(24.dp))
+                    .border(0.75.dp, SpecularRestingBrush, RoundedCornerShape(24.dp))
                     .padding(24.dp)
                     .onPreviewKeyEvent { event ->
                         if (event.nativeKeyEvent.action != KeyEvent.ACTION_DOWN) return@onPreviewKeyEvent false
@@ -488,7 +510,8 @@ fun StreamFormatSelectionDialog(
             Column(
                 modifier = Modifier
                     .widthIn(min = 360.dp, max = 520.dp)
-                    .background(SurfaceElevated, RoundedCornerShape(12.dp))
+                    .background(AppColors.GlassRegular, RoundedCornerShape(24.dp))
+                    .border(0.75.dp, SpecularRestingBrush, RoundedCornerShape(24.dp))
                     .padding(24.dp)
                     .onPreviewKeyEvent { event ->
                         if (event.nativeKeyEvent.action != KeyEvent.ACTION_DOWN) return@onPreviewKeyEvent false
@@ -572,7 +595,8 @@ fun PlayerSpeedSelectionDialog(
             Column(
                 modifier = Modifier
                     .widthIn(min = 300.dp, max = 400.dp)
-                    .background(SurfaceElevated, RoundedCornerShape(12.dp))
+                    .background(AppColors.GlassRegular, RoundedCornerShape(24.dp))
+                    .border(0.75.dp, SpecularRestingBrush, RoundedCornerShape(24.dp))
                     .padding(24.dp)
                     .onPreviewKeyEvent { event ->
                         if (event.nativeKeyEvent.action != KeyEvent.ACTION_DOWN) return@onPreviewKeyEvent false
@@ -652,7 +676,8 @@ fun PlayerSleepTimerDialog(
             Column(
                 modifier = Modifier
                     .widthIn(min = 300.dp, max = 420.dp)
-                    .background(SurfaceElevated, RoundedCornerShape(12.dp))
+                    .background(AppColors.GlassRegular, RoundedCornerShape(24.dp))
+                    .border(0.75.dp, SpecularRestingBrush, RoundedCornerShape(24.dp))
                     .padding(24.dp)
                     .onPreviewKeyEvent { event ->
                         if (event.nativeKeyEvent.action != KeyEvent.ACTION_DOWN) return@onPreviewKeyEvent false
@@ -788,7 +813,8 @@ fun PlayerAudioVideoOffsetDialog(
             Column(
                 modifier = Modifier
                     .widthIn(min = 340.dp, max = 460.dp)
-                    .background(SurfaceElevated, RoundedCornerShape(12.dp))
+                    .background(AppColors.GlassRegular, RoundedCornerShape(24.dp))
+                    .border(0.75.dp, SpecularRestingBrush, RoundedCornerShape(24.dp))
                     .padding(24.dp)
                     .onPreviewKeyEvent { event ->
                         if (event.nativeKeyEvent.action != KeyEvent.ACTION_DOWN) return@onPreviewKeyEvent false
@@ -1343,14 +1369,29 @@ private fun TrackSelectionItem(
     enabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    var isFocused by remember { mutableStateOf(false) }
     TvClickableSurface(
         onClick = { if (enabled) onClick() },
-        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(8.dp)),
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = if (isSelected) Primary.copy(alpha = 0.2f) else Color.Transparent,
-            focusedContainerColor = SurfaceHighlight
+            containerColor = if (isSelected) Color.White.copy(alpha = 0.12f) else Color.Transparent,
+            focusedContainerColor = AppColors.FocusGlass,
+            contentColor = if (isFocused) AppColors.TextInverted else if (isSelected) AppColors.TextPrimary else AppColors.TextSecondary
         ),
-        modifier = modifier.fillMaxWidth()
+        border = ClickableSurfaceDefaults.border(
+            border = Border(
+                border = BorderStroke(if (isSelected) 0.75.dp else 0.dp, if (isSelected) SpecularRestingBrush else SolidColor(Color.Transparent)),
+                shape = RoundedCornerShape(14.dp)
+            ),
+            focusedBorder = Border(
+                border = BorderStroke(1.dp, SpecularFocusBrush),
+                shape = RoundedCornerShape(14.dp)
+            )
+        ),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.02f),
+        modifier = modifier
+            .fillMaxWidth()
+            .onFocusChanged { isFocused = it.isFocused }
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -1361,15 +1402,16 @@ private fun TrackSelectionItem(
                 style = MaterialTheme.typography.bodyLarge,
                 color = when {
                     !enabled -> Color.White.copy(alpha = 0.38f)
-                    isSelected -> Primary
-                    else -> Color.White
+                    isFocused -> AppColors.TextInverted
+                    isSelected -> AppColors.TextPrimary
+                    else -> AppColors.TextSecondary
                 },
                 modifier = Modifier.weight(1f)
             )
             if (isSelected) {
                 Text(
                     text = stringResource(R.string.player_selected),
-                    color = Primary,
+                    color = if (isFocused) AppColors.TextInverted else AppColors.TextPrimary,
                     style = MaterialTheme.typography.labelSmall
                 )
             }
@@ -1419,7 +1461,8 @@ fun PlayerResumePrompt(
         Column(
             modifier = Modifier
                 .widthIn(max = 500.dp)
-                .background(SurfaceElevated, RoundedCornerShape(12.dp))
+                .background(AppColors.GlassRegular, RoundedCornerShape(24.dp))
+                .border(0.75.dp, SpecularRestingBrush, RoundedCornerShape(24.dp))
                 .focusGroup()
                 .onPreviewKeyEvent { event ->
                     if (event.nativeKeyEvent.action != KeyEvent.ACTION_DOWN) return@onPreviewKeyEvent false

@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -39,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -52,7 +54,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Border
 import androidx.tv.material3.ClickableSurfaceDefaults
+import com.streamvault.app.ui.design.AppColors
+import com.streamvault.app.ui.design.AppMotion
 import com.streamvault.app.ui.design.LocalAppShapes
+import com.streamvault.app.ui.design.SpecularFocusBrush
+import com.streamvault.app.ui.design.SpecularRestingBrush
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
@@ -121,7 +127,7 @@ fun FocusableCard(
         } else {
             if (isDragging) FocusSpec.FocusedScale else 1f
         },
-        animationSpec = tween(durationMillis = 160),
+        animationSpec = AppMotion.SpringFocusSpec,
         label = "cardScale"
     )
 
@@ -157,26 +163,26 @@ fun FocusableCard(
                 }
                 isFocused = it.isFocused
             },
-        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(12.dp)),
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(18.dp)),
         scale = ClickableSurfaceDefaults.scale(
             focusedScale = 1f,
             pressedScale = FocusSpec.PressedScale
         ),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = Surface,
-            focusedContainerColor = SurfaceHighlight
+            containerColor = AppColors.GlassThin,
+            focusedContainerColor = AppColors.FocusCardSurface
         ),
         border = ClickableSurfaceDefaults.border(
             border = Border(
-                border = BorderStroke(0.dp, Color.Transparent),
-                shape = RoundedCornerShape(12.dp)
+                border = BorderStroke(0.75.dp, SpecularRestingBrush),
+                shape = RoundedCornerShape(18.dp)
             ),
             focusedBorder = Border(
                 border = BorderStroke(
-                    width = if (isDragging) 4.dp else FocusSpec.CardBorderWidth,
-                    color = if (isDragging) AccentAmber else FocusBorder
+                    width = if (isDragging) 2.dp else 1.dp,
+                    brush = if (isDragging) SolidColor(AccentAmber) else SpecularFocusBrush
                 ),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(18.dp)
             )
         )
     ) {
@@ -198,7 +204,6 @@ fun ChannelCard(
     isRecording: Boolean = false,
     isScheduledRecording: Boolean = false
 ) {
-    val nowMs by ChannelProgressTicker.nowMs.collectAsStateWithLifecycle()
     val channelCardShape = LocalAppShapes.current.small
     val hasUsableArchive = channel.archivePlaybackCapability().canBuildReplayCandidate
     val channelDescription = buildString {
@@ -281,12 +286,16 @@ fun ChannelCard(
                         overflow = TextOverflow.Ellipsis
                     )
 
-                    val totalDuration = program.endTime - program.startTime
-                    val elapsed = nowMs - program.startTime
-                    val progress = if (totalDuration > 0) elapsed.toFloat() / totalDuration else 0f
-
                     LinearProgressIndicator(
-                        progress = { progress.coerceIn(0f, 1f) },
+                        progress = {
+                            val totalDuration = program.endTime - program.startTime
+                            if (totalDuration > 0) {
+                                val elapsed = ChannelProgressTicker.nowMs.value - program.startTime
+                                (elapsed.toFloat() / totalDuration).coerceIn(0f, 1f)
+                            } else {
+                                0f
+                            }
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(2.dp)
@@ -418,8 +427,9 @@ fun MovieCard(
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(8.dp)
-                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(999.dp))
+                        .border(0.5.dp, SolidColor(AppColors.SpecularRimResting), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 7.dp, vertical = 2.dp)
                 ) {
                     Text(
                         text = formatVodRatingLabel(movie.rating),
@@ -434,8 +444,9 @@ fun MovieCard(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(6.dp)
-                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
-                        .padding(4.dp)
+                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(999.dp))
+                        .border(0.5.dp, SolidColor(AppColors.SpecularRimResting), RoundedCornerShape(999.dp))
+                        .padding(5.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Star,
@@ -528,8 +539,9 @@ fun SeriesCard(
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(8.dp)
-                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(999.dp))
+                        .border(0.5.dp, SolidColor(AppColors.SpecularRimResting), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 7.dp, vertical = 2.dp)
                 ) {
                     Text(
                         text = formatVodRatingLabel(series.rating),
@@ -544,8 +556,9 @@ fun SeriesCard(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(6.dp)
-                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
-                        .padding(4.dp)
+                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(999.dp))
+                        .border(0.5.dp, SolidColor(AppColors.SpecularRimResting), RoundedCornerShape(999.dp))
+                        .padding(5.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Star,

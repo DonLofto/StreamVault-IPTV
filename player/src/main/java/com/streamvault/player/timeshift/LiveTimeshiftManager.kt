@@ -4,6 +4,7 @@ import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.res.Configuration
 import android.net.Uri
+import android.system.Os
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSourceInputStream
@@ -562,6 +563,15 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                 throw IOException("Live rewind storage limit reached (${diskManager.maxBudgetBytes / (1024 * 1024 * 1024)} GB max).")
             }
         }
+
+        protected fun linkOrCopySegmentFile(source: File, destination: File) {
+            if (destination.exists()) destination.delete()
+            try {
+                Os.link(source.absolutePath, destination.absolutePath)
+            } catch (_: Throwable) {
+                source.copyTo(destination, overwrite = true)
+            }
+        }
     }
 
     private inner class ProgressiveSession(
@@ -590,21 +600,32 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                             retryDelay = 1_000L
                             retryCount = 0
                             input.use { source ->
-                                var current = createChunk()
-                                val buffer = ByteArray(PROGRESSIVE_READ_BUFFER_SIZE)
-                                while (true) {
-                                    currentCoroutineContext().ensureActive()
-                                    awaitPlaybackNotStressed()
-                                    val read = source.read(buffer)
-                                    if (read <= 0) break
-                                    current.write(buffer, read)
-                                    if (System.currentTimeMillis() - current.startedAtMs >= PROGRESSIVE_CHUNK_MS) {
-                                        finalizeChunk(current)
-                                        current = createChunk()
+                                var current: ActiveProgressiveChunk? = createChunk()
+                                try {
+                                    val buffer = ByteArray(PROGRESSIVE_READ_BUFFER_SIZE)
+                                    while (true) {
+                                        currentCoroutineContext().ensureActive()
+                                        awaitPlaybackNotStressed()
+                                        val read = source.read(buffer)
+                                        if (read <= 0) break
+                                        val active = current ?: createChunk().also { current = it }
+                                        active.write(buffer, read)
+                                        if (System.currentTimeMillis() - active.startedAtMs >= PROGRESSIVE_CHUNK_MS) {
+                                            finalizeChunk(active)
+                                            current = createChunk()
+                                        }
                                     }
-                                }
-                                if (current.bytesWritten > 0L) {
-                                    finalizeChunk(current)
+                                    val active = current
+                                    if (active != null) {
+                                        if (active.bytesWritten > 0L) {
+                                            finalizeChunk(active)
+                                        } else {
+                                            active.close()
+                                        }
+                                        current = null
+                                    }
+                                } finally {
+                                    current?.close()
                                 }
                             }
                         }
@@ -661,9 +682,9 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
 
         private suspend fun finalizeChunk(active: ActiveProgressiveChunk) {
             val output = active.output ?: return  // never written — nothing to finalize
+            val payload = if (backend == LiveTimeshiftBackend.MEMORY) (output as ByteArrayOutputStream).toByteArray() else null
+            active.close()
             if (backend == LiveTimeshiftBackend.DISK) checkDiskAndBudget()
-            output.flush()
-            output.close()
             val endedAtMs = System.currentTimeMillis()
             val chunk = ProgressiveChunk(
                 id = active.id,
@@ -671,7 +692,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                 endedAtMs = endedAtMs,
                 durationMs = (endedAtMs - active.startedAtMs).coerceAtLeast(1L),
                 file = active.file,
-                payload = if (backend == LiveTimeshiftBackend.MEMORY) (output as ByteArrayOutputStream).toByteArray() else null
+                payload = payload
             )
             val windowDuration = chunkMutex.withLock {
                 runningChunkDurationMs += chunk.durationMs
@@ -782,7 +803,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                     val fileName = "segment-$index.ts"
                     val outputFile = File(snapshotDir, fileName)
                     when {
-                        segment.file != null && segment.file.exists() -> segment.file.copyTo(outputFile, overwrite = true)
+                        segment.file != null && segment.file.exists() -> linkOrCopySegmentFile(segment.file, outputFile)
                         segment.payload != null -> outputFile.writeBytes(segment.payload)
                     }
                     appendLine("#EXTINF:${"%.3f".format(Locale.US, segment.durationMs / 1000.0)},")
@@ -909,7 +930,17 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
         val file: File?,
         var output: java.io.OutputStream? = null,
         var bytesWritten: Long = 0L
-    )
+    ) : AutoCloseable {
+        override fun close() {
+            try {
+                output?.flush()
+            } catch (_: Throwable) {}
+            try {
+                output?.close()
+            } catch (_: Throwable) {}
+            output = null
+        }
+    }
 
     internal class HlsSegmentSnapshot(
         val remoteUrl: String,
@@ -1058,7 +1089,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                 val fileName = if (isInit) "init-$index.mp4" else "segment-${mediaIndex++}.mp4"
                 val outputFile = File(snapshotDir, fileName)
                 when {
-                    segment.file != null && segment.file.exists() -> segment.file.copyTo(outputFile, overwrite = true)
+                    segment.file != null && segment.file.exists() -> linkOrCopySegmentFile(segment.file, outputFile)
                     segment.payload != null -> outputFile.writeBytes(segment.payload)
                 }
                 DashSnapshotPlaylistSegment(

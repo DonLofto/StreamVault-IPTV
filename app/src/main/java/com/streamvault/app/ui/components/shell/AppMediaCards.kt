@@ -3,6 +3,7 @@ package com.streamvault.app.ui.components.shell
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -62,6 +63,9 @@ import coil3.compose.AsyncImage
 import com.streamvault.app.R
 import com.streamvault.app.ui.components.ChannelLogoBadge
 import com.streamvault.app.ui.components.rememberCrossfadeImageModel
+import androidx.compose.ui.graphics.SolidColor
+import com.streamvault.app.ui.design.SpecularFocusBrush
+import com.streamvault.app.ui.design.SpecularRestingBrush
 import com.streamvault.app.ui.design.AppColors
 import com.streamvault.app.ui.design.AppMotion
 import com.streamvault.app.ui.design.FocusSpec
@@ -103,13 +107,12 @@ fun LiveChannelRowCard(
     val logoPadding = if (isDense) 5.dp else if (isUltraCompact) 6.dp else 8.dp
     val contentSpacing = if (isUltraCompact) 8.dp else 10.dp
     val badgeSpacing = if (isUltraCompact) 3.dp else 4.dp
-    val nowMs by LiveChannelRowTicker.nowMs.collectAsStateWithLifecycle()
     val hasUsableArchive = channel.archivePlaybackCapability().canBuildReplayCandidate
 
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(18.dp))
-            .background(AppColors.SurfaceElevated)
+            .background(AppColors.GlassThin)
             .fillMaxWidth()
             .height(rowHeight)
     ) {
@@ -129,7 +132,7 @@ fun LiveChannelRowCard(
                 ChannelLogoBadge(
                     channelName = channel.name,
                     logoUrl = channel.logoUrl,
-                    backgroundColor = AppColors.SurfaceEmphasis,
+                    backgroundColor = AppColors.GlassRegular,
                     contentPadding = PaddingValues(logoPadding),
                     textStyle = MaterialTheme.typography.titleLarge,
                     textColor = AppColors.TextSecondary,
@@ -186,11 +189,13 @@ fun LiveChannelRowCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    val totalDuration = (program.endTime - program.startTime).coerceAtLeast(1L)
-                    val elapsed = (nowMs - program.startTime).coerceAtLeast(0L)
                     if (!isDense) {
                         LinearProgressIndicator(
-                            progress = { (elapsed.toFloat() / totalDuration.toFloat()).coerceIn(0f, 1f) },
+                            progress = {
+                                val totalDuration = (program.endTime - program.startTime).coerceAtLeast(1L)
+                                val elapsed = (LiveChannelRowTicker.nowMs.value - program.startTime).coerceAtLeast(0L)
+                                (elapsed.toFloat() / totalDuration.toFloat()).coerceIn(0f, 1f)
+                            },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(2.dp)
@@ -250,8 +255,8 @@ fun LiveChannelRowSurface(
         }
     }
     val scale by animateFloatAsState(
-        targetValue = if (isDragging) FocusSpec.FocusedScale else 1f,
-        animationSpec = AppMotion.FocusSpec,
+        targetValue = if (isFocused || isDragging) FocusSpec.FocusedScale else 1f,
+        animationSpec = AppMotion.SpringFocusSpec,
         label = "liveRowScale"
     )
 
@@ -289,18 +294,22 @@ fun LiveChannelRowSurface(
                 isFocused = it.isFocused
             },
         scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
-        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(16.dp)),
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(18.dp)),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = AppColors.SurfaceElevated,
-            focusedContainerColor = AppColors.SurfaceEmphasis
+            containerColor = AppColors.GlassThin,
+            focusedContainerColor = AppColors.FocusCardSurface
         ),
         border = ClickableSurfaceDefaults.border(
+            border = Border(
+                border = BorderStroke(0.75.dp, SpecularRestingBrush),
+                shape = RoundedCornerShape(18.dp)
+            ),
             focusedBorder = Border(
                 border = BorderStroke(
-                    width = if (isDragging) 4.dp else FocusSpec.BorderWidth,
-                    color = if (isDragging) AppColors.Warning else AppColors.Focus
+                    width = if (isDragging) 2.dp else 1.dp,
+                    brush = if (isDragging) SolidColor(AppColors.Warning) else SpecularFocusBrush
                 ),
-                shape = RoundedCornerShape(16.dp)
+                shape = RoundedCornerShape(18.dp)
             )
         )
     ) {
@@ -393,8 +402,9 @@ fun EpisodeRowCard(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(AppColors.SurfaceElevated)
+            .clip(RoundedCornerShape(20.dp))
+            .background(AppColors.GlassThin)
+            .border(0.75.dp, SpecularRestingBrush, RoundedCornerShape(20.dp))
             .padding(16.dp)
     ) {
         Column {
@@ -403,8 +413,9 @@ fun EpisodeRowCard(
                     modifier = Modifier
                         .width(previewWidth)
                         .aspectRatio(16f / 9f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(AppColors.SurfaceEmphasis),
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(AppColors.GlassRegular)
+                        .border(0.5.dp, SpecularRestingBrush, RoundedCornerShape(14.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -465,7 +476,7 @@ private fun PosterCard(
     subtitle: String?,
     modifier: Modifier = Modifier
 ) {
-    val posterShape = RoundedCornerShape(12.dp)
+    val posterShape = RoundedCornerShape(16.dp)
     var imageLoaded by remember(imageUrl) { mutableStateOf(false) }
     var imageFailed by remember(imageUrl) { mutableStateOf(false) }
     val showFallback = imageUrl.isNullOrBlank() || imageFailed || !imageLoaded
@@ -473,7 +484,8 @@ private fun PosterCard(
     Box(
         modifier = modifier
             .clip(posterShape)
-            .background(AppColors.SurfaceEmphasis)
+            .background(AppColors.GlassRegular)
+            .border(0.75.dp, SpecularRestingBrush, posterShape)
     ) {
         // Fallback letter: only shown while no URL, still loading, or load failed
         if (showFallback) {
@@ -504,11 +516,11 @@ private fun PosterCard(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.52f)
+                .fillMaxHeight(0.55f)
                 .align(Alignment.BottomCenter)
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(Color.Transparent, AppColors.HeroBottom)
+                        colors = listOf(Color.Transparent, AppColors.Canvas.copy(alpha = 0.88f))
                     )
                 )
         )

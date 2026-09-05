@@ -50,7 +50,7 @@ import com.streamvault.data.local.entity.*
         XtreamLiveOnboardingStateEntity::class,
         DownloadEntity::class
     ],
-    version = 63,
+    version = 64,
     exportSchema = true   // ← was false; schema JSON now tracked in version control
 )
 @TypeConverters(RoomEnumConverters::class)
@@ -2709,6 +2709,23 @@ abstract class StreamVaultDatabase : RoomDatabase() {
                 )
                 database.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_channels_provider_id_category_id_number` ON `channels` (`provider_id`, `category_id`, `number`)"
+                )
+            }
+        }
+
+        val MIGRATION_63_64 = object : Migration(63, 64) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_programs_end_time` ON `programs` (`end_time`)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_epg_programmes_end_time` ON `epg_programmes` (`end_time`)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_episodes_series_id_season_number_episode_number` ON `episodes` (`series_id`, `season_number`, `episode_number`)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_favorites_provider_id_content_type_position` ON `favorites` (`provider_id`, `content_type`, `position`)"
                 )
             }
         }

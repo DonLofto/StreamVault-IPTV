@@ -22,6 +22,8 @@ import androidx.compose.ui.Modifier
 import com.streamvault.app.ui.components.SearchInput
 import com.streamvault.app.ui.components.SelectionChip
 import com.streamvault.app.ui.components.SelectionChipRow
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.FocusRequester
@@ -68,6 +70,9 @@ import com.streamvault.app.ui.components.shell.AppScreenScaffold
 import com.streamvault.app.ui.design.FocusRestoreHost
 import com.streamvault.app.ui.design.requestFocusSafely
 import androidx.activity.compose.BackHandler
+import com.streamvault.app.ui.design.AppColors
+import com.streamvault.app.ui.design.SpecularFocusBrush
+import com.streamvault.app.ui.design.SpecularRestingBrush
 import com.streamvault.app.ui.model.LiveTvQuickFilterVisibilityMode
 import com.streamvault.app.ui.theme.*
 import com.streamvault.domain.model.ActiveLiveSource
@@ -140,6 +145,7 @@ private fun HomeLoadingPane(
 
 // ── Screen ─────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun HomeScreen(
     onChannelClick: (Channel, Category?, Provider?, Long?, Long?) -> Unit,
@@ -153,6 +159,9 @@ fun HomeScreen(
     val remoteShortcutPreferences by viewModel.remoteShortcutPreferences.collectAsStateWithLifecycle()
     val providerNameById = remember(uiState.allProviders) {
         uiState.allProviders.associateBy({ it.id }, { it.name })
+    }
+    val combinedMemberNameByProviderId = remember(uiState.currentCombinedProfileMembers) {
+        uiState.currentCombinedProfileMembers.associateBy({ it.providerId }, { it.providerName })
     }
     val resolveProviderForChannel: (Channel) -> Provider? = remember(uiState.allProviders, uiState.provider) {
         { channel -> uiState.allProviders.firstOrNull { it.id == channel.providerId } ?: uiState.provider }
@@ -414,10 +423,13 @@ fun HomeScreen(
                             kotlin.math.abs(category.id) !in uiState.unlockedCategoryIds
                     }
                 }
+                val categoriesById = remember(uiState.categories) {
+                    uiState.categories.associateBy { it.id }
+                }
                 val isChannelLocked: (Channel) -> Boolean = remember(
                     uiState.parentalControlLevel,
                     uiState.unlockedCategoryIds,
-                    uiState.categories,
+                    categoriesById,
                     uiState.selectedCategory?.id,
                     uiState.selectedCategory?.isAdult,
                     uiState.selectedCategory?.isUserProtected
@@ -425,7 +437,7 @@ fun HomeScreen(
                     { channel ->
                         val selectedCategory = uiState.selectedCategory
                         val channelCategoryId = channel.categoryId
-                        val sourceCategory = uiState.categories.firstOrNull { it.id == channelCategoryId }
+                        val sourceCategory = channelCategoryId?.let { categoriesById[it] }
                         val unlockedByChannelCategory =
                             channelCategoryId != null && kotlin.math.abs(channelCategoryId) in uiState.unlockedCategoryIds
                         val unlockedBySelectedCategory =
@@ -720,7 +732,8 @@ fun HomeScreen(
                         modifier = Modifier
                             .width(sidebarWidth)
                             .fillMaxHeight()
-                            .background(SurfaceElevated.copy(alpha = 0.88f), RoundedCornerShape(20.dp))
+                            .background(AppColors.GlassRegular, RoundedCornerShape(24.dp))
+                            .border(0.75.dp, SpecularRestingBrush, RoundedCornerShape(24.dp))
                             .padding(top = 10.dp)
                             .focusGroup()
                     ) {
@@ -789,24 +802,31 @@ fun HomeScreen(
                                         )
                                     }
                                 }
+                                var isQuickFiltersFocused by remember { mutableStateOf(false) }
                                 TvClickableSurface(
                                     onClick = { if (!isReorderMode) showQuickFiltersDrawer = !showQuickFiltersDrawer },
                                     enabled = !isReorderMode,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(bottom = 10.dp),
-                                    shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(12.dp)),
+                                        .padding(bottom = 10.dp)
+                                        .onFocusChanged { isQuickFiltersFocused = it.isFocused },
+                                    shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(16.dp)),
                                     colors = ClickableSurfaceDefaults.colors(
-                                        containerColor = SurfaceElevated,
-                                        focusedContainerColor = SurfaceHighlight.copy(alpha = 0.9f)
+                                        containerColor = AppColors.GlassThin,
+                                        focusedContainerColor = AppColors.FocusGlass,
+                                        contentColor = if (isQuickFiltersFocused) AppColors.TextInverted else AppColors.TextPrimary
                                     ),
                                     border = ClickableSurfaceDefaults.border(
+                                        border = Border(
+                                            border = BorderStroke(0.75.dp, SpecularRestingBrush),
+                                            shape = RoundedCornerShape(16.dp)
+                                        ),
                                         focusedBorder = Border(
-                                            border = BorderStroke(2.dp, Primary.copy(alpha = 0.85f)),
-                                            shape = RoundedCornerShape(12.dp)
+                                            border = BorderStroke(1.dp, SpecularFocusBrush),
+                                            shape = RoundedCornerShape(16.dp)
                                         )
                                     ),
-                                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1f)
+                                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1.02f)
                                 ) {
                                     Column(
                                         modifier = Modifier
@@ -822,7 +842,7 @@ fun HomeScreen(
                                             Text(
                                                 text = stringResource(R.string.home_quick_filters_button),
                                                 style = MaterialTheme.typography.labelLarge,
-                                                color = OnSurface
+                                                color = if (isQuickFiltersFocused) AppColors.TextInverted else AppColors.TextPrimary
                                             )
                                             Text(
                                                 text = if (showQuickFiltersDrawer) {
@@ -831,13 +851,13 @@ fun HomeScreen(
                                                     stringResource(R.string.home_quick_filters_show)
                                                 },
                                                 style = MaterialTheme.typography.labelMedium,
-                                                color = Primary
+                                                color = if (isQuickFiltersFocused) AppColors.TextInverted else AppColors.TextSecondary
                                             )
                                         }
                                         Text(
                                             text = filterSubtitle,
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = OnSurfaceDim
+                                            color = if (isQuickFiltersFocused) AppColors.TextInverted.copy(alpha = 0.8f) else AppColors.TextTertiary
                                         )
                                     }
                                 }
@@ -929,7 +949,9 @@ fun HomeScreen(
                         }
 
                         LazyColumn(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRestorer(),
                             contentPadding = PaddingValues(bottom = 16.dp)
                         ) {
 
@@ -1010,6 +1032,7 @@ fun HomeScreen(
                         modifier = Modifier
                             .weight(if (isProMode) 1.08f else 1f)
                             .fillMaxHeight()
+                            .focusGroup()
                     ) {
                         Column(
                             modifier = Modifier
@@ -1253,6 +1276,7 @@ fun HomeScreen(
                                 state = channelListState,
                                 modifier = Modifier
                                     .fillMaxSize()
+                                    .focusRestorer()
                                     .onPreviewKeyEvent { event ->
                                         if (uiState.isChannelReorderMode && event.nativeKeyEvent.action == android.view.KeyEvent.ACTION_DOWN) {
                                             if (event.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_BACK) {
@@ -1283,11 +1307,11 @@ fun HomeScreen(
 
                                     LiveChannelRowSurface(
                                         channel = channel,
-                                        sourceBadgeLabel = uiState.currentCombinedProfileMembers
-                                            .firstOrNull { it.providerId == channel.providerId }
-                                            ?.providerName
-                                            ?.ifBlank { providerNameById[channel.providerId] }
-                                            ?.takeIf { uiState.isCombinedLiveSource },
+                                        sourceBadgeLabel = if (uiState.isCombinedLiveSource) {
+                                            combinedMemberNameByProviderId[channel.providerId]
+                                                ?.ifBlank { providerNameById[channel.providerId] }
+                                                ?: providerNameById[channel.providerId]
+                                        } else null,
                                         isLocked = isLocked,
                                         isReorderMode = uiState.isChannelReorderMode,
                                         isDragging = isDraggingThis,

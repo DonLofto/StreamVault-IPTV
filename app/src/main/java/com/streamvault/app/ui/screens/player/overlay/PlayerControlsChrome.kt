@@ -10,7 +10,14 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.SolidColor
+import androidx.tv.material3.Border
+import com.streamvault.app.ui.design.AppColors
+import com.streamvault.app.ui.design.SpecularFocusBrush
+import com.streamvault.app.ui.design.SpecularRestingBrush
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,6 +56,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -602,6 +610,7 @@ private fun PlayerBottomBar(
                 vertical = if (isVod) 10.dp else 24.dp
             )
     ) {
+        val hudShape = RoundedCornerShape(28.dp)
         Surface(
             modifier = if (isVod) {
                 Modifier
@@ -611,23 +620,19 @@ private fun PlayerBottomBar(
             } else {
                 Modifier.fillMaxWidth()
             },
-            shape = RoundedCornerShape(if (isVod) 20.dp else 28.dp),
-            colors = SurfaceDefaults.colors(containerColor = Color(0xFF0C1624).copy(alpha = 0.92f))
+            shape = hudShape,
+            colors = SurfaceDefaults.colors(containerColor = AppColors.GlassThick),
+            border = Border(
+                border = BorderStroke(0.75.dp, SpecularRestingBrush),
+                shape = hudShape
+            )
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(
-                        Brush.horizontalGradient(
-                            colors = listOf(
-                                Primary.copy(alpha = 0.10f),
-                                Color.Transparent
-                            )
-                        )
-                    )
                     .padding(
-                        horizontal = if (isVod) 14.dp else 24.dp,
-                        vertical = if (isVod) 12.dp else 22.dp
+                        horizontal = if (isVod) 16.dp else 28.dp,
+                        vertical = if (isVod) 14.dp else 22.dp
                     )
             ) {
                 if (contentType == "LIVE") {
@@ -1167,8 +1172,12 @@ private fun PlayerVodInfo(
     Spacer(modifier = Modifier.height(10.dp))
 
     Surface(
-        shape = RoundedCornerShape(18.dp),
-        colors = SurfaceDefaults.colors(containerColor = Color.White.copy(alpha = 0.06f))
+        shape = RoundedCornerShape(20.dp),
+        colors = SurfaceDefaults.colors(containerColor = AppColors.GlassThin),
+        border = Border(
+            border = BorderStroke(0.75.dp, SpecularRestingBrush),
+            shape = RoundedCornerShape(20.dp)
+        )
     ) {
         Row(
             modifier = Modifier
@@ -1179,7 +1188,11 @@ private fun PlayerVodInfo(
         ) {
             Surface(
                 shape = RoundedCornerShape(999.dp),
-                colors = SurfaceDefaults.colors(containerColor = Color.Black.copy(alpha = 0.24f))
+                colors = SurfaceDefaults.colors(containerColor = Color.Black.copy(alpha = 0.35f)),
+                border = Border(
+                    border = BorderStroke(0.5.dp, SolidColor(AppColors.SpecularRimResting)),
+                    shape = RoundedCornerShape(999.dp)
+                )
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = transportGroupHorizontalPadding, vertical = 6.dp),
@@ -1201,16 +1214,30 @@ private fun PlayerVodInfo(
                             down = quickActionsFocusRequester
                         }
                     )
+                    var isPlayPauseFocused by remember { mutableStateOf(false) }
                     TvClickableSurface(
                         onClick = onTogglePlayPause,
                         shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(50)),
                         colors = ClickableSurfaceDefaults.colors(
-                            containerColor = Primary.copy(alpha = 0.84f),
-                            focusedContainerColor = Primary
+                            containerColor = Color.White.copy(alpha = 0.18f),
+                            focusedContainerColor = AppColors.FocusGlass,
+                            contentColor = if (isPlayPauseFocused) AppColors.TextInverted else Color.White
                         ),
+                        border = ClickableSurfaceDefaults.border(
+                            border = Border(
+                                border = BorderStroke(0.75.dp, SpecularRestingBrush),
+                                shape = RoundedCornerShape(50)
+                            ),
+                            focusedBorder = Border(
+                                border = BorderStroke(1.dp, SpecularFocusBrush),
+                                shape = RoundedCornerShape(50)
+                            )
+                        ),
+                        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.08f),
                         modifier = Modifier
                             .size(playButtonSize)
                             .focusRequester(playButtonFocusRequester)
+                            .onFocusChanged { isPlayPauseFocused = it.isFocused }
                             .focusProperties {
                                 down = quickActionsFocusRequester
                             }
@@ -1221,13 +1248,13 @@ private fun PlayerVodInfo(
                                 Text(
                                     text = "II",
                                     style = MaterialTheme.typography.headlineMedium,
-                                    color = Color.White
+                                    color = if (isPlayPauseFocused) AppColors.TextInverted else Color.White
                                 )
                             } else {
                                 Icon(
                                     imageVector = Icons.Default.PlayArrow,
                                     contentDescription = stringResource(R.string.player_play),
-                                    tint = Color.White,
+                                    tint = if (isPlayPauseFocused) AppColors.TextInverted else Color.White,
                                     modifier = Modifier.size(playIconSize)
                                 )
                             }
@@ -1472,18 +1499,31 @@ private fun PlayerQuickSettingsButton(
     compact: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    var isFocused by remember { mutableStateOf(false) }
     TvClickableSurface(
         onClick = onClick,
-        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(8.dp)),
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = Color.White.copy(alpha = 0.1f),
-            focusedContainerColor = Primary.copy(alpha = 0.9f)
+            containerColor = AppColors.GlassThin,
+            focusedContainerColor = AppColors.FocusGlass,
+            contentColor = if (isFocused) AppColors.TextInverted else Color.White
         ),
-        modifier = modifier
+        border = ClickableSurfaceDefaults.border(
+            border = Border(
+                border = BorderStroke(0.5.dp, SolidColor(AppColors.SpecularRimResting)),
+                shape = RoundedCornerShape(14.dp)
+            ),
+            focusedBorder = Border(
+                border = BorderStroke(1.dp, SpecularFocusBrush),
+                shape = RoundedCornerShape(14.dp)
+            )
+        ),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f),
+        modifier = modifier.onFocusChanged { isFocused = it.isFocused }
     ) {
         Text(
             text = text,
-            color = Color.White,
+            color = if (isFocused) AppColors.TextInverted else Color.White,
             style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -1506,6 +1546,7 @@ private fun PlayerTransportButton(
     val coroutineScope = rememberCoroutineScope()
     val latestOnClick by rememberUpdatedState(onClick)
     var repeatJob by remember { mutableStateOf<Job?>(null) }
+    var isTransportFocused by remember { mutableStateOf(false) }
 
     fun stopRepeating() {
         repeatJob?.cancel()
@@ -1532,11 +1573,24 @@ private fun PlayerTransportButton(
         onClick = onClick,
         shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(50)),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = Color.White.copy(alpha = 0.1f),
-            focusedContainerColor = Color.White.copy(alpha = 0.3f)
+            containerColor = Color.White.copy(alpha = 0.08f),
+            focusedContainerColor = AppColors.FocusGlass,
+            contentColor = if (isTransportFocused) AppColors.TextInverted else Color.White
         ),
+        border = ClickableSurfaceDefaults.border(
+            border = Border(
+                border = BorderStroke(0.5.dp, SolidColor(AppColors.SpecularRimResting)),
+                shape = RoundedCornerShape(50)
+            ),
+            focusedBorder = Border(
+                border = BorderStroke(1.dp, SpecularFocusBrush),
+                shape = RoundedCornerShape(50)
+            )
+        ),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.08f),
         modifier = modifier
             .size(buttonSize)
+            .onFocusChanged { isTransportFocused = it.isFocused }
             .onPreviewKeyEvent { event ->
                 when (event.nativeKeyEvent.keyCode) {
                     android.view.KeyEvent.KEYCODE_DPAD_CENTER,
@@ -1563,7 +1617,7 @@ private fun PlayerTransportButton(
             Text(
                 text = label,
                 style = MaterialTheme.typography.headlineSmall,
-                color = Color.White
+                color = if (isTransportFocused) AppColors.TextInverted else Color.White
             )
         }
     }
@@ -1581,7 +1635,11 @@ private fun PlayerMetaPill(
     Surface(
         shape = RoundedCornerShape(999.dp),
         colors = SurfaceDefaults.colors(
-            containerColor = if (accent) Primary.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.10f)
+            containerColor = if (accent) Color.White.copy(alpha = 0.16f) else AppColors.GlassThin
+        ),
+        border = Border(
+            border = BorderStroke(0.5.dp, if (accent) SpecularRestingBrush else SolidColor(AppColors.SpecularRimResting)),
+            shape = RoundedCornerShape(999.dp)
         )
     ) {
         Text(

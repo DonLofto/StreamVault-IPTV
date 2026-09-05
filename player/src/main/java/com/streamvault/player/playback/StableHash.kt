@@ -2,12 +2,14 @@ package com.streamvault.player.playback
 
 import java.security.MessageDigest
 
-// Cached instance — safe because all callers (PreloadCoordinator) are Main-thread-only.
-private val sha256: MessageDigest = MessageDigest.getInstance("SHA-256")
+private val sha256ThreadLocal: ThreadLocal<MessageDigest> = ThreadLocal.withInitial {
+    MessageDigest.getInstance("SHA-256")
+}
 
-/** SHA-256 fingerprint truncated to 16 hex chars — stable across JVM restarts. */
+/** SHA-256 fingerprint truncated to 16 hex chars — stable across JVM restarts. Thread-safe via ThreadLocal. */
 internal fun stableHash(input: String): String {
-    sha256.reset()
-    val digest = sha256.digest(input.toByteArray(Charsets.UTF_8))
+    val md = sha256ThreadLocal.get() ?: MessageDigest.getInstance("SHA-256")
+    md.reset()
+    val digest = md.digest(input.toByteArray(Charsets.UTF_8))
     return digest.take(8).joinToString("") { "%02x".format(it) }
 }
