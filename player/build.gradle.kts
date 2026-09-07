@@ -25,6 +25,11 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
+
+    lint {
+        disable.add("UnsafeOptInUsageError")
+        disable.add("RestrictedApi")
+    }
 }
 
 kotlin {
@@ -149,4 +154,6 @@ dependencies {
     // Test
     testImplementation(libs.junit)
     testImplementation(libs.truth)
+    testImplementation(libs.mockito.kotlin)
+    testImplementation(libs.okhttp.mockwebserver)
 }

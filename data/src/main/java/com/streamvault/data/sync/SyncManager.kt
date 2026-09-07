@@ -298,10 +298,9 @@ class SyncManager @Inject constructor(
 
     private suspend fun <T> withProviderLock(providerId: Long, block: suspend () -> T): T {
         val mutex = syncAdmissionMutex.withLock {
-            providerSyncMutexes.computeIfAbsent(providerId) { Mutex() }.also { providerMutex ->
-                providerMutex.lock()
-            }
+            providerSyncMutexes.computeIfAbsent(providerId) { Mutex() }
         }
+        mutex.lock()
         try {
             return block()
         } finally {
@@ -311,10 +310,9 @@ class SyncManager @Inject constructor(
 
     private suspend fun <T> withProviderEpgLock(providerId: Long, block: suspend () -> T): T {
         val mutex = syncAdmissionMutex.withLock {
-            providerEpgMutexes.computeIfAbsent(providerId) { Mutex() }.also { providerMutex ->
-                providerMutex.lock()
-            }
+            providerEpgMutexes.computeIfAbsent(providerId) { Mutex() }
         }
+        mutex.lock()
         try {
             return block()
         } finally {
@@ -329,10 +327,9 @@ class SyncManager @Inject constructor(
     ): T {
         val lockKey = "$providerId:${section.name}"
         val mutex = syncAdmissionMutex.withLock {
-            providerStalkerIndexSectionMutexes.computeIfAbsent(lockKey) { Mutex() }.also { sectionMutex ->
-                sectionMutex.lock()
-            }
+            providerStalkerIndexSectionMutexes.computeIfAbsent(lockKey) { Mutex() }
         }
+        mutex.lock()
         try {
             return block()
         } finally {
@@ -342,10 +339,9 @@ class SyncManager @Inject constructor(
 
     private suspend fun <T> withStalkerSummaryProviderLock(providerId: Long, block: suspend () -> T): T {
         val mutex = syncAdmissionMutex.withLock {
-            providerStalkerSummaryMutexes.computeIfAbsent(providerId) { Mutex() }.also { providerMutex ->
-                providerMutex.lock()
-            }
+            providerStalkerSummaryMutexes.computeIfAbsent(providerId) { Mutex() }
         }
+        mutex.lock()
         try {
             return block()
         } finally {

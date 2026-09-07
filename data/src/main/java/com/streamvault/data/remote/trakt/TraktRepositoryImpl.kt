@@ -20,6 +20,13 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -46,6 +53,8 @@ class TraktRepositoryImpl @Inject constructor(
     private val _authState = MutableStateFlow(TraktAuthState())
     override val authState: StateFlow<TraktAuthState> = _authState.asStateFlow()
 
+    private val pollingMutex = Mutex()
+    private val pollingGeneration = AtomicLong(0L)
     private var pollingJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO)
 
@@ -68,28 +77,30 @@ class TraktRepositoryImpl @Inject constructor(
     }
 
     override suspend fun generateDeviceCode(): Result<TraktAuthState> = withContext(Dispatchers.IO) {
-        try {
-            cancelDeviceCodeAuth()
-            val requestBody = mapOf("client_id" to DEFAULT_CLIENT_ID)
-            val response = traktApiService.getDeviceCode(requestBody)
-            if (response.isSuccessful && response.body() != null) {
-                val body = response.body()!!
-                val newState = TraktAuthState(
-                    isAuthenticated = false,
-                    userCode = body.userCode,
-                    verificationUrl = body.verificationUrl,
-                    expiresInSeconds = body.expiresIn,
-                    intervalSeconds = body.interval.coerceAtLeast(5),
-                    isPendingAuthorization = true
-                )
-                _authState.value = newState
-                Result.success(newState)
-            } else {
-                Result.failure(Exception("Failed to request Trakt device code: ${response.code()} ${response.message()}"))
+        pollingMutex.withLock {
+            cancelDeviceCodeAuthLocked()
+            try {
+                val requestBody = mapOf("client_id" to DEFAULT_CLIENT_ID)
+                val response = traktApiService.getDeviceCode(requestBody)
+                if (response.isSuccessful && response.body() != null) {
+                    val body = response.body()!!
+                    val newState = TraktAuthState(
+                        isAuthenticated = false,
+                        userCode = body.userCode,
+                        verificationUrl = body.verificationUrl,
+                        expiresInSeconds = body.expiresIn,
+                        intervalSeconds = body.interval.coerceAtLeast(5),
+                        isPendingAuthorization = true
+                    )
+                    _authState.value = newState
+                    Result.success(newState)
+                } else {
+                    Result.failure(Exception("Failed to request Trakt device code: ${response.code()} ${response.message()}"))
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error generating device code", e)
+                Result.failure(e)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error generating device code", e)
-            Result.failure(e)
         }
     }
 
@@ -98,54 +109,89 @@ class TraktRepositoryImpl @Inject constructor(
         intervalSeconds: Int,
         expiresInSeconds: Int
     ): Result<Unit> = withContext(Dispatchers.IO) {
-        cancelDeviceCodeAuth()
+        val currentGen: Long
+        pollingMutex.withLock {
+            cancelDeviceCodeAuthLocked()
+            currentGen = pollingGeneration.incrementAndGet()
+            pollingJob = coroutineContext.job
+        }
         val startTime = System.currentTimeMillis()
         val maxDurationMs = expiresInSeconds * 1000L
         val intervalMs = intervalSeconds * 1000L
 
-        while (System.currentTimeMillis() - startTime < maxDurationMs) {
-            delay(intervalMs)
-            try {
-                val requestBody = mapOf(
-                    "code" to deviceCode,
-                    "client_id" to DEFAULT_CLIENT_ID,
-                    "client_secret" to DEFAULT_CLIENT_SECRET
-                )
-                val response = traktApiService.getDeviceToken(requestBody)
-                when (response.code()) {
-                    200 -> {
-                        val token = response.body()
-                        if (token != null) {
-                            saveTokens(token)
-                            fetchAndSaveUserProfile(token.accessToken)
-                            return@withContext Result.success(Unit)
+        try {
+            while (System.currentTimeMillis() - startTime < maxDurationMs) {
+                delay(intervalMs)
+                currentCoroutineContext().ensureActive()
+                if (pollingGeneration.get() != currentGen) {
+                    return@withContext Result.failure(CancellationException("Trakt authentication superseded"))
+                }
+                try {
+                    val requestBody = mapOf(
+                        "code" to deviceCode,
+                        "client_id" to DEFAULT_CLIENT_ID,
+                        "client_secret" to DEFAULT_CLIENT_SECRET
+                    )
+                    val response = traktApiService.getDeviceToken(requestBody)
+                    currentCoroutineContext().ensureActive()
+                    if (pollingGeneration.get() != currentGen) {
+                        return@withContext Result.failure(CancellationException("Trakt authentication superseded"))
+                    }
+                    when (response.code()) {
+                        200 -> {
+                            val token = response.body()
+                            if (token != null) {
+                                saveTokens(token)
+                                fetchAndSaveUserProfile(token.accessToken)
+                                pollingMutex.withLock {
+                                    if (pollingGeneration.get() == currentGen) {
+                                        pollingJob = null
+                                    }
+                                }
+                                return@withContext Result.success(Unit)
+                            }
+                        }
+                        400 -> {
+                            // Pending authorization, continue polling
+                            Log.d(TAG, "Trakt device token pending...")
+                        }
+                        404, 409, 410 -> {
+                            // Expired or denied
+                            pollingMutex.withLock {
+                                if (pollingGeneration.get() == currentGen) {
+                                    cancelDeviceCodeAuthLocked()
+                                }
+                            }
+                            return@withContext Result.failure(Exception("Trakt authentication expired or denied"))
+                        }
+                        429 -> {
+                            // Rate limit, slow down
+                            delay(5000L)
+                        }
+                        else -> {
+                            Log.w(TAG, "Unexpected response during polling: ${response.code()}")
                         }
                     }
-                    400 -> {
-                        // Pending authorization, continue polling
-                        Log.d(TAG, "Trakt device token pending...")
-                    }
-                    404, 409, 410 -> {
-                        // Expired or denied
-                        cancelDeviceCodeAuth()
-                        return@withContext Result.failure(Exception("Trakt authentication expired or cancelled"))
-                    }
-                    429 -> {
-                        // Rate limit, slow down
-                        delay(5000L)
-                    }
-                    else -> {
-                        Log.w(TAG, "Unexpected response during polling: ${response.code()}")
-                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.e(TAG, "Polling error", e)
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.e(TAG, "Polling error", e)
             }
+            pollingMutex.withLock {
+                if (pollingGeneration.get() == currentGen) {
+                    cancelDeviceCodeAuthLocked()
+                }
+            }
+            Result.failure(Exception("Trakt authorization timed out"))
+        } catch (e: CancellationException) {
+            pollingMutex.withLock {
+                if (pollingGeneration.get() == currentGen) {
+                    cancelDeviceCodeAuthLocked()
+                }
+            }
+            throw e
         }
-        cancelDeviceCodeAuth()
-        Result.failure(Exception("Trakt authorization timed out"))
     }
 
     private suspend fun saveTokens(tokenDto: TraktTokenResponseDto) {
@@ -188,7 +234,14 @@ class TraktRepositoryImpl @Inject constructor(
     }
 
     override suspend fun cancelDeviceCodeAuth() {
-        pollingJob?.cancel()
+        pollingMutex.withLock {
+            cancelDeviceCodeAuthLocked()
+        }
+    }
+
+    private suspend fun cancelDeviceCodeAuthLocked() {
+        pollingGeneration.incrementAndGet()
+        pollingJob?.cancelAndJoin()
         pollingJob = null
         if (!_authState.value.isAuthenticated) {
             _authState.value = TraktAuthState()

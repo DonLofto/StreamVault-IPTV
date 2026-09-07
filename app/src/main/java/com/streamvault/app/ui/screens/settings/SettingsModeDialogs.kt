@@ -441,58 +441,6 @@ internal fun RemoteShortcutSelectionDialog(
     )
 }
 
-@Composable
-internal fun MaxConcurrentStreamsDialog(
-    currentLimit: Int,
-    onDismiss: () -> Unit,
-    onLimitSelected: (Int) -> Unit
-) {
-    val options = listOf(1, 2, 3, 4)
-    PremiumDialog(
-        title = stringResource(R.string.settings_max_concurrent_streams),
-        subtitle = stringResource(R.string.settings_max_concurrent_streams_subtitle),
-        onDismissRequest = onDismiss,
-        widthFraction = 0.52f,
-        content = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                options.forEach { count ->
-                    val isSelected = count == currentLimit
-                    val label = if (count == 2) {
-                        stringResource(R.string.settings_max_concurrent_streams_default, count, if (count == 1) "" else "s")
-                    } else {
-                        stringResource(R.string.settings_max_concurrent_streams_entry, count, if (count == 1) "" else "s")
-                    }
-                    TvClickableSurface(
-                        onClick = { onLimitSelected(count) },
-                        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
-                        colors = ClickableSurfaceDefaults.colors(
-                            containerColor = if (isSelected) Primary.copy(alpha = 0.18f) else SurfaceElevated,
-                            focusedContainerColor = Primary.copy(alpha = 0.28f)
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                text = label,
-                                style = MaterialTheme.typography.titleSmall,
-                                color = if (isSelected) Primary else OnBackground
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        footer = {
-            PremiumDialogFooterButton(
-                label = stringResource(R.string.settings_cancel),
-                onClick = onDismiss
-            )
-        }
-    )
-}
 
 @Composable
 internal fun MultiViewPerformanceModeDialog(

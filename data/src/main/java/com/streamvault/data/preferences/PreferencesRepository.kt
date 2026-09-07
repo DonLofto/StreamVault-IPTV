@@ -203,12 +203,10 @@ class PreferencesRepository @Inject constructor(
         val PREVENT_STANDBY_DURING_PLAYBACK = booleanPreferencesKey("prevent_standby_during_playback")
         val AUTO_PLAY_NEXT_EPISODE = booleanPreferencesKey("auto_play_next_episode")
         val AUTO_CHECK_APP_UPDATES = booleanPreferencesKey("auto_check_app_updates")
-        val AUTO_DOWNLOAD_APP_UPDATES = booleanPreferencesKey("auto_download_app_updates")
         val RECORDING_WIFI_ONLY = booleanPreferencesKey("recording_wifi_only")
         val RECORDING_PADDING_BEFORE_MINUTES = intPreferencesKey("recording_padding_before_minutes")
         val RECORDING_PADDING_AFTER_MINUTES = intPreferencesKey("recording_padding_after_minutes")
         val DOWNLOAD_TREE_URI = stringPreferencesKey("download_tree_uri")
-        val MAX_CONCURRENT_STREAMS = intPreferencesKey("max_concurrent_streams")
         val LAST_APP_UPDATE_CHECK_TIMESTAMP = longPreferencesKey("last_app_update_check_timestamp")
         val APP_UPDATE_DOWNLOAD_ID = longPreferencesKey("app_update_download_id")
         val APP_UPDATE_DOWNLOAD_VERSION_NAME = stringPreferencesKey("app_update_download_version_name")
@@ -608,10 +606,6 @@ class PreferencesRepository @Inject constructor(
         preferences[PreferencesKeys.AUTO_CHECK_APP_UPDATES] ?: true
     }
 
-    val autoDownloadAppUpdates: Flow<Boolean> = context.dataStore.data.map { preferences ->
-        preferences[PreferencesKeys.AUTO_DOWNLOAD_APP_UPDATES] ?: false
-    }
-
     val lastAppUpdateCheckTimestamp: Flow<Long?> = context.dataStore.data.map { preferences ->
         preferences[PreferencesKeys.LAST_APP_UPDATE_CHECK_TIMESTAMP]?.takeIf { it > 0L }
     }
@@ -701,10 +695,6 @@ class PreferencesRepository @Inject constructor(
             ?.takeIf { it.isNotBlank() }
     }
 
-    val maxConcurrentStreams: Flow<Int> = context.dataStore.data.map { preferences ->
-        (preferences[PreferencesKeys.MAX_CONCURRENT_STREAMS] ?: 2).coerceIn(1, 4)
-    }
-
     suspend fun setZapAutoRevert(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.ZAP_AUTO_REVERT] = enabled
@@ -740,12 +730,6 @@ class PreferencesRepository @Inject constructor(
         }
     }
 
-    suspend fun setMaxConcurrentStreams(count: Int) {
-        context.dataStore.edit { preferences ->
-            preferences[PreferencesKeys.MAX_CONCURRENT_STREAMS] = count.coerceIn(1, 4)
-        }
-    }
-
     suspend fun setPreventStandbyDuringPlayback(prevent: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.PREVENT_STANDBY_DURING_PLAYBACK] = prevent
@@ -761,12 +745,6 @@ class PreferencesRepository @Inject constructor(
     suspend fun setAutoCheckAppUpdates(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.AUTO_CHECK_APP_UPDATES] = enabled
-        }
-    }
-
-    suspend fun setAutoDownloadAppUpdates(enabled: Boolean) {
-        context.dataStore.edit { preferences ->
-            preferences[PreferencesKeys.AUTO_DOWNLOAD_APP_UPDATES] = enabled
         }
     }
 

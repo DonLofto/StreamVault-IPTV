@@ -16,12 +16,14 @@ import com.streamvault.data.remote.http.HttpRequestProfile
 import com.streamvault.data.remote.http.safeRequestIdentitySummary
 import com.streamvault.data.remote.http.toGenericRequestProfile
 import com.streamvault.data.remote.http.withRequestProfile
+import com.streamvault.data.remote.http.awaitResponse
 import com.streamvault.data.util.rankSearchResults
 import com.streamvault.data.util.RepositoryTimingReporter
 import com.streamvault.domain.model.Program
 import com.streamvault.domain.model.Result
 import com.streamvault.domain.repository.EpgRepository
 import com.streamvault.domain.repository.EpgSourceRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -64,7 +66,8 @@ class EpgRepositoryImpl @Inject constructor(
     private val epgSourceRepository: EpgSourceRepository,
     private val preferencesRepository: PreferencesRepository,
     private val repositoryTimingReporter: RepositoryTimingReporter = RepositoryTimingReporter(enabled = false),
-    private val externalScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val externalScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    private val providerLifecycleCoordinator: com.streamvault.data.lifecycle.ProviderLifecycleCoordinator = com.streamvault.data.lifecycle.ProviderLifecycleCoordinator()
 ) : EpgRepository {
 
     private suspend fun shiftMsFor(providerId: Long): Long =
@@ -269,112 +272,121 @@ class EpgRepositoryImpl @Inject constructor(
 
     override suspend fun refreshEpg(providerId: Long, epgUrl: String): Result<Unit> =
         withContext(Dispatchers.IO) {
-            providerRefreshMutex(providerId).withLock {
-                val stagingProviderId = -providerId
-                val providerTimezoneId = providerDao.getById(providerId)
-                    ?.stalkerDeviceTimezone
-                    ?.trim()
-                    ?.takeIf(String::isNotEmpty)
-                val batch = ArrayList<ProgramEntity>(EPG_PROGRAM_BATCH_SIZE)
-                suspend fun flushBatch() {
-                    if (batch.isEmpty()) return
-                    val rows = batch.toList()
-                    batch.clear()
-                    transactionRunner.inTransaction {
-                        programDao.insertAll(rows)
+            val outcome = providerLifecycleCoordinator.withProviderOperation(providerId) {
+                providerRefreshMutex(providerId).withLock {
+                    val stagingProviderId = -providerId
+                    val providerTimezoneId = providerDao.getById(providerId)
+                        ?.stalkerDeviceTimezone
+                        ?.trim()
+                        ?.takeIf(String::isNotEmpty)
+                    val batch = ArrayList<ProgramEntity>(EPG_PROGRAM_BATCH_SIZE)
+                    suspend fun flushBatch() {
+                        if (batch.isEmpty()) return
+                        val rows = batch.toList()
+                        batch.clear()
+                        transactionRunner.inTransaction {
+                            programDao.insertAll(rows)
+                        }
+                        yield()
                     }
-                    yield()
-                }
-                try {
-                    val providerRequestProfile = providerDao.getById(providerId)
-                        ?.toGenericRequestProfile(ownerTag = "provider:$providerId/epg")
-                        ?: HttpRequestProfile(ownerTag = "provider:$providerId/epg")
-                    val request = Request.Builder()
-                        .url(epgUrl)
-                        .build()
-                        .withRequestProfile(providerRequestProfile)
-                    val call = epgHttpClient.newCall(request)
                     try {
-                        call.execute().use { response ->
-                            if (!response.isSuccessful) {
-                                Log.w(
-                                    "EpgRepository",
-                                    "EPG request failed for provider $providerId (${request.safeRequestIdentitySummary(providerRequestProfile)}): HTTP ${response.code}"
-                                )
-                                return@withLock Result.error("Failed to download EPG: HTTP ${response.code}")
-                            }
-
-                            val contentLength = response.header("Content-Length")?.toLongOrNull() ?: -1L
-                            if (contentLength > MAX_EPG_SIZE_BYTES) {
-                                return@withLock Result.error("EPG file too large (${contentLength / 1_048_576}MB)")
-                            }
-
-                            val body = response.body ?: return@withLock Result.error("Empty EPG response")
-
-                            transactionRunner.inTransaction {
-                                programDao.deleteByProvider(stagingProviderId)
-                            }
-
-                            body.byteStream().use { rawStream ->
-                                // Let OkHttp negotiate/decompress standard gzip responses. We still
-                                // inspect the bytes so download-style URLs that return raw `.gz`
-                                // payloads without transparent decompression continue to work.
-                                val limitedStream = object : FilterInputStream(rawStream) {
-                                    private var bytesRead = 0L
-                                    override fun read(): Int {
-                                        if (bytesRead >= MAX_EPG_SIZE_BYTES) throw IOException("EPG response too large (>200 MB)")
-                                        return super.read().also { if (it >= 0) bytesRead++ }
-                                    }
-                                    override fun read(b: ByteArray, off: Int, len: Int): Int {
-                                        if (bytesRead >= MAX_EPG_SIZE_BYTES) throw IOException("EPG response too large (>200 MB)")
-                                        return super.read(b, off, len).also { if (it > 0) bytesRead += it }
-                                    }
-                                }
-                                xmltvParser.maybeDecompressGzip(epgUrl, limitedStream).use { xmlInput ->
-                                    val decompressionLimited = MaxBytesInputStream(
-                                        xmlInput,
-                                        NetworkTimeoutConfig.EPG_MAX_DECOMPRESSED_BYTES
+                        val providerRequestProfile = providerDao.getById(providerId)
+                            ?.toGenericRequestProfile(ownerTag = "provider:$providerId/epg")
+                            ?: HttpRequestProfile(ownerTag = "provider:$providerId/epg")
+                        val request = Request.Builder()
+                            .url(epgUrl)
+                            .build()
+                            .withRequestProfile(providerRequestProfile)
+                        val call = epgHttpClient.newCall(request)
+                        try {
+                            val response = call.awaitResponse()
+                            response.use {
+                                if (!response.isSuccessful) {
+                                    Log.w(
+                                        "EpgRepository",
+                                        "EPG request failed for provider $providerId (${request.safeRequestIdentitySummary(providerRequestProfile)}): HTTP ${response.code}"
                                     )
-                                    xmltvParser.parseStreaming(
-                                        decompressionLimited,
-                                        timezoneId = providerTimezoneId,
-                                        maxProgrammes = NetworkTimeoutConfig.EPG_MAX_PROGRAMMES
-                                    ) { program ->
-                                        batch.add(program.copy(providerId = stagingProviderId).toEntity())
-                                        if (batch.size >= EPG_PROGRAM_BATCH_SIZE) {
-                                            flushBatch()
+                                    return@withLock Result.error("Failed to download EPG: HTTP ${response.code}")
+                                }
+
+                                val contentLength = response.header("Content-Length")?.toLongOrNull() ?: -1L
+                                if (contentLength > MAX_EPG_SIZE_BYTES) {
+                                    return@withLock Result.error("EPG file too large (${contentLength / 1_048_576}MB)")
+                                }
+
+                                val body = response.body ?: return@withLock Result.error("Empty EPG response")
+
+                                transactionRunner.inTransaction {
+                                    programDao.deleteByProvider(stagingProviderId)
+                                }
+
+                                body.byteStream().use { rawStream ->
+                                    // Let OkHttp negotiate/decompress standard gzip responses. We still
+                                    // inspect the bytes so download-style URLs that return raw `.gz`
+                                    // payloads without transparent decompression continue to work.
+                                    val limitedStream = object : FilterInputStream(rawStream) {
+                                        private var bytesRead = 0L
+                                        override fun read(): Int {
+                                            if (bytesRead >= MAX_EPG_SIZE_BYTES) throw IOException("EPG response too large (>200 MB)")
+                                            return super.read().also { if (it >= 0) bytesRead++ }
+                                        }
+                                        override fun read(b: ByteArray, off: Int, len: Int): Int {
+                                            if (bytesRead >= MAX_EPG_SIZE_BYTES) throw IOException("EPG response too large (>200 MB)")
+                                            return super.read(b, off, len).also { if (it > 0) bytesRead += it }
+                                        }
+                                    }
+                                    xmltvParser.maybeDecompressGzip(epgUrl, limitedStream).use { xmlInput ->
+                                        val decompressionLimited = MaxBytesInputStream(
+                                            xmlInput,
+                                            NetworkTimeoutConfig.EPG_MAX_DECOMPRESSED_BYTES
+                                        )
+                                        xmltvParser.parseStreaming(
+                                            decompressionLimited,
+                                            timezoneId = providerTimezoneId,
+                                            maxProgrammes = NetworkTimeoutConfig.EPG_MAX_PROGRAMMES
+                                        ) { program ->
+                                            batch.add(program.copy(providerId = stagingProviderId).toEntity())
+                                            if (batch.size >= EPG_PROGRAM_BATCH_SIZE) {
+                                                flushBatch()
+                                            }
                                         }
                                     }
                                 }
                             }
+                        } finally {
+                            if (!currentCoroutineContext().isActive) {
+                                call.cancel()
+                            }
                         }
-                    } finally {
-                        // H6: cancel the blocking OkHttp call when the coroutine/worker is
-                        // cancelled, so EPG work never lingers past its cancellation.
-                        if (!currentCoroutineContext().isActive) {
-                            call.cancel()
+
+                        flushBatch()
+
+                        transactionRunner.inTransaction {
+                            if (providerDao.getById(providerId) == null) {
+                                programDao.deleteByProvider(stagingProviderId)
+                                return@inTransaction
+                            }
+                            programDao.deleteByProvider(providerId)
+                            programDao.moveToProvider(stagingProviderId, providerId)
                         }
-                    }
 
-                    flushBatch()
-
-                    transactionRunner.inTransaction {
-                        programDao.deleteByProvider(providerId)
-                        programDao.moveToProvider(stagingProviderId, providerId)
-                    }
-
-                    Result.success(Unit)
-                } catch (e: Exception) {
-                    programDao.deleteByProvider(stagingProviderId)
-                    if (e is EpgInputLimitException) {
-                        Result.error("EPG content exceeded size or programme limit", e)
-                    } else if (e is IOException && e.message?.contains("too large", ignoreCase = true) == true) {
-                        Result.error("EPG response exceeded 200 MB limit", e)
-                    } else {
-                        Result.error("Failed to refresh EPG: ${e.message}", e)
+                        Result.success(Unit)
+                    } catch (e: Exception) {
+                        programDao.deleteByProvider(stagingProviderId)
+                        if (e is CancellationException) {
+                            throw e
+                        }
+                        if (e is EpgInputLimitException) {
+                            Result.error("EPG content exceeded size or programme limit", e)
+                        } else if (e is IOException && e.message?.contains("too large", ignoreCase = true) == true) {
+                            Result.error("EPG response exceeded 200 MB limit", e)
+                        } else {
+                            Result.error("Failed to refresh EPG: ${e.message}", e)
+                        }
                     }
                 }
             }
+            outcome ?: Result.error("Provider is being deleted or does not exist")
         }
 
     override suspend fun clearOldPrograms(beforeTime: Long) {

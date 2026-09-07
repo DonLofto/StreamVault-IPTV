@@ -26,6 +26,24 @@ class LiveTimeshiftManagerTest {
     }
 
     @Test
+    fun dashPruning_evictOldestMedia_preservesInitSegment() {
+        val window = DefaultLiveTimeshiftManager.DashWindow(depthMs = 20_000)
+        val init = segment(remote = "init.mp4", duration = 0L)
+        val first = segment(remote = "seg-1.mp4", duration = 6_000L)
+        val second = segment(remote = "seg-2.mp4", duration = 6_000L)
+
+        window.addInit(init)
+        window.addMedia(first)
+        window.addMedia(second)
+
+        val evicted = window.evictOldestMedia()
+        assertThat(evicted).isEqualTo(first)
+        assertThat(window.mediaSegments()).containsExactly(second)
+        assertThat(window.initSegment()).isEqualTo(init)
+        assertThat(window.allSegments()).containsExactly(init, second)
+    }
+
+    @Test
     fun cancelledSession_doesNotPublishFailedAfterStop() {
         // After stop the session is no longer active: no error may reach FAILED state.
         assertThat(shouldPublishCaptureFailure(isActive = false, IOException("late"))).isFalse()

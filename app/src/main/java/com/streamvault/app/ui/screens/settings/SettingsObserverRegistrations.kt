@@ -34,17 +34,15 @@ internal fun registerSettingsAppUpdateObservers(
     scope.launch {
         combine(
             preferencesRepository.autoCheckAppUpdates,
-            preferencesRepository.lastAppUpdateCheckTimestamp,
-            preferencesRepository.autoDownloadAppUpdates
-        ) { autoCheckEnabled, lastCheckedAt, autoDownload ->
-            Triple(autoCheckEnabled, lastCheckedAt, autoDownload)
-        }.distinctUntilChanged().collect { (autoCheckEnabled, lastCheckedAt, autoDownload) ->
+            preferencesRepository.lastAppUpdateCheckTimestamp
+        ) { autoCheckEnabled, lastCheckedAt ->
+            Pair(autoCheckEnabled, lastCheckedAt)
+        }.distinctUntilChanged().collect { (autoCheckEnabled, lastCheckedAt) ->
             if (autoCheckEnabled && appUpdateActions.shouldAutoCheckForUpdates(lastCheckedAt)) {
                 appUpdateActions.checkForAppUpdates(
                     scope = scope,
                     manual = false,
-                    isRemoteVersionNewer = ::isRemoteVersionNewer,
-                    autoDownload = autoDownload
+                    isRemoteVersionNewer = ::isRemoteVersionNewer
                 )
             }
         }
@@ -120,12 +118,6 @@ internal fun registerRecordingObservers(
     scope.launch {
         preferencesRepository.recordingPaddingAfterMinutes.collect { minutes ->
             uiState.update { it.copy(recordingPaddingAfterMinutes = minutes) }
-        }
-    }
-
-    scope.launch {
-        preferencesRepository.maxConcurrentStreams.collect { count ->
-            uiState.update { it.copy(maxConcurrentStreams = count) }
         }
     }
 }

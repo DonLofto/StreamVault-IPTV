@@ -415,7 +415,7 @@ class StalkerProviderTest {
         assertThat(success.data.headers["Connection"]).isEqualTo("keep-alive")
         assertThat(success.data.headers["Host"]).isEqualTo("fdox.org:8080")
         assertThat(success.data.userAgent).isEqualTo("Lavf53.32.100")
-        assertThat(success.data.allowInvalidSsl).isTrue()
+        assertThat(success.data.allowInvalidSsl).isFalse()
     }
 
     @Test
@@ -491,12 +491,14 @@ class StalkerProviderTest {
         assertThat(result).isInstanceOf(Result.Success::class.java)
         val success = result as Result.Success
         assertThat(success.data.userAgent).isNull()
-        assertThat(success.data.allowInvalidSsl).isTrue()
+        assertThat(success.data.allowInvalidSsl).isFalse()
         assertThat(success.data.proxyHost).isEqualTo("127.0.0.1")
         assertThat(success.data.proxyPort).isEqualTo(8080)
         assertThat(success.data.headers).doesNotContainKey("Referer")
         assertThat(success.data.headers["X-Test"]).isEqualTo("enabled")
     }
+
+
 
     @Test
     fun resolvePlaybackInfo_repairs_blank_live_stream_from_localhost_channel_command() = runTest {

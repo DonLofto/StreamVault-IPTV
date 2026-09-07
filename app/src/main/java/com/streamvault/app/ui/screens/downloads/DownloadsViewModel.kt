@@ -88,6 +88,14 @@ class DownloadsViewModel @Inject constructor(
         }
     }
 
+    fun cancelDownload(item: DownloadItem) {
+        viewModelScope.launch {
+            downloadManager.cancelDownload(item.id)
+            val message = application.getString(R.string.downloads_cancelled)
+            _uiState.update { it.copy(userMessage = message) }
+        }
+    }
+
     fun showDeleteConfirm(item: DownloadItem) {
         _uiState.update { it.copy(deleteConfirmItem = item) }
     }

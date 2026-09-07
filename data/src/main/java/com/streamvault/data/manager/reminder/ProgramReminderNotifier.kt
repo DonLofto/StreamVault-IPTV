@@ -36,8 +36,14 @@ class ProgramReminderNotifier @Inject constructor(
             .setAutoCancel(true)
             .setContentIntent(buildLaunchPendingIntent())
             .build()
-        runCatching {
-            NotificationManagerCompat.from(context).notify(reminderNotificationTag(reminder.id), 0, notification)
+        if (androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            runCatching {
+                NotificationManagerCompat.from(context).notify(reminderNotificationTag(reminder.id), 0, notification)
+            }
         }
     }
 

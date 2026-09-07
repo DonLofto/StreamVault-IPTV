@@ -67,7 +67,11 @@ class AppCacheQuota @Inject constructor(
         // Prefer StorageStatsManager free-space when available, fall back to cacheDir.usableSpace.
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val statsManager = context.getSystemService(Context.STORAGE_SERVICE) as? StorageStatsManager
+                val statsManager = try {
+                    context.getSystemService(StorageStatsManager::class.java)
+                } catch (_: Throwable) {
+                    null
+                }
                 val free = try {
                     statsManager?.getFreeBytes(StorageManager.UUID_DEFAULT) ?: 0L
                 } catch (_: IOException) {

@@ -55,11 +55,17 @@ object OfficialBuildVerifier {
             packageManager.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
         }
 
-        val signingCertificateBytes = packageInfo.signingInfo
-            ?.apkContentsSigners
-            ?.firstOrNull()
-            ?.toByteArray()
-            ?: return null
+        val signingCertificateBytes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageInfo.signingInfo
+                ?.apkContentsSigners
+                ?.firstOrNull()
+                ?.toByteArray()
+        } else {
+            @Suppress("DEPRECATION")
+            packageInfo.signatures
+                ?.firstOrNull()
+                ?.toByteArray()
+        } ?: return null
 
         val certificate = CertificateFactory.getInstance("X.509")
             .generateCertificate(ByteArrayInputStream(signingCertificateBytes))

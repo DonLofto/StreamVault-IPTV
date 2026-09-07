@@ -32,7 +32,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.compositionLocalOf
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -74,14 +77,17 @@ import java.time.ZoneId
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private val LocalGuideNow = staticCompositionLocalOf { 0L }
+private val LocalGuideNow = compositionLocalOf { 0L }
 
 @Composable
 internal fun rememberGuideNow(): Long {
-    val currentTime by produceState(initialValue = System.currentTimeMillis()) {
-        while (true) {
-            value = System.currentTimeMillis()
-            delay(30_000L)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val currentTime by produceState(initialValue = System.currentTimeMillis(), lifecycleOwner) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                value = System.currentTimeMillis()
+                delay(30_000L)
+            }
         }
     }
     return currentTime

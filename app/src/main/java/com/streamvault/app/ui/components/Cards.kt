@@ -23,11 +23,16 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -89,19 +94,20 @@ import com.streamvault.app.ui.design.FocusSpec
 import com.streamvault.app.ui.interaction.mouseClickable
 import com.streamvault.app.ui.interaction.rememberTvInteractionSounds
 
-private object ChannelProgressTicker {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+val LocalChannelProgressClock = compositionLocalOf { System.currentTimeMillis() }
 
-    val nowMs = flow {
-        while (true) {
-            emit(System.currentTimeMillis())
-            delay(30_000L)
+@Composable
+fun rememberChannelProgressClock(intervalMs: Long = 30_000L): Long {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val now by produceState(initialValue = System.currentTimeMillis(), lifecycleOwner) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                value = System.currentTimeMillis()
+                delay(intervalMs)
+            }
         }
-    }.stateIn(
-        scope = scope,
-        started = SharingStarted.WhileSubscribed(stopTimeoutMillis = 30_000L),
-        initialValue = System.currentTimeMillis()
-    )
+    }
+    return now
 }
 
 @Composable
@@ -202,7 +208,8 @@ fun ChannelCard(
     isReorderMode: Boolean = false,
     isDragging: Boolean = false,
     isRecording: Boolean = false,
-    isScheduledRecording: Boolean = false
+    isScheduledRecording: Boolean = false,
+    nowMs: Long = LocalChannelProgressClock.current
 ) {
     val channelCardShape = LocalAppShapes.current.small
     val hasUsableArchive = channel.archivePlaybackCapability().canBuildReplayCandidate
@@ -290,7 +297,7 @@ fun ChannelCard(
                         progress = {
                             val totalDuration = program.endTime - program.startTime
                             if (totalDuration > 0) {
-                                val elapsed = ChannelProgressTicker.nowMs.value - program.startTime
+                                val elapsed = nowMs - program.startTime
                                 (elapsed.toFloat() / totalDuration).coerceIn(0f, 1f)
                             } else {
                                 0f

@@ -257,7 +257,6 @@ internal fun PlayerViewModel.changeChannel(index: Int, isAutoFallback: Boolean =
         internalChannelId = channel.id
     )
 
-    showZapOverlayFlow.value = false
     showControlsFlow.value = false
     openChannelInfoOverlay()
 

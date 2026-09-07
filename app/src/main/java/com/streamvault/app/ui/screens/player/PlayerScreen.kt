@@ -207,6 +207,7 @@ fun PlayerScreen(
     val availableVideoQualities by viewModel.availableVideoQualities.collectAsStateWithLifecycle()
     val liveTranslationAvailable by viewModel.liveTranslationAvailable.collectAsStateWithLifecycle()
     val liveTranslationActive by viewModel.liveTranslationActive.collectAsStateWithLifecycle()
+    val liveTranslationDetectedLanguage by viewModel.liveTranslationDetectedLanguage.collectAsStateWithLifecycle()
     val aspectRatio by viewModel.aspectRatio.collectAsStateWithLifecycle()
     val showDiagnostics by viewModel.showDiagnostics.collectAsStateWithLifecycle()
     val playerDiagnostics by viewModel.playerDiagnostics.collectAsStateWithLifecycle()
@@ -1070,7 +1071,21 @@ fun PlayerScreen(
             showExternalPlayerAction = externalPlaybackUrl.isNotBlank(),
             onOpenExternalPlayer = {
                 if (externalPlaybackUrl.isNotBlank()) {
-                    com.streamvault.app.player.external.ExternalPlayerLauncher.launch(context, externalPlaybackUrl)
+                    when (com.streamvault.app.player.external.ExternalPlayerLauncher.launch(context, externalPlaybackUrl)) {
+                        is com.streamvault.app.player.external.ExternalPlayerLaunchResult.Success -> Unit
+                        is com.streamvault.app.player.external.ExternalPlayerLaunchResult.NoHandler -> {
+                            android.widget.Toast.makeText(context, context.getString(R.string.player_no_external_player), android.widget.Toast.LENGTH_SHORT).show()
+                            quickActionsFocusRequester.requestFocusSafely(tag = "PlayerScreen", target = "External player failure")
+                        }
+                        is com.streamvault.app.player.external.ExternalPlayerLaunchResult.InvalidUrl -> {
+                            android.widget.Toast.makeText(context, context.getString(R.string.player_unsafe_stream_url), android.widget.Toast.LENGTH_SHORT).show()
+                            quickActionsFocusRequester.requestFocusSafely(tag = "PlayerScreen", target = "External player failure")
+                        }
+                        is com.streamvault.app.player.external.ExternalPlayerLaunchResult.Failed -> {
+                            android.widget.Toast.makeText(context, context.getString(R.string.player_external_launch_failed), android.widget.Toast.LENGTH_SHORT).show()
+                            quickActionsFocusRequester.requestFocusSafely(tag = "PlayerScreen", target = "External player failure")
+                        }
+                    }
                 }
             },
             onUserInteraction = {
@@ -1151,6 +1166,7 @@ fun PlayerScreen(
                 videoTracks = availableVideoQualities,
                 liveTranslationAvailable = liveTranslationAvailable,
                 liveTranslationActive = liveTranslationActive,
+                liveTranslationDetectedLanguage = liveTranslationDetectedLanguage,
                 onDismiss = { showTrackSelection = null },
                 onSelectAudio = viewModel::selectAudioTrack,
                 onSelectVideo = viewModel::selectVideoQuality,

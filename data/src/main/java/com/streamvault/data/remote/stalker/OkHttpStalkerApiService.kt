@@ -53,6 +53,7 @@ import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.Headers
 import okhttp3.HttpUrl
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
@@ -1457,6 +1458,9 @@ class OkHttpStalkerApiService @Inject constructor(
         val key = proxy?.let { "${it.host}:${it.port}" } ?: "<direct>"
         return stalkerHttpClients.computeIfAbsent(key) {
             okHttpClient.newBuilder()
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .addInterceptor(StalkerRedirectInterceptor())
                 .cookieJar(cookieJar)
                 .apply {
                     if (proxy != null) {
@@ -1464,6 +1468,40 @@ class OkHttpStalkerApiService @Inject constructor(
                     }
                 }
                 .build()
+        }
+    }
+
+    private class StalkerRedirectInterceptor : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response {
+            var request = chain.request()
+            var response = chain.proceed(request)
+            var redirectCount = 0
+            while (response.isRedirect && redirectCount < 20) {
+                redirectCount++
+                val location = response.header("Location") ?: break
+                val nextUrl = request.url.resolve(location) ?: break
+                response.close()
+
+                val isSameOrigin = request.url.scheme.equals(nextUrl.scheme, ignoreCase = true) &&
+                    request.url.host.equals(nextUrl.host, ignoreCase = true) &&
+                    request.url.port == nextUrl.port
+
+                val requestBuilder = request.newBuilder().url(nextUrl)
+                if (!isSameOrigin) {
+                    requestBuilder.removeHeader("Authorization")
+                    requestBuilder.removeHeader("Cookie")
+                    requestBuilder.removeHeader("X-User-Agent")
+                    requestBuilder.removeHeader("Referer")
+                    requestBuilder.removeHeader("Host")
+                    requestBuilder.removeHeader("X-Portal-Token")
+                }
+                if ((response.code == 301 || response.code == 302 || response.code == 303) && request.method == "POST") {
+                    requestBuilder.method("GET", null)
+                }
+                request = requestBuilder.build()
+                response = chain.proceed(request)
+            }
+            return response
         }
     }
 

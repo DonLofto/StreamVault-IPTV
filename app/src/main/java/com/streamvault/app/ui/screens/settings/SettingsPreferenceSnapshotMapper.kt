@@ -82,7 +82,6 @@ internal fun SettingsUiState.applyPreferenceSnapshot(snapshot: SettingsPreferenc
         zapAutoRevert = snapshot.zapAutoRevert,
         autoPlayNextEpisode = snapshot.autoPlayNextEpisode,
         autoCheckAppUpdates = snapshot.autoCheckAppUpdates,
-        autoDownloadAppUpdates = snapshot.autoDownloadAppUpdates,
         appUpdate = cachedAppUpdate.copy(
             downloadStatus = appUpdate.downloadStatus,
             downloadedVersionName = appUpdate.downloadedVersionName,

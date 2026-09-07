@@ -168,10 +168,8 @@ data class SettingsUiState(
     val epgPendingDeleteSourceId: Long? = null,
     val epgTimeShiftMinutesByProvider: Map<Long, Int> = emptyMap(),
     val autoCheckAppUpdates: Boolean = true,
-    val autoDownloadAppUpdates: Boolean = false,
     val isCheckingForUpdates: Boolean = false,
     val appUpdate: AppUpdateUiModel = AppUpdateUiModel(),
     val crashReport: CrashReportUiModel = CrashReportUiModel(),
-    val viewedCrashReport: CrashReportUiModel? = null,
-    val maxConcurrentStreams: Int = 2
+    val viewedCrashReport: CrashReportUiModel? = null
 )

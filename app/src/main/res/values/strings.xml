@@ -372,6 +372,9 @@
     <string name="settings_external_playback_subtitle">Choose which app opens streams when you play a channel or title.</string>
     <string name="settings_external_playback_mode_internal">Internal player</string>
     <string name="settings_external_playback_mode_external">External player</string>
+    <string name="settings_external_playback_mode_ask">Ask every time</string>
+    <string name="dialog_choose_player_title">Choose Player</string>
+    <string name="dialog_choose_player_subtitle">Select how you want to play this stream</string>
     <string name="settings_browsing">Browsing</string>
     <string name="settings_live_tv_channel_mode">Live TV Channel Mode</string>
     <string name="settings_live_tv_channel_mode_subtitle">Choose how the Live TV browser should present channels and whether it should preview before playback.</string>
@@ -641,7 +644,6 @@
     <string name="settings_updates_title">Updates</string>
     <string name="settings_updates_subtitle">Check GitHub Releases for newer StreamVault versions without leaving the app.</string>
     <string name="settings_update_auto_check">Automatically check for updates</string>
-    <string name="settings_update_auto_download">Automatically download updates</string>
     <string name="settings_update_latest_release">Latest release</string>
     <string name="settings_update_status">Update status</string>
     <string name="settings_update_last_checked">Last checked</string>
@@ -1751,7 +1753,9 @@
     <string name="download_play_local">Play</string>
     <string name="download_resume">Resume</string>
     <string name="download_delete">Delete</string>
+    <string name="download_cancel">Cancel</string>
     <string name="downloads_resumed">Download resumed</string>
+    <string name="downloads_cancelled">Download cancelled</string>
     <string name="download_error_no_url">Could not resolve stream URL for download</string>
     <string name="settings_remote_shortcuts_title">Colored Remote Buttons</string>
     <string name="settings_remote_shortcuts_subtitle">Works on remotes that send the Android red, green, yellow, and blue color key codes.</string>
@@ -1783,10 +1787,6 @@
     <string name="settings_remote_dialog_subtitle">Choose what this colored button should do in %1$s.</string>
 
     <!-- Unwired feature extensions -->
-    <string name="settings_max_concurrent_streams">Max concurrent streams</string>
-    <string name="settings_max_concurrent_streams_subtitle">Limit active streams per provider to avoid provider account suspension.</string>
-    <string name="settings_max_concurrent_streams_entry">%1$d stream%2$s</string>
-    <string name="settings_max_concurrent_streams_default">%1$d stream%2$s (Default)</string>
     <string name="epg_reminders_manage_title">Program Reminders</string>
     <string name="epg_reminders_empty">No upcoming program reminders scheduled.</string>
     <string name="epg_reminder_cancel">Cancel reminder</string>

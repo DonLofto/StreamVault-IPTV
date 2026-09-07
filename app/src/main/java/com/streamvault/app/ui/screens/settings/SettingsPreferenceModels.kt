@@ -117,7 +117,6 @@ internal data class SettingsPreferenceSnapshot(
     val zapAutoRevert: Boolean,
     val autoPlayNextEpisode: Boolean,
     val autoCheckAppUpdates: Boolean,
-    val autoDownloadAppUpdates: Boolean,
     val lastAppUpdateCheckAt: Long?,
     val cachedAppUpdateVersionName: String?,
     val cachedAppUpdateVersionCode: Int?,

@@ -7,6 +7,7 @@ import androidx.compose.foundation.relocation.BringIntoViewResponder
 import androidx.compose.foundation.relocation.bringIntoViewResponder
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -19,19 +20,32 @@ import androidx.compose.ui.layout.onSizeChanged
  *
  * Works by replacing the per-card BringIntoView rect with the full height of this
  * container, so the parent only scrolls to ensure the whole row section is visible.
+ *
+ * The measured height state is remembered across recompositions so that recomposing
+ * the row does not reset height to 0f.
  */
 @OptIn(ExperimentalFoundationApi::class)
 fun Modifier.suppressParentVerticalScroll(): Modifier = composed {
-    var height by mutableFloatStateOf(0f)
+    var height by remember { mutableFloatStateOf(0f) }
 
-    this
-        .onSizeChanged { height = it.height.toFloat() }
-        .bringIntoViewResponder(object : BringIntoViewResponder {
-            override fun calculateRectForParent(localRect: Rect): Rect =
-                Rect(localRect.left, 0f, localRect.right, height)
+    val responder = remember {
+        object : BringIntoViewResponder {
+            override fun calculateRectForParent(localRect: Rect): Rect {
+                val effectiveHeight = if (height > 0f) height else localRect.height
+                return Rect(localRect.left, 0f, localRect.right, effectiveHeight)
+            }
 
             override suspend fun bringChildIntoView(localRect: () -> Rect?) {
-                // No-op: horizontal scrolling is handled by the inner LazyRow.
+                // Horizontal scrolling is handled by the inner LazyRow.
             }
-        })
+        }
+    }
+
+    this
+        .onSizeChanged { size ->
+            if (size.height > 0) {
+                height = size.height.toFloat()
+            }
+        }
+        .bringIntoViewResponder(responder)
 }

@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
@@ -75,6 +76,16 @@ class EpgSourceRepositoryImplTest {
     }
 
     private lateinit var repository: EpgSourceRepositoryImpl
+
+    private fun mockCall(response: Response): Call {
+        val call: Call = mock()
+        whenever(call.execute()).thenReturn(response)
+        whenever(call.enqueue(any())).thenAnswer { invocation ->
+            val callback = invocation.getArgument<Callback>(0)
+            callback.onResponse(call, response)
+        }
+        return call
+    }
 
     @Before
     fun setup() {
@@ -291,7 +302,7 @@ class EpgSourceRepositoryImplTest {
                 ).toResponseBody("application/octet-stream".toMediaType())
             )
             .build()
-        val call: Call = mock()
+        val call = mockCall(response)
         val repositoryWithRealParser = EpgSourceRepositoryImpl(
             context = context,
             epgSourceDao = epgSourceDao,
@@ -309,7 +320,6 @@ class EpgSourceRepositoryImplTest {
 
         whenever(epgSourceDao.getById(10L)).thenReturn(source)
         whenever(okHttpClient.newCall(any())).thenReturn(call)
-        whenever(call.execute()).thenReturn(response)
         whenever(providerEpgSourceDao.getProviderIdsForSourceSync(10L)).thenReturn(emptyList())
 
         val result = repositoryWithRealParser.refreshSource(10L)
@@ -363,11 +373,10 @@ class EpgSourceRepositoryImplTest {
             .message("OK")
             .body("<tv></tv>".toResponseBody("application/xml".toMediaType()))
             .build()
-        val call: Call = mock()
+        val call = mockCall(response)
 
         whenever(epgSourceDao.getById(10L)).thenReturn(source)
         whenever(okHttpClient.newCall(requestCaptor.capture())).thenReturn(call)
-        whenever(call.execute()).thenReturn(response)
         whenever(providerEpgSourceDao.getProviderIdsForSourceSync(10L)).thenReturn(emptyList())
         whenever(xmltvParser.maybeDecompressGzip(eq(source.url), any())).thenAnswer { it.arguments[1] }
 
@@ -394,11 +403,10 @@ class EpgSourceRepositoryImplTest {
             .message("Not Modified")
             .body("".toResponseBody())
             .build()
-        val call: Call = mock()
+        val call = mockCall(response)
 
         whenever(epgSourceDao.getById(10L)).thenReturn(source)
         whenever(okHttpClient.newCall(any())).thenReturn(call)
-        whenever(call.execute()).thenReturn(response)
         whenever(providerEpgSourceDao.getProviderIdsForSourceSync(10L)).thenReturn(listOf(7L, 8L))
 
         val result = repository.refreshSource(10L)
@@ -424,11 +432,10 @@ class EpgSourceRepositoryImplTest {
             .message("OK")
             .body("<tv></tv>".toResponseBody())
             .build()
-        val call: Call = mock()
+        val call = mockCall(response)
 
         whenever(epgSourceDao.getById(10L)).thenReturn(source)
         whenever(okHttpClient.newCall(any())).thenReturn(call)
-        whenever(call.execute()).thenReturn(response)
         whenever(xmltvParser.maybeDecompressGzip(eq(source.url), any())).thenAnswer { it.arguments[1] }
         whenever(providerEpgSourceDao.getProviderIdsForSourceSync(10L)).thenReturn(listOf(7L, 8L))
         whenever(providerDao.getById(7L)).thenReturn(
@@ -471,11 +478,10 @@ class EpgSourceRepositoryImplTest {
             .message("OK")
             .body("<tv></tv>".toResponseBody())
             .build()
-        val call: Call = mock()
+        val call = mockCall(response)
 
         whenever(epgSourceDao.getById(10L)).thenReturn(source)
         whenever(okHttpClient.newCall(any())).thenReturn(call)
-        whenever(call.execute()).thenReturn(response)
         whenever(xmltvParser.maybeDecompressGzip(eq(source.url), any())).thenAnswer { it.arguments[1] }
         whenever(providerEpgSourceDao.getProviderIdsForSourceSync(10L)).thenReturn(listOf(7L, 8L))
         whenever(providerDao.getById(7L)).thenReturn(

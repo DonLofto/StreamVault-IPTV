@@ -6,8 +6,10 @@ import android.content.Context
 import android.content.Intent
 import android.media.tv.TvContract
 import android.net.Uri
+import android.os.Build
 import android.provider.BaseColumns
 import android.util.Log
+import androidx.annotation.RequiresApi
 import com.streamvault.app.MainActivity
 import com.streamvault.app.R
 import com.streamvault.app.device.isTelevisionDevice
@@ -31,7 +33,7 @@ class WatchNextManager @Inject constructor(
 ) {
 
     suspend fun refreshWatchNext() = withContext(Dispatchers.IO) {
-        if (!context.isTelevisionDevice()) return@withContext
+        if (!context.isTelevisionDevice() || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return@withContext
         val activeProviderId = providerRepository.getActiveProvider().first()?.id
         val historyEntries = selectWatchNextHistoryEntries(
             activeProviderId = activeProviderId,
@@ -77,6 +79,7 @@ class WatchNextManager @Inject constructor(
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun loadExistingEntries(): Map<String, Long> {
         val projection = arrayOf(BaseColumns._ID, COLUMN_INTERNAL_PROVIDER_ID)
         return context.contentResolver.query(
@@ -96,6 +99,7 @@ class WatchNextManager @Inject constructor(
         }.orEmpty()
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun buildWatchNextValues(history: PlaybackHistory): ContentValues {
         val launchIntent = Intent(context, MainActivity::class.java)
             .setAction(Intent.ACTION_VIEW)
@@ -116,6 +120,7 @@ class WatchNextManager @Inject constructor(
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun watchNextProgramType(contentType: ContentType): Int = when (contentType) {
         ContentType.MOVIE -> TvContract.PreviewPrograms.TYPE_MOVIE
         ContentType.SERIES,

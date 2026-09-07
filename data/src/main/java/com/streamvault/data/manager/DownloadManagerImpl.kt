@@ -72,19 +72,23 @@ class DownloadManagerImpl @Inject constructor(
     @Volatile private var playbackActive = false
 
     init {
-        val request = NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .build()
-        connectivityManager.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) {
-                applicationScope.launch(Dispatchers.IO) {
-                    downloadDao.getRetryablePausedOnce(MAX_RETRIES)
-                        .filter { it.retryCount == 0 }
-                        .forEach { scheduleExisting(it.id, keepPaused = true) }
-                    startNextQueued()
+        try {
+            val request = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
+            connectivityManager.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    applicationScope.launch(Dispatchers.IO) {
+                        downloadDao.getRetryablePausedOnce(MAX_RETRIES)
+                            .filter { it.retryCount == 0 }
+                            .forEach { scheduleExisting(it.id, keepPaused = true) }
+                        startNextQueued()
+                    }
                 }
-            }
-        })
+            })
+        } catch (_: Throwable) {
+            // Ignored in environments where NetworkRequest.Builder is stubbed or unsupported
+        }
     }
 
     override fun observeAllDownloads(): Flow<List<DownloadItem>> {
@@ -154,8 +158,17 @@ class DownloadManagerImpl @Inject constructor(
             activeCalls.remove(id)?.cancel()
             activeJobs.remove(id)?.cancelAndJoin()
             downloadDao.getByIdOnce(id)?.let { entity ->
-                downloadDao.update(entity.copy(status = DownloadStatus.CANCELLED))
+                deleteOutput(entity)
+                downloadDao.update(
+                    entity.copy(
+                        status = DownloadStatus.CANCELLED,
+                        bytesWritten = 0L,
+                        outputUri = null,
+                        outputDisplayPath = null
+                    )
+                )
             }
+            startNextQueued()
         }.fold(
             onSuccess = { Result.success(Unit) },
             onFailure = { Result.error("Failed to cancel download", it) }

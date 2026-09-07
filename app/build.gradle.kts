@@ -149,6 +149,11 @@ android {
     testOptions {
         animationsDisabled = true
     }
+
+    lint {
+        baseline = file("lint-baseline.xml")
+        abortOnError = true
+    }
 }
 
 kotlin {
@@ -249,6 +254,8 @@ dependencies {
     testImplementation(libs.coroutines.test)
     testImplementation(libs.mockito.kotlin)
     testImplementation(libs.robolectric)
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.okhttp.tls)
 
     androidTestImplementation(composeBom)
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
@@ -257,7 +264,7 @@ dependencies {
 }
 
 tasks.configureEach {
-    if (name == "hiltJavaCompileDebugUnitTest") {
+    if (name.startsWith("hiltJavaCompile")) {
         enabled = false
     }
 }

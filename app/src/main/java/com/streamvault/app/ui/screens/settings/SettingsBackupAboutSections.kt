@@ -260,7 +260,6 @@ internal fun LazyListScope.settingsAboutSection(
     onInstallDownloadedUpdate: () -> Unit,
     onDownloadLatestUpdate: () -> Unit,
     onSetAutoCheckAppUpdates: (Boolean) -> Unit,
-    onSetAutoDownloadAppUpdates: (Boolean) -> Unit,
     onRefreshDownloadState: () -> Unit,
     onViewCrashReport: () -> Unit,
     onShareCrashReport: () -> Unit,
@@ -289,16 +288,6 @@ internal fun LazyListScope.settingsAboutSection(
             checked = uiState.autoCheckAppUpdates,
             onCheckedChange = onSetAutoCheckAppUpdates
         )
-        if (uiState.autoCheckAppUpdates) {
-            SwitchSettingsRow(
-                label = stringResource(R.string.settings_update_auto_download),
-                value = stringResource(
-                    if (uiState.autoDownloadAppUpdates) R.string.settings_enabled else R.string.settings_disabled
-                ),
-                checked = uiState.autoDownloadAppUpdates,
-                onCheckedChange = onSetAutoDownloadAppUpdates
-            )
-        }
         SettingsRow(
             label = stringResource(R.string.settings_update_latest_release),
             value = formatLatestReleaseLabel(uiState.appUpdate, context)

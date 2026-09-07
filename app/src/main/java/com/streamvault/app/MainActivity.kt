@@ -19,9 +19,7 @@ import com.streamvault.app.navigation.AppNavigation
 import com.streamvault.app.navigation.ExternalDestination
 import com.streamvault.app.navigation.ExternalNavigationRequest
 import com.streamvault.app.navigation.PlayerNavigationRequest
-import com.streamvault.app.tv.LauncherRecommendationsManager
-import com.streamvault.app.tv.WatchNextManager
-import com.streamvault.app.tvinput.TvInputChannelSyncManager
+import com.streamvault.app.startup.StartupCoordinator
 import com.streamvault.app.ui.theme.StreamVaultTheme
 import com.streamvault.app.ui.time.LocalAppTimeFormat
 import com.streamvault.domain.repository.ChannelRepository
@@ -46,6 +44,7 @@ import android.view.View
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.doOnPreDraw
 import java.util.Locale
 import android.content.Context
 import android.content.ContextWrapper
@@ -94,13 +93,7 @@ class MainActivity : ComponentActivity() {
     lateinit var providerRepository: ProviderRepository
 
     @Inject
-    lateinit var watchNextManager: WatchNextManager
-
-    @Inject
-    lateinit var launcherRecommendationsManager: LauncherRecommendationsManager
-
-    @Inject
-    lateinit var tvInputChannelSyncManager: TvInputChannelSyncManager
+    lateinit var startupCoordinator: StartupCoordinator
 
     @Inject
     lateinit var castManager: CastManager
@@ -131,13 +124,6 @@ class MainActivity : ComponentActivity() {
         applyImmersiveSystemUi()
         _pictureInPictureModeFlow.value = isInPictureInPictureMode
         handleExternalIntent(intent)
-        if (isTelevisionDevice()) {
-            lifecycleScope.launch {
-                watchNextManager.refreshWatchNext()
-                launcherRecommendationsManager.refreshRecommendations()
-                tvInputChannelSyncManager.refreshTvInputCatalog()
-            }
-        }
         setContent {
             val appLanguage by preferencesRepository.appLanguage.collectAsState(initial = "system")
             val appTimeFormat by preferencesRepository.appTimeFormat.collectAsState(initial = com.streamvault.domain.model.AppTimeFormat.SYSTEM)
@@ -186,6 +172,9 @@ class MainActivity : ComponentActivity() {
                     AppNavigation(mainActivity = this@MainActivity)
                 }
             }
+        }
+        window.decorView.post {
+            startupCoordinator.onFirstFrameRendered(isTv = isTelevisionDevice())
         }
     }
 
@@ -277,7 +266,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun enterPlayerPictureInPictureModeIfEligible(requirePlaying: Boolean = true): Boolean {
-        if (!supportsPictureInPicture() || isInPictureInPictureMode) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !supportsPictureInPicture() || isInPictureInPictureMode) {
             return false
         }
         val state = playerPictureInPictureState
@@ -290,7 +279,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun applyPlayerPictureInPictureParams() {
-        if (!supportsPictureInPicture()) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !supportsPictureInPicture()) return
         runCatching {
             PictureInPictureCompat.apply(this, playerPictureInPictureState)
         }

@@ -69,33 +69,15 @@ internal fun SettingsSectionHeader(
 
 @Composable
 internal fun SettingsRow(label: String, value: String) {
-    val focusRequester = remember { FocusRequester() }
-    TvClickableSurface(
-        onClick = {},
-        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(8.dp)),
-        colors = ClickableSurfaceDefaults.colors(
-            containerColor = Color.Transparent,
-            focusedContainerColor = Primary.copy(alpha = 0.15f)
-        ),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .focusRequester(focusRequester)
-            .mouseClickable(
-                focusRequester = focusRequester,
-                onClick = {}
-            )
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(text = label, style = MaterialTheme.typography.bodyMedium, color = OnSurface)
-            Text(text = value, style = MaterialTheme.typography.bodyMedium, color = OnBackground)
-        }
+        Text(text = label, style = MaterialTheme.typography.bodyMedium, color = OnSurface)
+        Text(text = value, style = MaterialTheme.typography.bodyMedium, color = OnBackground)
     }
 }
 

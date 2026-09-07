@@ -8,8 +8,10 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.tv.TvContract
 import android.net.Uri
+import android.os.Build
 import android.provider.BaseColumns
 import android.util.Log
+import androidx.annotation.RequiresApi
 import com.streamvault.app.MainActivity
 import com.streamvault.app.R
 import com.streamvault.app.device.isTelevisionDevice
@@ -55,7 +57,7 @@ class LauncherRecommendationsManager @Inject constructor(
     private var lastRefreshAtMs: Long = 0L
 
     suspend fun refreshRecommendations(force: Boolean = false) = withContext(Dispatchers.IO) {
-        if (!context.isTelevisionDevice()) return@withContext
+        if (!context.isTelevisionDevice() || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return@withContext
 
         refreshMutex.withLock {
             val now = System.currentTimeMillis()
@@ -129,6 +131,7 @@ class LauncherRecommendationsManager @Inject constructor(
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     private suspend fun buildChannelSpecs(provider: Provider): List<RecommendationChannelSpec> {
         val continueWatching = when (val result = getContinueWatching(provider.id, limit = 12, requireResumePosition = true).first()) {
             is ContinueWatchingResult.Items -> result.items
@@ -224,6 +227,7 @@ class LauncherRecommendationsManager @Inject constructor(
         )
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun loadExistingChannels(): Map<String, Long> {
         val projection = arrayOf(
             BaseColumns._ID,
@@ -252,6 +256,7 @@ class LauncherRecommendationsManager @Inject constructor(
         }.orEmpty()
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun insertChannel(spec: RecommendationChannelSpec): Long? {
         val uri = context.contentResolver.insert(TvContract.Channels.CONTENT_URI, buildChannelValues(spec)) ?: return null
         val channelId = ContentUris.parseId(uri)
@@ -259,6 +264,7 @@ class LauncherRecommendationsManager @Inject constructor(
         return channelId
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun updateChannel(channelId: Long, spec: RecommendationChannelSpec) {
         context.contentResolver.update(
             ContentUris.withAppendedId(TvContract.Channels.CONTENT_URI, channelId),
@@ -268,6 +274,7 @@ class LauncherRecommendationsManager @Inject constructor(
         )
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun syncPrograms(channelId: Long, spec: RecommendationChannelSpec) {
         val existingPrograms = loadExistingPrograms(channelId)
         val activeKeys = spec.programs.mapTo(mutableSetOf()) { it.key }
@@ -299,6 +306,7 @@ class LauncherRecommendationsManager @Inject constructor(
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun loadExistingPrograms(channelId: Long): Map<String, Long> {
         val projection = arrayOf(BaseColumns._ID, PREVIEW_COLUMN_INTERNAL_PROVIDER_ID)
         return context.contentResolver.query(
@@ -318,6 +326,7 @@ class LauncherRecommendationsManager @Inject constructor(
         }.orEmpty()
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun buildChannelValues(spec: RecommendationChannelSpec): ContentValues = ContentValues().apply {
         put(CHANNEL_COLUMN_TYPE, TvContract.Channels.TYPE_PREVIEW)
         put(CHANNEL_COLUMN_DISPLAY_NAME, spec.title)
@@ -326,6 +335,7 @@ class LauncherRecommendationsManager @Inject constructor(
         put(CHANNEL_COLUMN_APP_LINK_INTENT_URI, buildBrowseIntent().toUri(Intent.URI_INTENT_SCHEME))
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun buildProgramValues(channelId: Long, spec: RecommendationProgramSpec): ContentValues = ContentValues().apply {
         put(PREVIEW_COLUMN_CHANNEL_ID, channelId)
         put(PREVIEW_COLUMN_TYPE, previewProgramType(spec.contentType))
@@ -339,6 +349,7 @@ class LauncherRecommendationsManager @Inject constructor(
         put(PREVIEW_COLUMN_DURATION_MILLIS, spec.durationMillis)
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun previewProgramType(contentType: ContentType): Int = when (contentType) {
         ContentType.MOVIE -> TvContract.PreviewPrograms.TYPE_MOVIE
         ContentType.SERIES,
@@ -361,6 +372,7 @@ class LauncherRecommendationsManager @Inject constructor(
     private fun buildBrowseIntent(): Intent =
         buildDestinationIntent(ExternalDestination.Home)
 
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun requestChannelBrowsable(channelId: Long) {
         runCatching {
             TvContract.requestChannelBrowsable(context, channelId)
@@ -369,6 +381,7 @@ class LauncherRecommendationsManager @Inject constructor(
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun updateChannelLogo(channelId: Long) {
         runCatching {
             context.contentResolver.openOutputStream(TvContract.buildChannelLogoUri(channelId), "w")
@@ -383,10 +396,12 @@ class LauncherRecommendationsManager @Inject constructor(
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun deleteAllManagedChannels() {
         loadExistingChannels().values.forEach(::deleteChannel)
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun deleteChannel(channelId: Long) {
         context.contentResolver.delete(
             ContentUris.withAppendedId(TvContract.Channels.CONTENT_URI, channelId),

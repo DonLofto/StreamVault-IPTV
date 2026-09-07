@@ -411,7 +411,11 @@ internal fun ExternalPlaybackModeDialog(
     onDismiss: () -> Unit,
     onModeSelected: (ExternalPlaybackMode) -> Unit
 ) {
-    val modes = listOf(ExternalPlaybackMode.INTERNAL_PLAYER, ExternalPlaybackMode.EXTERNAL_PLAYER)
+    val modes = listOf(
+        ExternalPlaybackMode.INTERNAL_PLAYER,
+        ExternalPlaybackMode.EXTERNAL_PLAYER,
+        ExternalPlaybackMode.ASK_EVERY_TIME
+    )
     PremiumDialog(
         title = stringResource(R.string.settings_external_playback),
         subtitle = stringResource(R.string.settings_external_playback_subtitle),
@@ -420,8 +424,7 @@ internal fun ExternalPlaybackModeDialog(
         content = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 modes.forEach { mode ->
-                    val isSelected = mode == selectedMode ||
-                        (mode == ExternalPlaybackMode.EXTERNAL_PLAYER && selectedMode == ExternalPlaybackMode.ASK_EVERY_TIME)
+                    val isSelected = mode == selectedMode
                     TvClickableSurface(
                         onClick = { onModeSelected(mode) },
                         shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
@@ -440,7 +443,7 @@ internal fun ExternalPlaybackModeDialog(
                                     when (mode) {
                                         ExternalPlaybackMode.INTERNAL_PLAYER -> R.string.settings_external_playback_mode_internal
                                         ExternalPlaybackMode.EXTERNAL_PLAYER -> R.string.settings_external_playback_mode_external
-                                        ExternalPlaybackMode.ASK_EVERY_TIME -> R.string.settings_external_playback_mode_external
+                                        ExternalPlaybackMode.ASK_EVERY_TIME -> R.string.settings_external_playback_mode_ask
                                     }
                                 ),
                                 style = androidx.compose.material3.MaterialTheme.typography.titleSmall,

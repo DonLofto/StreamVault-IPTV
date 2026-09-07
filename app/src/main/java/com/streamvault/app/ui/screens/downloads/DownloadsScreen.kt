@@ -136,6 +136,7 @@ fun DownloadsScreen(
                             viewModel.playDownload(download)?.let(context::startActivity)
                         },
                         onResumeClick = viewModel::resumeDownload,
+                        onCancelClick = viewModel::cancelDownload,
                         onDeleteClick = viewModel::showDeleteConfirm
                     )
                 }
@@ -212,6 +213,7 @@ private fun DownloadsGrid(
     downloads: List<DownloadItem>,
     onOpenClick: (DownloadItem) -> Unit,
     onResumeClick: (DownloadItem) -> Unit,
+    onCancelClick: (DownloadItem) -> Unit,
     onDeleteClick: (DownloadItem) -> Unit
 ) {
     val columns = if (LocalConfiguration.current.screenWidthDp < 700) {
@@ -232,6 +234,7 @@ private fun DownloadsGrid(
                 download = download,
                 onOpenClick = { onOpenClick(download) },
                 onResumeClick = { onResumeClick(download) },
+                onCancelClick = { onCancelClick(download) },
                 onDeleteClick = { onDeleteClick(download) }
             )
         }
@@ -243,6 +246,7 @@ private fun DownloadCard(
     download: DownloadItem,
     onOpenClick: () -> Unit,
     onResumeClick: () -> Unit,
+    onCancelClick: () -> Unit,
     onDeleteClick: () -> Unit
 ) {
     val progress = download.totalBytes?.takeIf { it > 0L }?.let { total ->
@@ -250,9 +254,16 @@ private fun DownloadCard(
     } ?: 0f
 
     val isCompleted = download.status == DownloadStatus.COMPLETED
+    val canResume = download.status == DownloadStatus.FAILED || download.status == DownloadStatus.PAUSED
 
     TvClickableSurface(
-        onClick = { if (isCompleted) onOpenClick() else onResumeClick() },
+        onClick = {
+            if (isCompleted) {
+                onOpenClick()
+            } else if (canResume) {
+                onResumeClick()
+            }
+        },
         shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
         colors = ClickableSurfaceDefaults.colors(
             containerColor = SurfaceElevated,
@@ -342,7 +353,18 @@ private fun DownloadCard(
                     .padding(top = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
             ) {
-                if (download.status == DownloadStatus.FAILED) {
+                if (download.status == DownloadStatus.DOWNLOADING || download.status == DownloadStatus.PENDING) {
+                    TvButton(
+                        onClick = onCancelClick,
+                        colors = ButtonDefaults.colors(
+                            containerColor = SurfaceHighlight,
+                            contentColor = com.streamvault.app.ui.theme.AccentRed
+                        )
+                    ) {
+                        Text(text = stringResource(R.string.download_cancel))
+                    }
+                }
+                if (download.status == DownloadStatus.FAILED || download.status == DownloadStatus.PAUSED) {
                     TvButton(
                         onClick = onResumeClick,
                         colors = ButtonDefaults.colors(

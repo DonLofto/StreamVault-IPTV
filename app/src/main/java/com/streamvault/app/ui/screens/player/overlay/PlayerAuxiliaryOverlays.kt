@@ -91,9 +91,20 @@ fun ChannelListOverlay(
     onOverlayInteracted: () -> Unit = {}
 ) {
     val listState = rememberLazyListState()
-    val currentIndex = remember(channels, currentChannelId) {
-        channels.indexOfFirst { it.id == currentChannelId }.coerceAtLeast(0)
+    var userFocusedChannelId by remember { mutableStateOf<Long?>(null) }
+    var lastKnownChannelIndex by remember { mutableStateOf<Int?>(null) }
+
+    val effectiveFocusChannelId by remember(channels, userFocusedChannelId, currentChannelId, lastKnownChannelIndex) {
+        derivedStateOf {
+            OverlayFocusResolver.resolveChannelFocus(
+                channels = channels,
+                lastFocusedId = userFocusedChannelId,
+                lastKnownIndex = lastKnownChannelIndex,
+                fallbackId = currentChannelId
+            )
+        }
     }
+
     val channelNumbersById = remember(channels) {
         channels.mapIndexed { index, channel ->
             channel.id to (channel.number.takeIf { it > 0 } ?: (index + 1))
@@ -109,9 +120,14 @@ fun ChannelListOverlay(
         count
     }
 
-    LaunchedEffect(channels, currentIndex, headerItemCount) {
+    val targetScrollIndex = remember(channels, effectiveFocusChannelId) {
+        val idx = channels.indexOfFirst { it.id == effectiveFocusChannelId }
+        if (idx >= 0) idx else 0
+    }
+
+    LaunchedEffect(channels, targetScrollIndex, headerItemCount) {
         if (channels.isNotEmpty()) {
-            listState.scrollToItem(headerItemCount + currentIndex)
+            listState.scrollToItem(headerItemCount + targetScrollIndex)
         }
     }
 
@@ -223,12 +239,10 @@ fun ChannelListOverlay(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                                     ) {
-                                        itemsIndexed(
+                                        items(
                                             recentChannels,
-                                            key = { index, channel ->
-                                                "recent:${channel.id}:${channel.streamId}:${channel.epgChannelId.orEmpty()}:${index}"
-                                            }
-                                        ) { index, channel ->
+                                            key = { channel -> "recent_${channel.id}" }
+                                        ) { channel ->
                                             TvClickableSurface(
                                                 onClick = {
                                                     onOverlayInteracted()
@@ -276,14 +290,18 @@ fun ChannelListOverlay(
                                 }
                             }
                         }
-                        items(channels.size) { index ->
-                            val channel = channels[index]
+                        items(
+                            channels,
+                            key = { channel -> channel.id }
+                        ) { channel ->
                             val isSelected = channel.id == currentChannelId
-                            val shouldRequestFocus = isSelected
-                            val channelNumber = channel.number.takeIf { it > 0 } ?: (index + 1)
-                            var isFocused by remember { mutableStateOf(false) }
+                            val isFocusedItem = channel.id == effectiveFocusChannelId
+                            val shouldRequestFocus = isFocusedItem
+                            val channelNumber = channelNumbersById[channel.id] ?: (channels.indexOf(channel) + 1)
+                            var isLocallyFocused by remember { mutableStateOf(false) }
+                            val isItemFocused = isLocallyFocused || (userFocusedChannelId == null && isFocusedItem)
                             val bgColor = when {
-                                isFocused -> Primary
+                                isItemFocused -> Primary
                                 isSelected -> Primary.copy(alpha = 0.20f)
                                 else -> AppColors.Surface.copy(alpha = 0.68f)
                             }
@@ -297,8 +315,10 @@ fun ChannelListOverlay(
                                     .fillMaxWidth()
                                     .padding(vertical = 3.dp)
                                     .onFocusChanged { focusState ->
-                                        isFocused = focusState.isFocused
+                                        isLocallyFocused = focusState.isFocused
                                         if (focusState.isFocused) {
+                                            userFocusedChannelId = channel.id
+                                            lastKnownChannelIndex = channels.indexOfFirst { it.id == channel.id }.takeIf { it >= 0 }
                                             onOverlayInteracted()
                                         }
                                     }
@@ -332,11 +352,11 @@ fun ChannelListOverlay(
                                         style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp),
                                         color = Color.White,
                                         maxLines = 1,
-                                        overflow = if (isFocused) TextOverflow.Clip else TextOverflow.Ellipsis,
+                                        overflow = if (isItemFocused) TextOverflow.Clip else TextOverflow.Ellipsis,
                                         modifier = Modifier
                                             .weight(1f)
                                             .then(
-                                                if (isFocused) {
+                                                if (isItemFocused) {
                                                     Modifier.basicMarquee(
                                                         iterations = Int.MAX_VALUE,
                                                         initialDelayMillis = 600,
@@ -692,9 +712,11 @@ fun EpgOverlay(
                                 fontWeight = FontWeight.Bold
                             )
                         }
-                        items(displayPrograms.size) { index ->
-                            val program = displayPrograms[index]
-                            val isNext = index == 0 && nextProgram != null
+                        items(
+                            displayPrograms,
+                            key = { program -> "${program.id}_${program.channelId}_${program.startTime}" }
+                        ) { program ->
+                            val isNext = program == nextProgram
 
                             Box(
                                 modifier = Modifier
@@ -1019,13 +1041,28 @@ fun CategoryListOverlay(
     onOverlayInteracted: () -> Unit = {}
 ) {
     val listState = rememberLazyListState()
-    val currentIndex = remember(categories, currentCategoryId) {
-        categories.indexOfFirst { it.id == currentCategoryId }.coerceAtLeast(0)
+    var userFocusedCategoryId by remember { mutableStateOf<Long?>(null) }
+    var lastKnownCategoryIndex by remember { mutableStateOf<Int?>(null) }
+
+    val effectiveFocusCategoryId by remember(categories, userFocusedCategoryId, currentCategoryId, lastKnownCategoryIndex) {
+        derivedStateOf {
+            OverlayFocusResolver.resolveCategoryFocus(
+                categories = categories,
+                lastFocusedId = userFocusedCategoryId,
+                lastKnownIndex = lastKnownCategoryIndex,
+                fallbackId = currentCategoryId
+            )
+        }
     }
 
-    LaunchedEffect(categories, currentIndex) {
+    val targetScrollIndex = remember(categories, effectiveFocusCategoryId) {
+        val idx = categories.indexOfFirst { it.id == effectiveFocusCategoryId }
+        if (idx >= 0) idx else 0
+    }
+
+    LaunchedEffect(categories, targetScrollIndex) {
         if (categories.isNotEmpty()) {
-            listState.scrollToItem(currentIndex)
+            listState.scrollToItem(targetScrollIndex)
         }
     }
 
@@ -1072,12 +1109,16 @@ fun CategoryListOverlay(
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp)
                             )
                         }
-                        items(categories.size) { index ->
-                            val category = categories[index]
+                        items(
+                            categories,
+                            key = { category -> category.id }
+                        ) { category ->
                             val isSelected = category.id == currentCategoryId
+                            val isFocusedItem = category.id == effectiveFocusCategoryId
                             val isLocked = isCategoryLocked(category)
-                            var isFocused by remember { mutableStateOf(false) }
-                            val shouldRequestFocus = isSelected
+                            var isLocallyFocused by remember { mutableStateOf(false) }
+                            val isFocused = isLocallyFocused || (userFocusedCategoryId == null && isFocusedItem)
+                            val shouldRequestFocus = isFocusedItem
                             val bgColor = when {
                                 isFocused -> Primary
                                 isSelected -> Primary.copy(alpha = 0.20f)
@@ -1092,8 +1133,10 @@ fun CategoryListOverlay(
                                     .fillMaxWidth()
                                     .padding(vertical = 2.dp)
                                     .onFocusChanged { focusState ->
-                                        isFocused = focusState.isFocused
+                                        isLocallyFocused = focusState.isFocused
                                         if (focusState.isFocused) {
+                                            userFocusedCategoryId = category.id
+                                            lastKnownCategoryIndex = categories.indexOfFirst { it.id == category.id }.takeIf { it >= 0 }
                                             onOverlayInteracted()
                                         }
                                     }

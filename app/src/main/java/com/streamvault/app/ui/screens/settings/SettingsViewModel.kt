@@ -94,6 +94,7 @@ import com.streamvault.domain.usecase.SyncProviderResult
 import com.streamvault.player.AudioCompatibilityMemoryStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlin.math.max
@@ -524,12 +525,6 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun resetAppHomeDashboardShelves() {
-        viewModelScope.launch {
-            preferencesRepository.setAppHomeDashboardShelves(AppHomeDashboardShelf.defaultOrder)
-        }
-    }
-
     fun setLiveTvChannelMode(mode: LiveTvChannelMode) {
         viewModelScope.launch {
             preferencesRepository.setLiveTvChannelMode(mode.name)
@@ -695,12 +690,6 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun setAutoDownloadAppUpdates(enabled: Boolean) {
-        viewModelScope.launch {
-            preferencesRepository.setAutoDownloadAppUpdates(enabled)
-        }
-    }
-
     fun refreshDownloadState() {
         viewModelScope.launch {
             appUpdateInstaller.refreshState()
@@ -727,12 +716,6 @@ class SettingsViewModel @Inject constructor(
         val providerId = _uiState.value.activeProviderId ?: return
         viewModelScope.launch {
             preferencesRepository.setCategorySortMode(providerId, type, mode)
-        }
-    }
-
-    fun setMaxConcurrentStreams(count: Int) {
-        viewModelScope.launch {
-            preferencesRepository.setMaxConcurrentStreams(count)
         }
     }
 
@@ -1423,8 +1406,11 @@ class SettingsViewModel @Inject constructor(
         epgActions.moveEpgSourceAssignmentDown(viewModelScope, providerId, epgSourceId)
     }
 
+    private var traktPairingJob: Job? = null
+
     fun startTraktPairing() {
-        viewModelScope.launch {
+        traktPairingJob?.cancel()
+        traktPairingJob = viewModelScope.launch {
             val result = traktRepository.generateDeviceCode()
             result.onSuccess { state ->
                 val code = state.userCode
@@ -1440,6 +1426,8 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun cancelTraktPairing() {
+        traktPairingJob?.cancel()
+        traktPairingJob = null
         viewModelScope.launch {
             traktRepository.cancelDeviceCodeAuth()
         }
@@ -1494,4 +1482,8 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    override fun onCleared() {
+        super.onCleared()
+        traktPairingJob?.cancel()
+    }
 }

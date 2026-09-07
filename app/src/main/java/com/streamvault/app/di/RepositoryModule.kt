@@ -124,5 +124,13 @@ abstract class RepositoryModule {
         fun provideM3uParser(): com.streamvault.data.parser.M3uParser {
             return com.streamvault.data.parser.M3uParser()
         }
+
+        @Provides
+        @Singleton
+        fun provideTimeshiftDiskManager(
+            @dagger.hilt.android.qualifiers.ApplicationContext context: android.content.Context
+        ): com.streamvault.player.timeshift.TimeshiftDiskManager {
+            return com.streamvault.player.timeshift.TimeshiftDiskManager(context)
+        }
     }
 }

@@ -245,6 +245,15 @@ class EpgRepositoryImplTest {
             }
         }
 
+        whenever(providerDao.getById(7L)).thenReturn(
+            ProviderEntity(
+                id = 7L,
+                name = "Provider",
+                type = ProviderType.M3U,
+                serverUrl = "https://provider.example.com"
+            )
+        )
+
         val repository = EpgRepositoryImpl(
             programDao = programDao,
             providerDao = providerDao,

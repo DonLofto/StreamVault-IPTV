@@ -9,6 +9,9 @@ import java.io.File
  * - Enforces a global byte budget across all session data.
  * - Deletes stale session directories left by crashes or force-stops.
  * - Evicts the oldest (LRU) session directories first when over-budget.
+ * - Mutation-safe accounting with immediate invalidation / synchronization.
+ * - Deduplicates hard links to avoid double-charging snapshot inodes.
+ * - Supports concurrent session reservations to prevent oversubscribing the budget.
  *
  * All methods are safe to call from IO threads.
  */
@@ -16,11 +19,11 @@ class TimeshiftDiskManager(
     context: Context,
     val maxBudgetBytes: Long = DEFAULT_BUDGET_BYTES
 ) {
-    private val timeshiftDir = File(context.cacheDir, "timeshift")
+    val timeshiftDir = File(context.cacheDir, "timeshift")
 
+    private val accountingLock = Any()
     @Volatile private var cachedUsageBytes: Long = -1L
-    @Volatile private var lastUsageCheckMs: Long = 0L
-    private val usageCheckLock = Any()
+    private var reservedBytes: Long = 0L
 
     /**
      * Deletes every directory under [timeshiftDir] except [activeSessionDir].
@@ -28,42 +31,130 @@ class TimeshiftDiskManager(
      * before any session exists).
      */
     fun cleanupStaleDirectories(activeSessionDir: File?) {
-        invalidateUsageCache()
-        val entries = timeshiftDir.listFiles() ?: return
-        for (entry in entries) {
-            if (entry == activeSessionDir) continue
-            entry.deleteRecursively()
+        synchronized(accountingLock) {
+            val entries = timeshiftDir.listFiles() ?: return
+            for (entry in entries) {
+                if (entry == activeSessionDir) continue
+                entry.deleteRecursively()
+            }
+            invalidateUsageCacheLocked()
         }
     }
 
     /**
-     * Returns the total bytes consumed by all files under [timeshiftDir].
-     * Throttles disk traversals using a cache TTL unless [forceRefresh] is requested.
+     * Tries to reserve [bytes] from the remaining budget.
+     * Returns true if the reservation succeeded, false if it would exceed [maxBudgetBytes].
      */
-    fun currentUsageBytes(forceRefresh: Boolean = false): Long {
-        val now = System.currentTimeMillis()
-        if (!forceRefresh && cachedUsageBytes >= 0 && (now - lastUsageCheckMs) < USAGE_CACHE_TTL_MS) {
-            return cachedUsageBytes
-        }
-        synchronized(usageCheckLock) {
-            if (!forceRefresh && cachedUsageBytes >= 0 && (System.currentTimeMillis() - lastUsageCheckMs) < USAGE_CACHE_TTL_MS) {
-                return cachedUsageBytes
+    fun reserve(bytes: Long): Boolean {
+        synchronized(accountingLock) {
+            val current = currentUsageBytesLocked(forceRefresh = true)
+            if (current + reservedBytes + bytes <= maxBudgetBytes) {
+                reservedBytes += bytes
+                return true
             }
-            val calculated = timeshiftDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-            cachedUsageBytes = calculated
-            lastUsageCheckMs = System.currentTimeMillis()
-            return calculated
+            return false
         }
     }
 
+    /**
+     * Releases a previously made reservation of [bytes].
+     */
+    fun release(bytes: Long) {
+        synchronized(accountingLock) {
+            reservedBytes = (reservedBytes - bytes).coerceAtLeast(0L)
+        }
+    }
+
+    fun currentReservedBytes(): Long = synchronized(accountingLock) { reservedBytes }
+
+    /**
+     * Notifies the manager that files were added, deleted, or mutated.
+     */
+    fun recordFileMutation() {
+        synchronized(accountingLock) {
+            invalidateUsageCacheLocked()
+        }
+    }
+
+    /**
+     * Returns the total physical bytes consumed by files under [timeshiftDir],
+     * deduplicating hard-links so snapshot files pointing to existing segments are not charged twice.
+     */
+    fun currentUsageBytes(forceRefresh: Boolean = false): Long {
+        synchronized(accountingLock) {
+            return currentUsageBytesLocked(forceRefresh)
+        }
+    }
+
+    private fun currentUsageBytesLocked(forceRefresh: Boolean): Long {
+        if (!forceRefresh && cachedUsageBytes >= 0L) {
+            return cachedUsageBytes
+        }
+        if (!timeshiftDir.exists()) {
+            cachedUsageBytes = 0L
+            return 0L
+        }
+        val seenKeys = HashSet<Any>()
+        var total = 0L
+        val files = timeshiftDir.walkTopDown().filter { it.isFile }
+        for (file in files) {
+            val key = getFileKey(file)
+            if (key != null && !seenKeys.add(key)) {
+                // Hard link pointing to an already-counted inode: zero additional physical space
+                continue
+            }
+            total += file.length()
+        }
+        cachedUsageBytes = total
+        return total
+    }
+
+    private fun getFileKey(file: File): Any? {
+        return try {
+            val stat = android.system.Os.stat(file.absolutePath)
+            Pair(stat.st_dev, stat.st_ino)
+        } catch (_: Throwable) {
+            getFallbackFileKey(file)
+        }
+    }
+
+    private fun getFallbackFileKey(file: File): Any? {
+        if (android.os.Build.VERSION.SDK_INT in 1 until android.os.Build.VERSION_CODES.O) {
+            return file.canonicalPath
+        }
+        return try {
+            readAttributesFileKey(file) ?: file.canonicalPath
+        } catch (_: Throwable) {
+            file.canonicalPath
+        }
+    }
+
+    @android.annotation.SuppressLint("NewApi")
+    private fun readAttributesFileKey(file: File): Any? {
+        return java.nio.file.Files.readAttributes(
+            file.toPath(),
+            java.nio.file.attribute.BasicFileAttributes::class.java
+        ).fileKey()
+    }
+
     fun invalidateUsageCache() {
+        synchronized(accountingLock) {
+            invalidateUsageCacheLocked()
+        }
+    }
+
+    private fun invalidateUsageCacheLocked() {
         cachedUsageBytes = -1L
     }
 
     /**
-     * Returns true when the total usage is below [maxBudgetBytes].
+     * Returns true when the total usage plus reservations is below [maxBudgetBytes].
      */
-    fun isWithinBudget(forceRefresh: Boolean = false): Boolean = currentUsageBytes(forceRefresh) < maxBudgetBytes
+    fun isWithinBudget(forceRefresh: Boolean = false): Boolean {
+        synchronized(accountingLock) {
+            return (currentUsageBytesLocked(forceRefresh) + reservedBytes) < maxBudgetBytes
+        }
+    }
 
     /**
      * Deletes stale session directories in oldest-first (LRU) order until usage
@@ -72,21 +163,22 @@ class TimeshiftDiskManager(
      * [activeSessionDir] is never touched.
      */
     fun evictLruUntilWithinBudget(activeSessionDir: File?) {
-        val staleDirs = timeshiftDir.listFiles()
-            ?.filter { it.isDirectory && it != activeSessionDir }
-            ?.sortedBy { it.lastModified() }
-            ?: return
-        val target = (maxBudgetBytes * 0.8).toLong()
-        for (dir in staleDirs) {
-            if (currentUsageBytes(forceRefresh = true) < target) break
-            dir.deleteRecursively()
+        synchronized(accountingLock) {
+            val staleDirs = timeshiftDir.listFiles()
+                ?.filter { it.isDirectory && it != activeSessionDir }
+                ?.sortedBy { it.lastModified() }
+                ?: return
+            val target = (maxBudgetBytes * 0.8).toLong()
+            for (dir in staleDirs) {
+                if (currentUsageBytesLocked(forceRefresh = true) + reservedBytes < target) break
+                dir.deleteRecursively()
+            }
+            invalidateUsageCacheLocked()
         }
-        invalidateUsageCache()
     }
 
     companion object {
         /** Default 2 GB global budget for all timeshift data. */
         const val DEFAULT_BUDGET_BYTES = 2L * 1024 * 1024 * 1024
-        private const val USAGE_CACHE_TTL_MS = 10_000L // 10 seconds
     }
 }

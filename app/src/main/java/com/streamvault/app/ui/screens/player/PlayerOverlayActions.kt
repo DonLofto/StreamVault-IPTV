@@ -190,14 +190,6 @@ fun PlayerViewModel.cancelControlsAutoHide() {
     controlsHideJob = null
 }
 
-internal fun PlayerViewModel.hideZapOverlayAfterDelay() {
-    zapOverlayJob?.cancel()
-    zapOverlayJob = viewModelScope.launch {
-        delay(liveOverlayTimeoutMs)
-        showZapOverlayFlow.value = false
-    }
-}
-
 internal fun PlayerViewModel.hasVisibleTransientLiveOverlay(): Boolean =
     showChannelInfoOverlayFlow.value ||
         showChannelListOverlayFlow.value ||

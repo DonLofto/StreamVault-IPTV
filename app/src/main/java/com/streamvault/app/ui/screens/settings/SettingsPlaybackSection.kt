@@ -96,7 +96,6 @@ internal fun LazyListScope.settingsPlaybackSection(
                 LiveStreamFormatMode.MPEG_TS
             )
         }
-        var showMaxConcurrentStreamsDialog by rememberSaveable { mutableStateOf(false) }
         var showMultiViewPerformanceModeDialog by rememberSaveable { mutableStateOf(false) }
         if (showMultiViewPerformanceModeDialog) {
             MultiViewPerformanceModeDialog(
@@ -105,16 +104,6 @@ internal fun LazyListScope.settingsPlaybackSection(
                 onModeSelected = { mode ->
                     viewModel.setMultiViewPerformanceMode(mode)
                     showMultiViewPerformanceModeDialog = false
-                }
-            )
-        }
-        if (showMaxConcurrentStreamsDialog) {
-            MaxConcurrentStreamsDialog(
-                currentLimit = uiState.maxConcurrentStreams,
-                onDismiss = { showMaxConcurrentStreamsDialog = false },
-                onLimitSelected = { limit ->
-                    viewModel.setMaxConcurrentStreams(limit)
-                    showMaxConcurrentStreamsDialog = false
                 }
             )
         }
@@ -467,11 +456,6 @@ internal fun LazyListScope.settingsPlaybackSection(
                 )
             }
         }
-        ClickableSettingsRow(
-            label = stringResource(R.string.settings_max_concurrent_streams),
-            value = stringResource(R.string.settings_max_concurrent_streams_entry, uiState.maxConcurrentStreams, if (uiState.maxConcurrentStreams == 1) "" else "s"),
-            onClick = { showMaxConcurrentStreamsDialog = true }
-        )
         ClickableSettingsRow(
             label = "MultiView performance mode",
             value = formatMultiViewPerformanceModeLabel(uiState.multiViewPerformanceMode),

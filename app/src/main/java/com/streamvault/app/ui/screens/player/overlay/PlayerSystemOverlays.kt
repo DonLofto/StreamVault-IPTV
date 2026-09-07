@@ -261,6 +261,7 @@ fun PlayerTrackSelectionDialog(
     videoTracks: List<PlayerTrack>,
     liveTranslationAvailable: Boolean = false,
     liveTranslationActive: Boolean = false,
+    liveTranslationDetectedLanguage: String? = null,
     onDismiss: () -> Unit,
     onSelectAudio: (String) -> Unit,
     onSelectVideo: (String) -> Unit,
@@ -365,8 +366,14 @@ fun PlayerTrackSelectionDialog(
 
                     if (trackType == TrackType.TEXT && liveTranslationAvailable) {
                         item {
+                            val baseName = stringResource(R.string.player_track_live_translation)
+                            val displayName = if (liveTranslationActive && !liveTranslationDetectedLanguage.isNullOrBlank()) {
+                                "$baseName (${liveTranslationDetectedLanguage.uppercase()})"
+                            } else {
+                                baseName
+                            }
                             TrackSelectionItem(
-                                name = stringResource(R.string.player_track_live_translation),
+                                name = displayName,
                                 isSelected = liveTranslationActive,
                                 onClick = {
                                     onSelectLiveTranslation()

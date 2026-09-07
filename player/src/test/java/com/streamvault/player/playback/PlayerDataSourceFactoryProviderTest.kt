@@ -1,6 +1,11 @@
 package com.streamvault.player.playback
 
 import com.google.common.truth.Truth.assertThat
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.Test
 
 class PlayerDataSourceFactoryProviderTest {
@@ -94,5 +99,100 @@ class PlayerDataSourceFactoryProviderTest {
         assertThat(readStatsWrappingEnabled(readDiagnosticsEnabled = false, resolvedStreamType = ResolvedStreamType.HLS)).isFalse()
         assertThat(readStatsWrappingEnabled(readDiagnosticsEnabled = true, resolvedStreamType = ResolvedStreamType.HLS)).isTrue()
         assertThat(readStatsWrappingEnabled(readDiagnosticsEnabled = true, resolvedStreamType = ResolvedStreamType.PROGRESSIVE)).isFalse()
+    }
+
+    @Test
+    fun crossHostRedirect_drops_portal_credentials() {
+        val server1 = okhttp3.mockwebserver.MockWebServer()
+        val server2 = okhttp3.mockwebserver.MockWebServer()
+        server1.start()
+        server2.start()
+
+        try {
+            server1.enqueue(
+                okhttp3.mockwebserver.MockResponse()
+                    .setResponseCode(302)
+                    .setHeader("Location", server2.url("/stream.ts").toString())
+            )
+            server2.enqueue(okhttp3.mockwebserver.MockResponse().setResponseCode(200).setBody("data"))
+
+            val client = okhttp3.OkHttpClient.Builder()
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .addInterceptor(CrossHostRedirectInterceptor())
+                .build()
+
+            val request = okhttp3.Request.Builder()
+                .url(server1.url("/initial.m3u8"))
+                .header("Authorization", "Bearer secret")
+                .header("Cookie", "session=123")
+                .header("X-User-Agent", "Model: MAG250")
+                .header("Referer", "https://portal.example.com/c/")
+                .header("X-Portal-Token", "token456")
+                .header("Accept", "*/*")
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                assertThat(response.isSuccessful).isTrue()
+            }
+
+            val recorded1 = server1.takeRequest()
+            assertThat(recorded1.getHeader("Authorization")).isEqualTo("Bearer secret")
+
+            val recorded2 = server2.takeRequest()
+            assertThat(recorded2.getHeader("Authorization")).isNull()
+            assertThat(recorded2.getHeader("Cookie")).isNull()
+            assertThat(recorded2.getHeader("X-User-Agent")).isNull()
+            assertThat(recorded2.getHeader("Referer")).isNull()
+            assertThat(recorded2.getHeader("X-Portal-Token")).isNull()
+            assertThat(recorded2.getHeader("Accept")).isEqualTo("*/*")
+        } finally {
+            server1.shutdown()
+            server2.shutdown()
+        }
+    }
+
+    @Test
+    fun sameHostRedirect_preserves_portal_credentials() {
+        val server = okhttp3.mockwebserver.MockWebServer()
+        server.start()
+
+        try {
+            server.enqueue(
+                okhttp3.mockwebserver.MockResponse()
+                    .setResponseCode(302)
+                    .setHeader("Location", server.url("/stream.ts").toString())
+            )
+            server.enqueue(okhttp3.mockwebserver.MockResponse().setResponseCode(200).setBody("data"))
+
+            val client = okhttp3.OkHttpClient.Builder()
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .addInterceptor(CrossHostRedirectInterceptor())
+                .build()
+
+            val request = okhttp3.Request.Builder()
+                .url(server.url("/initial.m3u8"))
+                .header("Authorization", "Bearer secret")
+                .header("Cookie", "session=123")
+                .header("X-User-Agent", "Model: MAG250")
+                .header("Referer", "https://portal.example.com/c/")
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                assertThat(response.isSuccessful).isTrue()
+            }
+
+            val recorded1 = server.takeRequest()
+            assertThat(recorded1.getHeader("Authorization")).isEqualTo("Bearer secret")
+
+            val recorded2 = server.takeRequest()
+            assertThat(recorded2.getHeader("Authorization")).isEqualTo("Bearer secret")
+            assertThat(recorded2.getHeader("Cookie")).isEqualTo("session=123")
+            assertThat(recorded2.getHeader("X-User-Agent")).isEqualTo("Model: MAG250")
+            assertThat(recorded2.getHeader("Referer")).isEqualTo("https://portal.example.com/c/")
+        } finally {
+            server.shutdown()
+        }
     }
 }

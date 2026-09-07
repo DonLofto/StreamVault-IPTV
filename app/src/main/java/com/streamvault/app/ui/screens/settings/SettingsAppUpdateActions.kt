@@ -30,8 +30,7 @@ internal class SettingsAppUpdateActions(
     fun checkForAppUpdates(
         scope: CoroutineScope,
         manual: Boolean,
-        isRemoteVersionNewer: (Int?, String, String?) -> Boolean,
-        autoDownload: Boolean = false
+        isRemoteVersionNewer: (Int?, String, String?) -> Boolean
     ) {
         if (updateCheckInFlight) return
         updateCheckInFlight = true
@@ -103,12 +102,6 @@ internal class SettingsAppUpdateActions(
                     val refreshedDownloadState = appUpdateInstaller.refreshState()
                     latestUpdateModel = latestUpdateModel.withDownloadState(refreshedDownloadState)
                     uiState.update { it.copy(appUpdate = latestUpdateModel) }
-                    if (autoDownload &&
-                        updateAvailable &&
-                        latestUpdateModel.latestActionState() == AppUpdateActionState.DownloadLatest
-                    ) {
-                        downloadLatestUpdate(scope)
-                    }
                 }
                 Result.Loading -> {
                     uiState.update { it.copy(isCheckingForUpdates = false) }

@@ -20,6 +20,8 @@ import java.util.concurrent.TimeUnit
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
+import okhttp3.Response
+import androidx.annotation.VisibleForTesting
 
 internal fun shouldUsePlatformHttpDataSource(resolvedStreamType: ResolvedStreamType): Boolean =
     false
@@ -88,6 +90,9 @@ class PlayerDataSourceFactoryProvider(
                 baseClient.newBuilder()
             }
             builder
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .addInterceptor(CrossHostRedirectInterceptor())
                 .addInterceptor(StalkerPlaybackRequestLoggingInterceptor)
                 // Some IPTV edges (Cloudflare-protected origins) answer 407 Proxy
                 // Authentication Required to requests carrying Accept-Encoding: gzip.
@@ -288,6 +293,38 @@ internal class LivePlaylistBypassDataSource(
 
     override fun close() {
         activeDataSource.close()
+    }
+}
+
+@VisibleForTesting
+internal class CrossHostRedirectInterceptor : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        var request = chain.request()
+        var response = chain.proceed(request)
+        var redirectCount = 0
+        while (response.isRedirect && redirectCount < 20) {
+            redirectCount++
+            val location = response.header("Location") ?: break
+            val nextUrl = request.url.resolve(location) ?: break
+            response.close()
+
+            val isSameOrigin = request.url.scheme.equals(nextUrl.scheme, ignoreCase = true) &&
+                request.url.host.equals(nextUrl.host, ignoreCase = true) &&
+                request.url.port == nextUrl.port
+
+            val requestBuilder = request.newBuilder().url(nextUrl)
+            if (!isSameOrigin) {
+                requestBuilder.removeHeader("Authorization")
+                requestBuilder.removeHeader("Cookie")
+                requestBuilder.removeHeader("X-User-Agent")
+                requestBuilder.removeHeader("Referer")
+                requestBuilder.removeHeader("Host")
+                requestBuilder.removeHeader("X-Portal-Token")
+            }
+            request = requestBuilder.build()
+            response = chain.proceed(request)
+        }
+        return response
     }
 }
 

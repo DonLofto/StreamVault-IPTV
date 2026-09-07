@@ -115,7 +115,6 @@ internal fun observeSettingsPreferenceSnapshot(
             zapAutoRevert = true,
             autoPlayNextEpisode = true,
             autoCheckAppUpdates = true,
-            autoDownloadAppUpdates = false,
             lastAppUpdateCheckAt = null,
             cachedAppUpdateVersionName = null,
             cachedAppUpdateVersionCode = null,
@@ -267,8 +266,6 @@ internal fun observeSettingsPreferenceSnapshot(
         snapshot.copy(autoPlayNextEpisode = autoPlayNextEpisode)
     }.combine(preferencesRepository.autoCheckAppUpdates) { snapshot, autoCheckAppUpdates ->
         snapshot.copy(autoCheckAppUpdates = autoCheckAppUpdates)
-    }.combine(preferencesRepository.autoDownloadAppUpdates) { snapshot, autoDownloadAppUpdates ->
-        snapshot.copy(autoDownloadAppUpdates = autoDownloadAppUpdates)
     }.combine(preferencesRepository.lastAppUpdateCheckTimestamp) { snapshot, lastAppUpdateCheckAt ->
         snapshot.copy(lastAppUpdateCheckAt = lastAppUpdateCheckAt)
     }.combine(preferencesRepository.cachedAppUpdateVersionName) { snapshot, versionName ->

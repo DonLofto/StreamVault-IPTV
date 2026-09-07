@@ -8,12 +8,15 @@ import com.streamvault.data.remote.http.HttpRequestProfile
 import com.streamvault.data.remote.http.safeRequestIdentitySummary
 import com.streamvault.data.remote.http.toGenericRequestProfile
 import com.streamvault.data.remote.http.withRequestProfile
+import com.streamvault.data.remote.http.awaitResponse
 import com.streamvault.data.util.AdultContentClassifier
 import com.streamvault.data.util.UrlSecurityPolicy
 import com.streamvault.domain.model.ContentType
 import com.streamvault.domain.model.Provider
 import com.streamvault.domain.sync.Section
 import com.streamvault.domain.sync.SyncProgress
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -251,7 +254,9 @@ internal class SyncManagerM3uImporter(
                 .url(urlStr)
                 .build()
                 .withRequestProfile(requestProfile)
-            okHttpClient.newCall(request).execute().use { response ->
+            val call = okHttpClient.newCall(request)
+            val response = call.awaitResponse()
+            try {
                 ensureSuccessfulPlaylistResponse(response, requestProfile)
                 val body = response.body ?: throw IllegalStateException("Empty M3U response")
                 body.byteStream().use { input ->
@@ -262,6 +267,11 @@ internal class SyncManagerM3uImporter(
                             sourceName = urlStr
                         )
                     )
+                }
+            } finally {
+                response.close()
+                if (!currentCoroutineContext().isActive) {
+                    call.cancel()
                 }
             }
         }

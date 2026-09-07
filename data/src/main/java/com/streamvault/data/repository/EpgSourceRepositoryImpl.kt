@@ -30,9 +30,11 @@ import com.streamvault.data.parser.MaxBytesInputStream
 import com.streamvault.data.util.ProviderInputSanitizer
 import com.streamvault.data.util.UrlSecurityPolicy
 import com.streamvault.data.remote.http.HttpRequestProfile
+import com.streamvault.data.remote.http.awaitResponse
 import com.streamvault.data.remote.http.safeRequestIdentitySummary
 import com.streamvault.data.remote.http.withRequestProfile
 import com.streamvault.domain.model.ChannelEpgMapping
+import kotlinx.coroutines.CancellationException
 import com.streamvault.domain.model.ContentType
 import com.streamvault.domain.model.EpgResolutionSummary
 import com.streamvault.domain.model.EpgSource
@@ -266,7 +268,8 @@ class EpgSourceRepositoryImpl @Inject constructor(
                         }
                         .build()
                         .withRequestProfile(requestProfile)
-                    val response = epgHttpClient.newCall(request).execute()
+                    val call = epgHttpClient.newCall(request)
+                    val response = call.awaitResponse()
 
                     if (response.code == 304) {
                         response.close()
@@ -415,7 +418,6 @@ class EpgSourceRepositoryImpl @Inject constructor(
                 Log.d(TAG, "Refreshed source $sourceId: $channelCount channels, $programmeCount programmes")
                 Result.success(Unit)
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to refresh source $sourceId", e)
                 // Clean up any staged rows on failure
                 val stagingId = -sourceId
                 runCatching {
@@ -425,6 +427,10 @@ class EpgSourceRepositoryImpl @Inject constructor(
                         epgSourceDao.delete(stagingId)
                     }
                 }
+                if (e is CancellationException) {
+                    throw e
+                }
+                Log.e(TAG, "Failed to refresh source $sourceId", e)
                 val isOversizeError = e is IOException && e.message?.contains("too large", ignoreCase = true) == true
                 val isLimitError = e is EpgInputLimitException
                 val statusMessage = when {

@@ -35,17 +35,13 @@ import com.streamvault.player.timeshift.TimeshiftDiskManager
 import com.streamvault.player.cache.AppCacheQuota
 import javax.inject.Inject
 import okhttp3.OkHttpClient
+import java.util.concurrent.atomic.AtomicBoolean
 
 @HiltAndroidApp
 class StreamVaultApp : Application(), SingletonImageLoader.Factory {
     private val runtimeDiagnosticsManager by lazy { RuntimeDiagnosticsManager(this) }
-    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
     @Inject
-    lateinit var preferencesRepository: PreferencesRepository
-
-    @Inject
-    lateinit var gitHubReleaseChecker: GitHubReleaseChecker
+    lateinit var startupCoordinator: com.streamvault.app.startup.StartupCoordinator
 
     @Inject
     lateinit var okHttpClient: OkHttpClient
@@ -66,39 +62,15 @@ class StreamVaultApp : Application(), SingletonImageLoader.Factory {
         super.onCreate()
         CrashReportStore.install(this)
         runtimeDiagnosticsManager.start()
-        applicationScope.launch {
-            // Clean up any timeshift temp directories left behind by crashes, OOM kills, or
-            // force-stops from the previous run. activeSessionDir = null means wipe everything.
-            TimeshiftDiskManager(applicationContext).cleanupStaleDirectories(activeSessionDir = null)
-        }
-        applicationScope.launch {
-            refreshCachedAppUpdateIfNeeded()
-        }
-        
-        // Schedule daily data maintenance: EPG pruning, stale-favorite cleanup, and DB compaction checks.
-        // BLD-H02: Require network + device idle so the worker doesn't drain battery.
-        val gcConstraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .setRequiresBatteryNotLow(true)
-            .setRequiresDeviceIdle(true)
-            .build()
+    }
 
-        val gcWorkRequest = PeriodicWorkRequestBuilder<com.streamvault.data.sync.SyncWorker>(24, java.util.concurrent.TimeUnit.HOURS)
-            .setConstraints(gcConstraints)
-            .build()
-            
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "DataMaintenanceWorker",
-            ExistingPeriodicWorkPolicy.KEEP,
-            gcWorkRequest
-        )
-
-        ProviderSyncWorker.enqueuePeriodic(this)
-        ProviderSyncWorker.enqueueLaunchStaleCheck(this)
-        XtreamIndexWorker.enqueuePeriodic(this)
-        XtreamIndexWorker.enqueueLaunchStaleCheck(this)
-        RecordingReconcileWorker.enqueuePeriodic(this)
-        RecordingReconcileWorker.enqueueOneShot(this)
+    /**
+     * Starts optional maintenance only after the first activity frame has been submitted.
+     * Keeping this behind an explicit checkpoint prevents application creation from becoming
+     * part of the user-visible cold-start critical path.
+     */
+    fun startDeferredStartup() {
+        startupCoordinator.onFirstFrameRendered()
     }
 
     override fun onTerminate() {
@@ -106,35 +78,6 @@ class StreamVaultApp : Application(), SingletonImageLoader.Factory {
         super.onTerminate()
     }
 
-    private suspend fun refreshCachedAppUpdateIfNeeded() {
-        val autoCheckEnabled = preferencesRepository.autoCheckAppUpdates.first()
-        if (!autoCheckEnabled) {
-            return
-        }
-
-        val lastCheckedAt = preferencesRepository.lastAppUpdateCheckTimestamp.first()
-        val now = System.currentTimeMillis()
-        val checkIntervalMs = 24L * 60L * 60L * 1000L
-        if (lastCheckedAt != null && now - lastCheckedAt < checkIntervalMs) {
-            return
-        }
-
-        preferencesRepository.setLastAppUpdateCheckTimestamp(now)
-        when (val result = gitHubReleaseChecker.fetchLatestRelease()) {
-            is Result.Success -> {
-                preferencesRepository.setCachedAppUpdateRelease(
-                    versionName = result.data.versionName,
-                    versionCode = result.data.versionCode,
-                    releaseUrl = result.data.releaseUrl,
-                    downloadUrl = result.data.downloadUrl,
-                    downloadSha256 = result.data.downloadSha256,
-                    releaseNotes = result.data.releaseNotes,
-                    publishedAt = result.data.publishedAt
-                )
-            }
-            else -> Unit
-        }
-    }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader {
         return ImageLoader.Builder(context)

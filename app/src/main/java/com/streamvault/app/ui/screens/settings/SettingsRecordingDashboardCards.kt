@@ -50,21 +50,12 @@ internal fun RecordingInfoCard(
     paddingBeforeMinutes: Int,
     paddingAfterMinutes: Int
 ) {
-    TvClickableSurface(
-        onClick = { },
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        colors = ClickableSurfaceDefaults.colors(
-            containerColor = SurfaceElevated,
-            focusedContainerColor = SurfaceElevated
+        colors = SurfaceDefaults.colors(
+            containerColor = SurfaceElevated
         ),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
-        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(16.dp)),
-        border = ClickableSurfaceDefaults.border(
-            focusedBorder = Border(
-                border = BorderStroke(2.dp, FocusBorder),
-                shape = RoundedCornerShape(16.dp)
-            )
-        )
+        shape = RoundedCornerShape(16.dp)
     ) {
         Column(
             modifier = Modifier.padding(20.dp),

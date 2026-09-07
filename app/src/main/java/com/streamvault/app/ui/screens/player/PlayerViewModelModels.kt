@@ -40,10 +40,6 @@ data class SeekPreviewState(
     val isLoading: Boolean = false
 )
 
-data class PlayerPreferencesUiState(
-    val externalPlaybackMode: ExternalPlaybackMode = ExternalPlaybackMode.INTERNAL_PLAYER
-)
-
 data class PlayerDiagnosticsUiState(
     val providerName: String = "",
     val providerSourceLabel: String = "",

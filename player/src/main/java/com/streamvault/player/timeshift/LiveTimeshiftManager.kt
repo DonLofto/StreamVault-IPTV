@@ -289,15 +289,17 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
 
     override suspend fun createSnapshot(): LiveTimeshiftSnapshot? {
         return withContext(Dispatchers.IO) {
-            // Hold the outer mutex only long enough to register the old snapshot as retired
-            // and grab a reference to the active session. File I/O runs outside the lock
-            // so startSession/stopSession are not blocked for hundreds of milliseconds.
-            val session = mutex.withLock {
-                val s = activeSession ?: return@withLock null
-                s.activeSnapshotDir?.let { retiredSnapshotDirs.addLast(it) }
-                s
-            } ?: return@withContext null
-            session.createSnapshot()
+            val session = mutex.withLock { activeSession } ?: return@withContext null
+            try {
+                session.snapshotMutex.withLock {
+                    val isStillActive = mutex.withLock { activeSession === session }
+                    if (!isStillActive) return@withLock null
+                    session.activeSnapshotDir?.let { retiredSnapshotDirs.addLast(it) }
+                    session.createSnapshot()
+                }
+            } catch (_: CancellationException) {
+                null
+            }
         }
     }
 
@@ -323,7 +325,12 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             session.stop()
             // Await the external capture job before removing its files.
             session.job?.cancelAndJoin()
+            // Ensure any in-flight snapshot completes or cancels before sessionDir deletion
+            session.snapshotMutex.withLock {
+                // Done
+            }
             session.sessionDir.deleteRecursively()
+            diskManager.recordFileMutation()
         }
     }
 
@@ -391,7 +398,9 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
         val sessionDir: File
     ) {
         var job: Job? = null
+        val snapshotMutex = Mutex()
         var activeSnapshotDir: File? = null
+        var fileLinker: (File, File) -> Unit = { source, destination -> linkOrCopySegmentFile(source, destination) }
         val effectiveDepthMs: Long = config.effectiveDepthMs(backend)
         protected val sequence = AtomicLong(0L)
         protected val stateStartMs = System.currentTimeMillis()
@@ -643,27 +652,44 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             }
         }
 
-        override suspend fun createSnapshot(): LiveTimeshiftSnapshot? {
+        override suspend fun createSnapshot(): LiveTimeshiftSnapshot? = snapshotMutex.withLock {
             val snapshotId = sequence.incrementAndGet()
-            val snapshotDir = File(sessionDir, "snapshot-$snapshotId").apply { mkdirs() }
-            activeSnapshotDir = snapshotDir
-            val snapshotFile = File(snapshotDir, "buffer.ts")
-            val orderedChunks = chunkMutex.withLock { chunks.toList() }
-            if (orderedChunks.isEmpty()) return null
-            snapshotFile.outputStream().use { output ->
-                orderedChunks.forEach { chunk ->
-                    when {
-                        chunk.file != null && chunk.file.exists() -> chunk.file.inputStream().use { it.copyTo(output) }
-                        chunk.payload != null -> output.write(chunk.payload)
+            val tmpDir = File(sessionDir, "snapshot-$snapshotId.tmp").apply { mkdirs() }
+            val finalDir = File(sessionDir, "snapshot-$snapshotId")
+            try {
+                val snapshotFile = File(tmpDir, "buffer.ts")
+                val orderedChunks = chunkMutex.withLock { chunks.toList() }
+                if (orderedChunks.isEmpty()) {
+                    tmpDir.deleteRecursively()
+                    return null
+                }
+                currentCoroutineContext().ensureActive()
+                snapshotFile.outputStream().use { output ->
+                    orderedChunks.forEach { chunk ->
+                        currentCoroutineContext().ensureActive()
+                        when {
+                            chunk.file != null && chunk.file.exists() -> chunk.file.inputStream().use { it.copyTo(output) }
+                            chunk.payload != null -> output.write(chunk.payload)
+                        }
                     }
                 }
+                currentCoroutineContext().ensureActive()
+                val durationMs = orderedChunks.sumOf { it.durationMs }
+                if (finalDir.exists()) finalDir.deleteRecursively()
+                val renamed = tmpDir.renameTo(finalDir)
+                val targetDir = if (renamed) finalDir else tmpDir
+                activeSnapshotDir = targetDir
+                diskManager.recordFileMutation()
+                val finalFile = File(targetDir, "buffer.ts")
+                LiveTimeshiftSnapshot(
+                    url = finalFile.toURI().toString(),
+                    durationMs = durationMs,
+                    backend = backend
+                )
+            } catch (t: Throwable) {
+                tmpDir.deleteRecursively()
+                throw t
             }
-            val durationMs = orderedChunks.sumOf { it.durationMs }
-            return LiveTimeshiftSnapshot(
-                url = snapshotFile.toURI().toString(),
-                durationMs = durationMs,
-                backend = backend
-            )
         }
 
         private fun createChunk(): ActiveProgressiveChunk {
@@ -684,7 +710,6 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             val output = active.output ?: return  // never written — nothing to finalize
             val payload = if (backend == LiveTimeshiftBackend.MEMORY) (output as ByteArrayOutputStream).toByteArray() else null
             active.close()
-            if (backend == LiveTimeshiftBackend.DISK) checkDiskAndBudget()
             val endedAtMs = System.currentTimeMillis()
             val chunk = ProgressiveChunk(
                 id = active.id,
@@ -698,7 +723,17 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                 runningChunkDurationMs += chunk.durationMs
                 chunks += chunk
                 pruneProgressiveChunksLocked()
+                while (backend == LiveTimeshiftBackend.DISK && !diskManager.isWithinBudget() && chunks.size > 1) {
+                    val removed = chunks.removeFirst()
+                    runningChunkDurationMs -= removed.durationMs
+                    removed.file?.delete()
+                    diskManager.recordFileMutation()
+                }
                 runningChunkDurationMs
+            }
+            if (backend == LiveTimeshiftBackend.DISK) {
+                diskManager.recordFileMutation()
+                checkDiskAndBudget()
             }
             updateWindow(windowDuration)
         }
@@ -718,6 +753,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                 val removed = chunks.removeFirst()
                 removed.file?.delete()
                 runningChunkDurationMs -= removed.durationMs
+                diskManager.recordFileMutation()
             }
         }
     }
@@ -763,13 +799,22 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                                 if (remoteSegment.mediaSequence <= lastProcessedSequence) return@forEach
                                 lastProcessedSequence = remoteSegment.mediaSequence
                                 awaitPlaybackNotStressed()
-                                if (backend == LiveTimeshiftBackend.DISK) checkDiskAndBudget()
                                 val retained = retainHlsSegment(remoteSegment)
                                 val windowDuration = segmentMutex.withLock {
                                     runningSegmentDurationMs += retained.durationMs
                                     segments += retained
                                     pruneHlsSegmentsLocked()
+                                    while (backend == LiveTimeshiftBackend.DISK && !diskManager.isWithinBudget() && segments.size > 1) {
+                                        val removed = segments.removeFirst()
+                                        runningSegmentDurationMs -= removed.durationMs
+                                        removed.file?.delete()
+                                        diskManager.recordFileMutation()
+                                    }
                                     runningSegmentDurationMs
+                                }
+                                if (backend == LiveTimeshiftBackend.DISK) {
+                                    diskManager.recordFileMutation()
+                                    checkDiskAndBudget()
                                 }
                                 updateWindow(windowDuration)
                             }
@@ -786,37 +831,54 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             }
         }
 
-        override suspend fun createSnapshot(): LiveTimeshiftSnapshot? {
+        override suspend fun createSnapshot(): LiveTimeshiftSnapshot? = snapshotMutex.withLock {
             val snapshotId = sequence.incrementAndGet()
-            val snapshotDir = File(sessionDir, "snapshot-$snapshotId").apply { mkdirs() }
-            activeSnapshotDir = snapshotDir
-            val snapshotSegments = segmentMutex.withLock { segments.toList() }
-            if (snapshotSegments.isEmpty()) return null
-            val playlist = File(snapshotDir, "index.m3u8")
-            val targetDurationSeconds = snapshotSegments.maxOf { ((it.durationMs + 999L) / 1000L).toInt().coerceAtLeast(1) }
-            val body = buildString {
-                appendLine("#EXTM3U")
-                appendLine("#EXT-X-VERSION:3")
-                appendLine("#EXT-X-TARGETDURATION:$targetDurationSeconds")
-                appendLine("#EXT-X-MEDIA-SEQUENCE:0")
-                snapshotSegments.forEachIndexed { index, segment ->
-                    val fileName = "segment-$index.ts"
-                    val outputFile = File(snapshotDir, fileName)
-                    when {
-                        segment.file != null && segment.file.exists() -> linkOrCopySegmentFile(segment.file, outputFile)
-                        segment.payload != null -> outputFile.writeBytes(segment.payload)
-                    }
-                    appendLine("#EXTINF:${"%.3f".format(Locale.US, segment.durationMs / 1000.0)},")
-                    appendLine(fileName)
+            val tmpDir = File(sessionDir, "snapshot-$snapshotId.tmp").apply { mkdirs() }
+            val finalDir = File(sessionDir, "snapshot-$snapshotId")
+            try {
+                val snapshotSegments = segmentMutex.withLock { segments.toList() }
+                if (snapshotSegments.isEmpty()) {
+                    tmpDir.deleteRecursively()
+                    return null
                 }
-                appendLine("#EXT-X-ENDLIST")
+                currentCoroutineContext().ensureActive()
+                val playlist = File(tmpDir, "index.m3u8")
+                val targetDurationSeconds = snapshotSegments.maxOf { ((it.durationMs + 999L) / 1000L).toInt().coerceAtLeast(1) }
+                val body = buildString {
+                    appendLine("#EXTM3U")
+                    appendLine("#EXT-X-VERSION:3")
+                    appendLine("#EXT-X-TARGETDURATION:$targetDurationSeconds")
+                    appendLine("#EXT-X-MEDIA-SEQUENCE:0")
+                    snapshotSegments.forEachIndexed { index, segment ->
+                        val fileName = "segment-$index.ts"
+                        val outputFile = File(tmpDir, fileName)
+                        currentCoroutineContext().ensureActive()
+                        when {
+                            segment.file != null && segment.file.exists() -> fileLinker(segment.file, outputFile)
+                            segment.payload != null -> outputFile.writeBytes(segment.payload)
+                        }
+                        appendLine("#EXTINF:${"%.3f".format(Locale.US, segment.durationMs / 1000.0)},")
+                        appendLine(fileName)
+                    }
+                    appendLine("#EXT-X-ENDLIST")
+                }
+                playlist.writeText(body)
+                currentCoroutineContext().ensureActive()
+                if (finalDir.exists()) finalDir.deleteRecursively()
+                val renamed = tmpDir.renameTo(finalDir)
+                val targetDir = if (renamed) finalDir else tmpDir
+                activeSnapshotDir = targetDir
+                diskManager.recordFileMutation()
+                val finalPlaylist = File(targetDir, "index.m3u8")
+                LiveTimeshiftSnapshot(
+                    url = finalPlaylist.toURI().toString(),
+                    durationMs = snapshotSegments.sumOf { it.durationMs },
+                    backend = backend
+                )
+            } catch (t: Throwable) {
+                tmpDir.deleteRecursively()
+                throw t
             }
-            playlist.writeText(body)
-            return LiveTimeshiftSnapshot(
-                url = playlist.toURI().toString(),
-                durationMs = snapshotSegments.sumOf { it.durationMs },
-                backend = backend
-            )
         }
 
         private fun retainHlsSegment(remote: RemoteHlsSegment): HlsSegmentSnapshot {
@@ -836,6 +898,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                 val removed = segments.removeFirst()
                 removed.file?.delete()
                 runningSegmentDurationMs -= removed.durationMs
+                diskManager.recordFileMutation()
             }
         }
 
@@ -979,6 +1042,14 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
 
         fun allSegments(): List<HlsSegmentSnapshot> = listOfNotNull(init) + media
 
+        fun evictOldestMedia(): HlsSegmentSnapshot? {
+            if (media.isEmpty()) return null
+            val removed = media.removeFirst()
+            mediaDurationMs -= removed.durationMs
+            onEvict(removed)
+            return removed
+        }
+
         private fun prune() {
             while (mediaDurationMs > depthMs && media.isNotEmpty()) {
                 val removed = media.removeFirst()
@@ -1025,6 +1096,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             onEvict = { evicted ->
                 seenSegments.remove(evicted.remoteUrl)
                 evicted.file?.delete()
+                diskManager.recordFileMutation()
             }
         )
 
@@ -1040,9 +1112,12 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                     // Download init segment once (identified by URL; seenSegments deduplicates it).
                     parsed.initSegmentUrl?.let { initUrl ->
                         if (seenSegments.add("__init__:$initUrl")) {
-                            if (backend == LiveTimeshiftBackend.DISK) checkDiskAndBudget()
                             val retained = retainSegment(RemoteHlsSegment(initUrl, 0L), isInit = true)
                             segmentMutex.withLock { window.addInit(retained) }
+                            if (backend == LiveTimeshiftBackend.DISK) {
+                                diskManager.recordFileMutation()
+                                checkDiskAndBudget()
+                            }
                         }
                     }
 
@@ -1050,11 +1125,17 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                         currentCoroutineContext().ensureActive()
                         if (!seenSegments.add(remote.uri)) return@forEach
                         awaitPlaybackNotStressed()
-                        if (backend == LiveTimeshiftBackend.DISK) checkDiskAndBudget()
                         val retained = retainSegment(remote, isInit = false)
                         val windowDuration = segmentMutex.withLock {
                             window.addMedia(retained)
+                            while (backend == LiveTimeshiftBackend.DISK && !diskManager.isWithinBudget() && window.mediaSegments().size > 1) {
+                                window.evictOldestMedia()
+                            }
                             window.mediaDurationMs()
+                        }
+                        if (backend == LiveTimeshiftBackend.DISK) {
+                            diskManager.recordFileMutation()
+                            checkDiskAndBudget()
                         }
                         updateWindow(windowDuration)
                     }
@@ -1070,44 +1151,57 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             }
         }
 
-        override suspend fun createSnapshot(): LiveTimeshiftSnapshot? {
+        override suspend fun createSnapshot(): LiveTimeshiftSnapshot? = snapshotMutex.withLock {
             val snapshotId = sequence.incrementAndGet()
-            val snapshotDir = File(sessionDir, "snapshot-$snapshotId").apply { mkdirs() }
-            activeSnapshotDir = snapshotDir
-            val all = segmentMutex.withLock { window.allSegments() }
-            val snapshotSegments = all.filter { it.durationMs > 0L }  // media only for HLS timing
-            if (snapshotSegments.isEmpty()) return null
-
-            // Re-package captured DASH segments as a static HLS playlist.
-            // ExoPlayer already handles both HLS and DASH, and our snapshot infrastructure
-            // is built around HLS output, so DASH snapshots follow the same pattern.
-            val playlist = File(snapshotDir, "index.m3u8")
-            val targetDurationSeconds = snapshotSegments.maxOf { ((it.durationMs + 999L) / 1000L).toInt().coerceAtLeast(1) }
-            var mediaIndex = 0
-            val playlistSegments = all.mapIndexed { index, segment ->
-                val isInit = segment.durationMs == 0L
-                val fileName = if (isInit) "init-$index.mp4" else "segment-${mediaIndex++}.mp4"
-                val outputFile = File(snapshotDir, fileName)
-                when {
-                    segment.file != null && segment.file.exists() -> linkOrCopySegmentFile(segment.file, outputFile)
-                    segment.payload != null -> outputFile.writeBytes(segment.payload)
+            val tmpDir = File(sessionDir, "snapshot-$snapshotId.tmp").apply { mkdirs() }
+            val finalDir = File(sessionDir, "snapshot-$snapshotId")
+            try {
+                val all = segmentMutex.withLock { window.allSegments() }
+                val snapshotSegments = all.filter { it.durationMs > 0L }  // media only for HLS timing
+                if (snapshotSegments.isEmpty()) {
+                    tmpDir.deleteRecursively()
+                    return null
                 }
-                DashSnapshotPlaylistSegment(
-                    fileName = fileName,
-                    durationMs = segment.durationMs,
-                    isInit = isInit
+                currentCoroutineContext().ensureActive()
+                val playlist = File(tmpDir, "index.m3u8")
+                val targetDurationSeconds = snapshotSegments.maxOf { ((it.durationMs + 999L) / 1000L).toInt().coerceAtLeast(1) }
+                var mediaIndex = 0
+                val playlistSegments = all.mapIndexed { index, segment ->
+                    val isInit = segment.durationMs == 0L
+                    val fileName = if (isInit) "init-$index.mp4" else "segment-${mediaIndex++}.mp4"
+                    val outputFile = File(tmpDir, fileName)
+                    currentCoroutineContext().ensureActive()
+                    when {
+                        segment.file != null && segment.file.exists() -> fileLinker(segment.file, outputFile)
+                        segment.payload != null -> outputFile.writeBytes(segment.payload)
+                    }
+                    DashSnapshotPlaylistSegment(
+                        fileName = fileName,
+                        durationMs = segment.durationMs,
+                        isInit = isInit
+                    )
+                }
+                val body = buildDashSnapshotPlaylist(
+                    targetDurationSeconds = targetDurationSeconds,
+                    segments = playlistSegments
                 )
+                playlist.writeText(body)
+                currentCoroutineContext().ensureActive()
+                if (finalDir.exists()) finalDir.deleteRecursively()
+                val renamed = tmpDir.renameTo(finalDir)
+                val targetDir = if (renamed) finalDir else tmpDir
+                activeSnapshotDir = targetDir
+                diskManager.recordFileMutation()
+                val finalPlaylist = File(targetDir, "index.m3u8")
+                LiveTimeshiftSnapshot(
+                    url = finalPlaylist.toURI().toString(),
+                    durationMs = snapshotSegments.sumOf { it.durationMs },
+                    backend = backend
+                )
+            } catch (t: Throwable) {
+                tmpDir.deleteRecursively()
+                throw t
             }
-            val body = buildDashSnapshotPlaylist(
-                targetDurationSeconds = targetDurationSeconds,
-                segments = playlistSegments
-            )
-            playlist.writeText(body)
-            return LiveTimeshiftSnapshot(
-                url = playlist.toURI().toString(),
-                durationMs = snapshotSegments.sumOf { it.durationMs },
-                backend = backend
-            )
         }
 
         private fun retainSegment(remote: RemoteHlsSegment, isInit: Boolean): HlsSegmentSnapshot {

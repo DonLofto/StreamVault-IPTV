@@ -266,65 +266,6 @@ fun PlayerControlsOverlay(
 }
 
 @Composable
-fun PlayerZapOverlay(
-    visible: Boolean,
-    displayChannelNumber: Int,
-    channelName: String?,
-    programTitle: String?,
-    modifier: Modifier = Modifier
-) {
-    AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn() + slideInHorizontally(),
-        exit = fadeOut() + slideOutHorizontally(),
-        modifier = modifier
-    ) {
-        Box(
-            modifier = Modifier
-                .padding(32.dp)
-                .background(
-                    brush = Brush.horizontalGradient(
-                        colors = listOf(Color.Black.copy(alpha = 0.84f), Color.Transparent)
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                )
-                .padding(18.dp)
-                .widthIn(min = 320.dp, max = 460.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (displayChannelNumber > 0) {
-                    Text(
-                        text = displayChannelNumber.toString(),
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = Primary,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                }
-                Column {
-                    Text(
-                        text = channelName.orEmpty(),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (!programTitle.isNullOrBlank()) {
-                        Text(
-                            text = programTitle,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White.copy(alpha = 0.78f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 fun PlayerNumericInputOverlay(
     state: NumericChannelInputState?,
     visible: Boolean,

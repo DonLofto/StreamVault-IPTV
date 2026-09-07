@@ -23,12 +23,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.produceState
 import com.streamvault.domain.util.isPlaybackComplete
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -77,19 +82,20 @@ import com.streamvault.domain.model.Episode
 import com.streamvault.domain.model.Movie
 import com.streamvault.domain.model.Series
 
-private object LiveChannelRowTicker {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+val LocalLiveMediaProgressClock = compositionLocalOf { System.currentTimeMillis() }
 
-    val nowMs = flow {
-        while (true) {
-            emit(System.currentTimeMillis())
-            delay(30_000L)
+@Composable
+fun rememberLiveMediaProgressClock(intervalMs: Long = 30_000L): Long {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val now by produceState(initialValue = System.currentTimeMillis(), lifecycleOwner) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                value = System.currentTimeMillis()
+                delay(intervalMs)
+            }
         }
-    }.stateIn(
-        scope = scope,
-        started = SharingStarted.WhileSubscribed(stopTimeoutMillis = 30_000L),
-        initialValue = System.currentTimeMillis()
-    )
+    }
+    return now
 }
 
 @Composable
@@ -97,7 +103,8 @@ fun LiveChannelRowCard(
     channel: Channel,
     sourceBadgeLabel: String? = null,
     modifier: Modifier = Modifier,
-    rowHeight: Dp = 68.dp
+    rowHeight: Dp = 68.dp,
+    nowMs: Long = LocalLiveMediaProgressClock.current
 ) {
     val isUltraCompact = rowHeight <= 60.dp
     val isDense = rowHeight <= 56.dp
@@ -193,7 +200,7 @@ fun LiveChannelRowCard(
                         LinearProgressIndicator(
                             progress = {
                                 val totalDuration = (program.endTime - program.startTime).coerceAtLeast(1L)
-                                val elapsed = (LiveChannelRowTicker.nowMs.value - program.startTime).coerceAtLeast(0L)
+                                val elapsed = (nowMs - program.startTime).coerceAtLeast(0L)
                                 (elapsed.toFloat() / totalDuration.toFloat()).coerceIn(0f, 1f)
                             },
                             modifier = Modifier

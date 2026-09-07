@@ -21,10 +21,15 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import android.content.Context
+import androidx.compose.ui.platform.LocalContext
 import com.streamvault.app.backup.BackupFileBridge
+import com.streamvault.app.player.external.PlaybackModeDispatcher
+import com.streamvault.app.ui.components.dialogs.PlaybackModeChooserDialog
 import com.streamvault.app.ui.model.isArchivePlayable
 import com.streamvault.domain.model.Channel
 import com.streamvault.domain.model.Episode
+import com.streamvault.domain.model.ExternalPlaybackMode
 import com.streamvault.domain.model.Movie
 import com.streamvault.domain.repository.ChannelRepository
 import com.streamvault.app.ui.screens.dashboard.DashboardScreen
@@ -311,11 +316,26 @@ private fun Series.toSeriesDetailPresentationHint(): SeriesDetailPresentationHin
     )
 }
 
-private fun NavHostController.navigateToExternalPlayer(request: PlayerNavigationRequest): Boolean {
-    if (currentBackStackEntry?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) != true) return false
-    currentBackStackEntry?.savedStateHandle?.set(PLAYER_REQUEST_KEY, request)
-    navigate(Routes.PLAYER) { launchSingleTop = true }
-    return true
+private fun NavHostController.dispatchPlayback(
+    request: PlayerNavigationRequest,
+    context: Context,
+    mode: ExternalPlaybackMode,
+    onShowChooser: (PlayerNavigationRequest) -> Unit,
+    forceInternal: Boolean = false
+): Boolean {
+    when (PlaybackModeDispatcher.dispatch(mode, request, forceInternal)) {
+        PlaybackModeDispatcher.DispatchResult.PlayInternal -> {
+            return navigateToPlayer(request)
+        }
+        PlaybackModeDispatcher.DispatchResult.ShowChooser -> {
+            onShowChooser(request)
+            return true
+        }
+        PlaybackModeDispatcher.DispatchResult.LaunchExternal -> {
+            PlaybackModeDispatcher.launchExternal(context, request.streamUrl)
+            return true
+        }
+    }
 }
 
 internal fun AppLandingDestination.toAppRoute(): String = when (this) {
@@ -347,6 +367,10 @@ internal fun AppTopLevelDestination.toAppRoute(): String = when (this) {
 fun AppNavigation(mainActivity: MainActivity) {
     val navController = rememberNavController()
     val currentBackStackEntry = navController.currentBackStackEntryAsState().value
+    val context = LocalContext.current
+    val externalPlaybackMode by mainActivity.preferencesRepository.playerExternalPlaybackMode
+        .collectAsStateWithLifecycle(initialValue = ExternalPlaybackMode.INTERNAL_PLAYER)
+    var pendingChooserRequest by remember { mutableStateOf<PlayerNavigationRequest?>(null) }
     val externalNavigationRequest = mainActivity.externalNavigationRequestFlow.collectAsStateWithLifecycle().value
     val topLevelDestinations = mainActivity.preferencesRepository.appTopLevelDestinations
         .collectAsStateWithLifecycle(initialValue = AppTopLevelDestination.defaultOrder)
@@ -410,7 +434,7 @@ fun AppNavigation(mainActivity: MainActivity) {
         entry.lifecycle.awaitResumed()
         when (val request = externalNavigationRequest) {
             is ExternalNavigationRequest.Player -> {
-                if (navController.navigateToExternalPlayer(request.request)) {
+                if (navController.dispatchPlayback(request.request, context, externalPlaybackMode, { pendingChooserRequest = it })) {
                     mainActivity.clearExternalNavigationRequest()
                 }
             }
@@ -514,7 +538,7 @@ fun AppNavigation(mainActivity: MainActivity) {
                     navController.navigate(Routes.providerSetup(null))
                 },
                 onRecentChannelClick = { channel, combinedProfileId ->
-                    navController.navigateToPlayer(
+                    navController.dispatchPlayback(
                         Routes.livePlayer(
                             channel = channel,
                             categoryId = com.streamvault.domain.model.VirtualCategoryIds.RECENT,
@@ -522,11 +546,14 @@ fun AppNavigation(mainActivity: MainActivity) {
                             isVirtual = true,
                             combinedProfileId = combinedProfileId,
                             returnRoute = Routes.HOME
-                        )
+                        ),
+                        context,
+                        externalPlaybackMode,
+                        { pendingChooserRequest = it }
                     )
                 },
                 onFavoriteChannelClick = { channel, combinedProfileId ->
-                    navController.navigateToPlayer(
+                    navController.dispatchPlayback(
                         Routes.livePlayer(
                             channel = channel,
                             categoryId = com.streamvault.domain.model.VirtualCategoryIds.FAVORITES,
@@ -534,7 +561,10 @@ fun AppNavigation(mainActivity: MainActivity) {
                             isVirtual = true,
                             combinedProfileId = combinedProfileId,
                             returnRoute = Routes.HOME
-                        )
+                        ),
+                        context,
+                        externalPlaybackMode,
+                        { pendingChooserRequest = it }
                     )
                 },
                 onMovieClick = { movie ->
@@ -583,7 +613,12 @@ fun AppNavigation(mainActivity: MainActivity) {
                         }
                     }
                     if (route is PlayerNavigationRequest) {
-                        navController.navigateToPlayer(route)
+                        navController.dispatchPlayback(
+                            route,
+                            context,
+                            externalPlaybackMode,
+                            { pendingChooserRequest = it }
+                        )
                     } else {
                         navController.navigateIfResumed(route as String) { launchSingleTop = true }
                     }
@@ -601,7 +636,7 @@ fun AppNavigation(mainActivity: MainActivity) {
             val initialCategoryId = backStackEntry.arguments?.getLong("categoryId")?.takeIf { it != -1L }
             HomeScreen(
                 onChannelClick = { channel, category, provider, combinedProfileId, combinedSourceFilterProviderId ->
-                    navController.navigateToPlayer(
+                    navController.dispatchPlayback(
                         Routes.livePlayer(
                             channel = channel,
                             categoryId = category?.id,
@@ -610,7 +645,10 @@ fun AppNavigation(mainActivity: MainActivity) {
                             combinedProfileId = combinedProfileId,
                             combinedSourceFilterProviderId = combinedSourceFilterProviderId,
                             returnRoute = Routes.liveTv(category?.id)
-                        )
+                        ),
+                        context,
+                        externalPlaybackMode,
+                        { pendingChooserRequest = it }
                     )
                 },
                 onNavigate = { route -> tabNavigate(route) },
@@ -626,8 +664,11 @@ fun AppNavigation(mainActivity: MainActivity) {
                     navController.navigateToMovieDetail(movie, Routes.MOVIES)
                 },
                 onContinueWatchingPlay = { history ->
-                    navController.navigateToPlayer(
-                        history.toPlayerNavigationRequest().copy(returnRoute = Routes.MOVIES)
+                    navController.dispatchPlayback(
+                        history.toPlayerNavigationRequest().copy(returnRoute = Routes.MOVIES),
+                        context,
+                        externalPlaybackMode,
+                        { pendingChooserRequest = it }
                     )
                 },
                 onNavigate = { route -> tabNavigate(route) },
@@ -675,7 +716,7 @@ fun AppNavigation(mainActivity: MainActivity) {
                 initialAnchorTime = epgAnchorTime,
                 initialFavoritesOnly = epgFavoritesOnly,
                 onPlayChannel = { channel, categoryId, isVirtual, combinedProfileId, returnRoute ->
-                    navController.navigateToPlayer(
+                    navController.dispatchPlayback(
                         Routes.livePlayer(
                             channel = channel,
                             categoryId = categoryId,
@@ -683,14 +724,17 @@ fun AppNavigation(mainActivity: MainActivity) {
                             isVirtual = isVirtual,
                             combinedProfileId = combinedProfileId,
                             returnRoute = returnRoute
-                        )
+                        ),
+                        context,
+                        externalPlaybackMode,
+                        { pendingChooserRequest = it }
                     )
                 },
                 onPlayArchive = { channel, program, categoryId, isVirtual, combinedProfileId, returnRoute ->
                     if (!channel.isArchivePlayable(program)) {
                         return@FullEpgScreen
                     }
-                    navController.navigateToPlayer(
+                    navController.dispatchPlayback(
                         Routes.player(
                             streamUrl = channel.streamUrl,
                             title = channel.name,
@@ -705,7 +749,10 @@ fun AppNavigation(mainActivity: MainActivity) {
                             archiveEndMs = program.endTime,
                             archiveTitle = "${channel.name}: ${program.title}",
                             returnRoute = returnRoute
-                        )
+                        ),
+                        context,
+                        externalPlaybackMode,
+                        { pendingChooserRequest = it }
                     )
                 },
                 onNavigate = { route -> tabNavigate(route) }
@@ -764,14 +811,17 @@ fun AppNavigation(mainActivity: MainActivity) {
             com.streamvault.app.ui.screens.search.SearchScreen(
                 initialQuery = backStackEntry.arguments?.getString("query").orEmpty(),
                 onChannelClick = { channel ->
-                    navController.navigateToPlayer(
+                    navController.dispatchPlayback(
                         Routes.livePlayer(
                             channel = channel,
                             categoryId = channel.categoryId ?: ChannelRepository.ALL_CHANNELS_ID,
                             providerId = channel.providerId,
                             isVirtual = false,
                             returnRoute = Routes.search(backStackEntry.arguments?.getString("query").orEmpty())
-                        )
+                        ),
+                        context,
+                        externalPlaybackMode,
+                        { pendingChooserRequest = it }
                     )
                 },
                 onMovieClick = { movie ->
@@ -876,13 +926,16 @@ fun AppNavigation(mainActivity: MainActivity) {
             val movieId = backStackEntry.arguments?.getLong("movieId") ?: -1L
             com.streamvault.app.ui.screens.movies.MovieDetailScreen(
                 onPlay = { movie ->
-                    navController.navigateToPlayer(
+                    navController.dispatchPlayback(
                         Routes.moviePlayer(movie).copy(
                             returnRoute = Routes.movieDetail(
                                 movieId = movie.id.takeIf { it > 0L } ?: movieId,
                                 returnRoute = returnRoute
                             )
-                        )
+                        ),
+                        context,
+                        externalPlaybackMode,
+                        { pendingChooserRequest = it }
                     )
                 },
                 onBack = {
@@ -913,14 +966,17 @@ fun AppNavigation(mainActivity: MainActivity) {
             val seriesId = backStackEntry.arguments?.getLong("seriesId") ?: -1L
             com.streamvault.app.ui.screens.series.SeriesDetailScreen(
                 onEpisodeClick = { episode ->
-                     navController.navigateToPlayer(
-                         Routes.episodePlayer(episode).copy(
-                             returnRoute = Routes.seriesDetail(
-                                 seriesId = episode.seriesId.takeIf { it > 0L } ?: seriesId,
-                                 returnRoute = returnRoute
-                             )
-                         )
-                     )
+                    navController.dispatchPlayback(
+                        Routes.episodePlayer(episode).copy(
+                            returnRoute = Routes.seriesDetail(
+                                seriesId = episode.seriesId.takeIf { it > 0L } ?: seriesId,
+                                returnRoute = returnRoute
+                            )
+                        ),
+                        context,
+                        externalPlaybackMode,
+                        { pendingChooserRequest = it }
+                    )
                 },
                 onBack = {
                     if (!returnRoute.isNullOrBlank()) {
@@ -940,6 +996,29 @@ fun AppNavigation(mainActivity: MainActivity) {
                 onBack = { navController.popBackStack() }
             )
         }
+    }
+
+    pendingChooserRequest?.let { request ->
+        PlaybackModeChooserDialog(
+            request = request,
+            onPlayInternal = {
+                pendingChooserRequest = null
+                navController.dispatchPlayback(
+                    request = request,
+                    context = context,
+                    mode = externalPlaybackMode,
+                    onShowChooser = {},
+                    forceInternal = true
+                )
+            },
+            onPlayExternal = {
+                pendingChooserRequest = null
+                PlaybackModeDispatcher.launchExternal(context, request.streamUrl)
+            },
+            onDismiss = {
+                pendingChooserRequest = null
+            }
+        )
     }
 }
 

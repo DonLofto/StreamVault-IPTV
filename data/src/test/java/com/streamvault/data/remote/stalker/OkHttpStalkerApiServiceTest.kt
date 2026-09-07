@@ -15,11 +15,86 @@ import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import org.junit.Test
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 
 class OkHttpStalkerApiServiceTest {
+
+    @Test
+    fun authenticate_crossHostRedirect_dropsPortalCredentials() = runTest {
+        val destination = MockWebServer()
+        val portal = MockWebServer()
+        val redirectedRequests = mutableListOf<RecordedRequest>()
+        destination.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                redirectedRequests += request
+                return successfulStalkerResponse(request)
+            }
+        }
+        portal.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = MockResponse()
+                .setResponseCode(302)
+                .addHeader("Location", destination.url(request.path.orEmpty()))
+        }
+        destination.start()
+        portal.start()
+        try {
+            val service = OkHttpStalkerApiService(OkHttpClient(), Json { ignoreUnknownKeys = true })
+
+            val result = service.authenticate(redirectTestProfile(portal))
+
+            assertThat(result).isInstanceOf(Result.Success::class.java)
+            assertThat(redirectedRequests).isNotEmpty()
+            redirectedRequests.forEach { request ->
+                assertThat(request.getHeader("Authorization")).isNull()
+                assertThat(request.getHeader("Cookie")).isNull()
+                assertThat(request.getHeader("X-User-Agent")).isNull()
+                assertThat(request.getHeader("Referer")).isNull()
+                assertThat(request.getHeader("X-Portal-Token")).isNull()
+            }
+        } finally {
+            portal.shutdown()
+            destination.shutdown()
+        }
+    }
+
+    @Test
+    fun authenticate_sameHostRedirect_preservesPortalCredentials() = runTest {
+        val portal = MockWebServer()
+        val redirectedRequests = mutableListOf<RecordedRequest>()
+        portal.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                if (request.requestUrl?.encodedPath == "/redirected") {
+                    redirectedRequests += request
+                    return successfulStalkerResponse(request)
+                }
+                return MockResponse()
+                    .setResponseCode(302)
+                    .addHeader("Location", portal.url("/redirected?${request.requestUrl?.encodedQuery.orEmpty()}"))
+            }
+        }
+        portal.start()
+        try {
+            val service = OkHttpStalkerApiService(OkHttpClient(), Json { ignoreUnknownKeys = true })
+
+            val result = service.authenticate(redirectTestProfile(portal))
+
+            assertThat(result).isInstanceOf(Result.Success::class.java)
+            assertThat(redirectedRequests).isNotEmpty()
+            assertThat(redirectedRequests.first().getHeader("Cookie")).contains("mac=")
+            assertThat(redirectedRequests.first().getHeader("X-User-Agent")).isNotEmpty()
+            assertThat(redirectedRequests.first().getHeader("Referer")).isNotEmpty()
+            assertThat(redirectedRequests.first().getHeader("X-Portal-Token")).isEqualTo("portal-secret")
+            assertThat(redirectedRequests.any { it.getHeader("Authorization") == "Bearer token-123" }).isTrue()
+        } finally {
+            portal.shutdown()
+        }
+    }
 
     @Test
     fun authenticate_retries_with_legacy_recipe_and_updates_profile_metadata() = runTest {
@@ -1759,4 +1834,23 @@ class OkHttpStalkerApiServiceTest {
             }
             .build()
     }
+
+    private fun redirectTestProfile(server: MockWebServer) = buildStalkerDeviceProfile(
+        portalUrl = server.url("/c/").toString(),
+        macAddress = "00:1A:79:12:34:56",
+        authMode = StalkerAuthMode.MAC_ONLY,
+        deviceProfile = "MAG250",
+        timezone = "UTC",
+        locale = "en",
+        httpHeadersOverride = "X-Portal-Token: portal-secret"
+    )
+
+    private fun successfulStalkerResponse(request: RecordedRequest): MockResponse =
+        when (request.requestUrl?.queryParameter("action")) {
+            "handshake" -> MockResponse().setResponseCode(200).setBody("""{"js":{"token":"token-123"}}""")
+            "get_profile", "get_main_info" -> MockResponse().setResponseCode(200)
+                .setBody("""{"js":{"id":"42","name":"Redirect Test","status":"1","auth_access":true}}""")
+            "get_modules" -> MockResponse().setResponseCode(200).setBody("""{"js":{}}""")
+            else -> MockResponse().setResponseCode(200).setBody("""{"js":{}}""")
+        }
 }

@@ -27,4 +27,52 @@ class ExternalDestinationTest {
         assertThat(ExternalDestination.fromLegacyRoute("series_detail/not-a-number"))
             .isNull()
     }
+
+    @Test
+    fun fromLegacyRoute_decodesProviderImportUriOnMinimumSdkCompatibleOverload() {
+        assertThat(
+            ExternalDestination.fromLegacyRoute(
+                "provider_setup?providerId=7&importUri=https%3A%2F%2Fexample.test%2Fplaylist%3Fx%3D1%26y%3D2"
+            )
+        ).isEqualTo(
+            ExternalDestination.ProviderSetup(
+                providerId = 7L,
+                importUri = "https://example.test/playlist?x=1&y=2"
+            )
+        )
+    }
+
+    @Test
+    fun fromLegacyRoute_decodesMovieAndSeriesReturnRoutes() {
+        assertThat(
+            ExternalDestination.fromLegacyRoute("movie_detail/42?returnRoute=search%2Fcats")
+        ).isEqualTo(ExternalDestination.MovieDetail(42L, "search/cats"))
+        assertThat(
+            ExternalDestination.fromLegacyRoute("series_detail/43?returnRoute=home%252Ftv")
+        ).isEqualTo(ExternalDestination.SeriesDetail(43L, "home%2Ftv"))
+    }
+
+    @Test
+    fun fromLegacyRoute_ignoresMalformedAndBlankQueryValuesSafely() {
+        assertThat(
+            ExternalDestination.fromLegacyRoute("movie_detail/42?returnRoute=%ZZ")
+        ).isEqualTo(ExternalDestination.MovieDetail(42L))
+        assertThat(
+            ExternalDestination.fromLegacyRoute("provider_setup?providerId=&importUri=")
+        ).isEqualTo(ExternalDestination.ProviderSetup())
+    }
+
+    @Test
+    fun fromLegacyRoute_duplicateKeysUseTheLastWellFormedValue() {
+        assertThat(
+            ExternalDestination.fromLegacyRoute(
+                "provider_setup?providerId=1&providerId=2&importUri=https%3A%2F%2Fexample.test"
+            )
+        ).isEqualTo(
+            ExternalDestination.ProviderSetup(
+                providerId = 2L,
+                importUri = "https://example.test"
+            )
+        )
+    }
 }

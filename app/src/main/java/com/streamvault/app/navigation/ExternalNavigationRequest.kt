@@ -85,10 +85,16 @@ private fun String.queryParameters(): Map<String, String> {
             val key = entry.substringBefore('=', missingDelimiterValue = "").takeIf { it.isNotBlank() }
                 ?: return@mapNotNull null
             val rawValue = entry.substringAfter('=', missingDelimiterValue = "")
-            key to URLDecoder.decode(rawValue, StandardCharsets.UTF_8)
+            val decoded = rawValue.decodeUrlComponentOrNull() ?: return@mapNotNull null
+            key to decoded
         }
         .toMap()
 }
+
+private fun String.decodeUrlComponentOrNull(): String? = runCatching {
+    // The charset-name overload is available on the application's minimum SDK.
+    URLDecoder.decode(this, StandardCharsets.UTF_8.name())
+}.getOrNull()
 
 sealed interface ExternalNavigationRequest {
     data class Search(val query: String) : ExternalNavigationRequest

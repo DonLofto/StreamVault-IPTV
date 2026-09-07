@@ -143,9 +143,6 @@ class PlayerViewModel @Inject constructor(
     private val _isCatchUpPlayback = MutableStateFlow(false)
     val isCatchUpPlayback: StateFlow<Boolean> = _isCatchUpPlayback.asStateFlow()
 
-    internal val showZapOverlayFlow = MutableStateFlow(false)
-    val showZapOverlay: StateFlow<Boolean> = showZapOverlayFlow.asStateFlow()
-    
     private val _currentProgram = MutableStateFlow<Program?>(null)
     val currentProgram: StateFlow<Program?> = _currentProgram.asStateFlow()
 
@@ -245,8 +242,6 @@ class PlayerViewModel @Inject constructor(
     val sleepTimerExitEvent: StateFlow<Int> = _sleepTimerExitEvent.asStateFlow()
     val remoteShortcutPreferences = preferencesRepository.remoteShortcutPreferences
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), com.streamvault.domain.model.RemoteShortcutPreferences())
-    private val _playerPreferencesUiState = MutableStateFlow(PlayerPreferencesUiState())
-    val playerPreferencesUiState: StateFlow<PlayerPreferencesUiState> = _playerPreferencesUiState.asStateFlow()
     private val _externalPlaybackUrl = MutableStateFlow("")
     val externalPlaybackUrl: StateFlow<String> = _externalPlaybackUrl.asStateFlow()
 
@@ -355,7 +350,6 @@ class PlayerViewModel @Inject constructor(
     internal var tokenRenewalJob: Job? = null
     internal var stopPlaybackTimerJob: Job? = null
     internal var idleStandbyTimerJob: Job? = null
-    internal var zapOverlayJob: Job? = null
     internal var aspectRatioJob: Job? = null
     internal var zapBufferWatchdogJob: Job? = null
     internal var autoPlayCountdownJob: Job? = null
@@ -688,13 +682,6 @@ class PlayerViewModel @Inject constructor(
         }
         viewModelScope.launch {
             activePlayerEngineFlow.flatMapLatest { it.timeshiftState }.collect(::applyTimeshiftState)
-        }
-        viewModelScope.launch {
-            preferencesRepository.playerExternalPlaybackMode.collect { mode ->
-                _playerPreferencesUiState.value = PlayerPreferencesUiState(
-                    externalPlaybackMode = mode
-                )
-            }
         }
         viewModelScope.launch {
             preferencesRepository.playerAudioDecoderMode
