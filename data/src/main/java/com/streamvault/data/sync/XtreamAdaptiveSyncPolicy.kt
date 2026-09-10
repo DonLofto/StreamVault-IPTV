@@ -16,7 +16,11 @@ internal class XtreamAdaptiveSyncPolicy {
 
     enum class Stage(val timeoutMs: Long?) {
         LIGHTWEIGHT(15_000L),
-        CATEGORY(35_000L),
+        // Tightened from 35s: a stalled category request now fails over to the buffered
+        // legacy decode (same request) or a retry sooner, bounding worst-case stall time.
+        // With only 25s the provider-health policy still throttles repeat failures, so
+        // a slow-but-healthy server is not hammered.
+        CATEGORY(25_000L),
         HEAVY(null)
     }
 

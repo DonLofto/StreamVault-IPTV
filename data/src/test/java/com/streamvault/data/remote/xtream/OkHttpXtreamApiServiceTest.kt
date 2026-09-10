@@ -3,6 +3,7 @@ package com.streamvault.data.remote.xtream
 import com.google.common.truth.Truth.assertThat
 import com.streamvault.data.remote.NetworkTimeoutConfig
 import com.streamvault.data.remote.http.HttpRequestProfile
+import com.streamvault.data.remote.dto.XtreamLiveStreamRow
 import com.streamvault.data.remote.dto.XtreamSeriesInfoResponse
 import java.io.IOException
 import java.net.SocketTimeoutException
@@ -263,6 +264,110 @@ class OkHttpXtreamApiServiceTest {
         assertThat(response.episodes.keys).containsExactly("1")
         assertThat(response.episodes["1"]).hasSize(1)
         assertThat(response.episodes["1"]?.first()?.title).isEqualTo("Pilot")
+    }
+
+    @Test
+    fun `loadLiveCategory returns thin result with a single request`() = runTest {
+        val requestCount = AtomicInteger(0)
+        val service = OkHttpXtreamApiService(
+            client = clientReturningCounting(
+                requestCount = requestCount,
+                statusCode = 200,
+                body = """
+                    [{"num":1,"name":"BBC One","stream_id":1001,"stream_icon":null}]
+                """.trimIndent()
+            ),
+            json = json
+        )
+        val rows = mutableListOf<XtreamLiveStreamRow>()
+        val result = service.loadLiveCategory(
+            endpoint = "https://example.test/player_api.php?action=get_live_streams&category_id=1",
+            maxBufferBytes = 1024 * 1024
+        ) { row ->
+            rows += row
+        }
+
+        assertThat(result).isInstanceOf(LiveCategoryLoad.Thin::class.java)
+        assertThat(result.rawCount).isEqualTo(1)
+        assertThat(rows).hasSize(1)
+        assertThat(rows.single().streamId).isEqualTo(1001L)
+        assertThat(requestCount.get()).isEqualTo(1)
+    }
+
+    @Test
+    fun `loadLiveCategory does not re-request when thin decode fails but body fits the buffer`() = runTest {
+        val requestCount = AtomicInteger(0)
+        // Valid thin row followed by a `null` element: the thin decoder emits the first
+        // row then throws, and the legacy decoder also rejects the same bytes — but the
+        // key guarantee is that the whole body is captured and re-decoded locally with
+        // NO second HTTP request.
+        val service = OkHttpXtreamApiService(
+            client = clientReturningCounting(
+                requestCount = requestCount,
+                statusCode = 200,
+                body = """
+                    [{"num":1,"name":"BBC One","stream_id":1001},null]
+                """.trimIndent()
+            ),
+            json = json
+        )
+
+        val failure = runCatching {
+            service.loadLiveCategory(
+                endpoint = "https://example.test/player_api.php?action=get_live_streams&category_id=1",
+                maxBufferBytes = 1024 * 1024
+            ) { }
+        }.exceptionOrNull()
+
+        assertThat(failure).isInstanceOf(XtreamParsingException::class.java)
+        assertThat(requestCount.get()).isEqualTo(1)
+    }
+
+    @Test
+    fun `loadLiveCategory re-requests legacy when the body exceeds the buffer cap`() = runTest {
+        val requestCount = AtomicInteger(0)
+        // Body is larger than the tiny buffer cap: after the thin decode fails, the
+        // previous behavior is preserved — a legacy re-request happens.
+        val body = """
+            [{"num":1,"name":"Large Channel","stream_id":9001,"stream_icon":"https://example.test/${"x".repeat(40)}"},null]
+        """.trimIndent()
+        val service = OkHttpXtreamApiService(
+            client = clientReturningCounting(
+                requestCount = requestCount,
+                statusCode = 200,
+                body = body
+            ),
+            json = json
+        )
+
+        val failure = runCatching {
+            service.loadLiveCategory(
+                endpoint = "https://example.test/player_api.php?action=get_live_streams&category_id=1",
+                maxBufferBytes = 64
+            ) { }
+        }.exceptionOrNull()
+
+        assertThat(failure).isInstanceOf(XtreamParsingException::class.java)
+        assertThat(requestCount.get()).isEqualTo(2)
+    }
+
+    private fun clientReturningCounting(
+        requestCount: AtomicInteger,
+        statusCode: Int,
+        body: String
+    ): OkHttpClient {
+        return OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                requestCount.incrementAndGet()
+                Response.Builder()
+                    .request(Request.Builder().url(chain.request().url).build())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(statusCode)
+                    .message("test")
+                    .body(body.toResponseBody("application/json".toMediaType()))
+                    .build()
+            }
+            .build()
     }
 
     private fun clientReturning(statusCode: Int, body: String): OkHttpClient {

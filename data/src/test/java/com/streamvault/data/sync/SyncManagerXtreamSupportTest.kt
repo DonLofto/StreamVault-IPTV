@@ -37,7 +37,7 @@ class SyncManagerXtreamSupportTest {
         }.exceptionOrNull()
 
         assertThat(failure).isInstanceOf(IOException::class.java)
-        assertThat(failure).hasMessageThat().contains("35 seconds")
+        assertThat(failure).hasMessageThat().contains("25 seconds")
         assertThat(
             adaptiveSyncPolicy.concurrencyFor(
                 providerId = providerId,

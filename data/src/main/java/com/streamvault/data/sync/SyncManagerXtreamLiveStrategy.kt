@@ -21,6 +21,12 @@ import kotlin.system.measureTimeMillis
 
 private const val XTREAM_LIVE_STRATEGY_TAG = "SyncManager"
 
+/** How many completed live categories between mid-sync progress commits (see P4). */
+private const val LIVE_PROGRESS_COMMIT_CATEGORY_INTERVAL = 15
+
+/** How many accepted live channels between mid-sync progress commits in full-stream mode (see P4). */
+private const val LIVE_PROGRESS_COMMIT_CHANNEL_INTERVAL = 500
+
 private enum class XtreamLiveDecodeMode {
     THIN_WITH_LEGACY_FALLBACK,
     LEGACY_ONLY
@@ -239,6 +245,7 @@ internal class SyncManagerXtreamLiveStrategy(
         var flushCount = 0
         var mappingElapsedMs = 0L
         var stagingElapsedMs = 0L
+        var lastProgressCommitChannels = 0
 
         fun abortIfLowMemory() {
             if (isCurrentlyLowOnMemory()) {
@@ -282,6 +289,24 @@ internal class SyncManagerXtreamLiveStrategy(
             acceptedCount += staged.acceptedCount
             flushCount++
             rawBatch.clear()
+            // P4 — periodic mid-sync commit for the full-stream mode: every N accepted
+            // channels the staged rows so far are upserted into the live tables so long
+            // full-catalog downloads remain browsable instead of one atomic swap at the end.
+            if (acceptedCount - lastProgressCommitChannels >= LIVE_PROGRESS_COMMIT_CHANNEL_INTERVAL) {
+                lastProgressCommitChannels = acceptedCount
+                try {
+                    syncCatalogStore.commitStagedLiveCatalogProgress(
+                        providerId = provider.id,
+                        sessionId = stagedSessionId!!,
+                        categories = fallbackCollector.entities().takeIf { it.isNotEmpty() }
+                    )
+                } catch (error: Exception) {
+                    Log.w(
+                        XTREAM_LIVE_STRATEGY_TAG,
+                        "Live full-catalog progress commit failed for provider ${provider.id}: ${sanitizeThrowableMessage(error)}"
+                    )
+                }
+            }
             // D10 — mode HIGH (full catalog) : pas de count par categorie disponible,
             // on emet en indetermine (`total = 0`) une fois par flush de batch (cadence
             // <= 1/s en pratique, jamais par item). Le label reste vide car aucune
@@ -414,6 +439,7 @@ internal class SyncManagerXtreamLiveStrategy(
         val stageMutex = Mutex()
         var stagedSessionId: Long? = null
         var stagedAcceptedCount = 0
+        var lastProgressCommitAt = 0
 
         suspend fun stageMappedBatch(channels: List<Channel>) {
             if (channels.isEmpty()) return
@@ -427,6 +453,28 @@ internal class SyncManagerXtreamLiveStrategy(
                 )
                 stagedSessionId = staged.sessionId
                 stagedAcceptedCount += staged.acceptedCount
+            }
+        }
+
+        // P4 — periodic mid-sync commit: every N completed categories the staged rows so
+        // far are upserted into the live tables (without stale pruning and without
+        // clearing the session), so long index runs become browsable and progress is
+        // visible instead of one atomic swap at the very end.
+        suspend fun commitLiveProgressIfDue(provider: Provider, completed: Int, currentLabel: String) {
+            if (completed - lastProgressCommitAt < LIVE_PROGRESS_COMMIT_CATEGORY_INTERVAL) return
+            lastProgressCommitAt = completed
+            val sessionId = stagedSessionId ?: return
+            try {
+                syncCatalogStore.commitStagedLiveCatalogProgress(
+                    providerId = provider.id,
+                    sessionId = sessionId,
+                    categories = fallbackCollector.entities().takeIf { it.isNotEmpty() }
+                )
+            } catch (error: Exception) {
+                Log.w(
+                    XTREAM_LIVE_STRATEGY_TAG,
+                    "Live catalog progress commit failed for provider ${provider.id} at category '$currentLabel': ${sanitizeThrowableMessage(error)}"
+                )
             }
         }
 
@@ -464,6 +512,7 @@ internal class SyncManagerXtreamLiveStrategy(
                 // `stagedAcceptedCount` est mis a jour de maniere thread-safe sous le
                 // `stageMutex` (cf `stageMappedBatch`), la lecture ici est best-effort
                 // (snapshot UX, pas une metrique business).
+                commitLiveProgressIfDue(provider, completed, currentLabel)
                 syncProgressBus.emit(
                     SyncProgress(
                         section = Section.LIVE,

@@ -196,6 +196,24 @@ internal class SyncCatalogStore(
     }
 
     /**
+     * Mid-sync progress commit for a long category-by-category live import.
+     *
+     * Identical upsert-only semantics to [applyStagedLiveCatalogUpsertOnly], but it does
+     * NOT clear the staging session: later category batches keep landing under the same
+     * [sessionId], and the final [applyStagedLiveCatalog] still performs the authoritative
+     * swap (including stale-row pruning) when the section completes. Running this every N
+     * completed categories makes partial results browsable and the UI progress meaningful
+     * instead of showing nothing until the whole section has been fetched.
+     */
+    suspend fun commitStagedLiveCatalogProgress(providerId: Long, sessionId: Long, categories: List<CategoryEntity>?) {
+        transactionRunner.inTransaction {
+            categories?.let { stageCategories(providerId, sessionId, it) }
+            categories?.let { applyCategories(providerId, sessionId, "LIVE", pruneStale = false) }
+            upsertChannels(providerId, sessionId)
+        }
+    }
+
+    /**
      * Staged movie-catalog commit that updates and inserts without deleting stale rows.
      * Use when the staged session represents a partial (subset) of categories/pages.
      */

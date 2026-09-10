@@ -28,6 +28,7 @@ import org.mockito.kotlin.doAnswer
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
+import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 
@@ -148,6 +149,27 @@ class SyncCatalogStoreTest {
         assertThat(runner.calls).isEqualTo(1)
         verify(catalogSyncDao).updateChangedChannelsFromStage(eq(7L), eq(55L))
         verify(catalogSyncDao).deleteStaleChannelsForStage(eq(7L), eq(55L))
+    }
+
+    @Test
+    fun `commitStagedLiveCatalogProgress upserts without clearing the staging session`() = runTest {
+        val runner = TrackingTransactionRunner()
+        val providerId = 7L
+        val sessionId = 55L
+        val store = store(transactionRunner = runner)
+
+        // Two progress commits on the same session: both must run inside a transaction,
+        // upsert-only (no stale deletion) and must NOT clear the staged rows that later
+        // category batches still rely on.
+        store.commitStagedLiveCatalogProgress(providerId, sessionId, categories = null)
+        store.commitStagedLiveCatalogProgress(providerId, sessionId, categories = null)
+
+        assertThat(runner.calls).isEqualTo(2)
+        verify(catalogSyncDao, times(2)).updateChangedChannelsFromStage(eq(providerId), eq(sessionId))
+        verify(catalogSyncDao, times(2)).insertMissingChannelsFromStage(eq(providerId), eq(sessionId))
+        verify(catalogSyncDao, never()).deleteStaleChannelsForStage(any(), any())
+        verify(catalogSyncDao, never()).clearChannelStages(any(), any())
+        verify(catalogSyncDao, never()).clearCategoryStages(any(), any())
     }
 
     @Test

@@ -262,9 +262,3 @@ dependencies {
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.espresso.core)
 }
-
-tasks.configureEach {
-    if (name.startsWith("hiltJavaCompile")) {
-        enabled = false
-    }
-}

@@ -5,6 +5,7 @@ import com.streamvault.data.remote.dto.XtreamCategory
 import com.streamvault.data.remote.dto.XtreamLiveStreamRow
 import com.streamvault.data.remote.dto.XtreamSeriesItem
 import com.streamvault.data.remote.dto.XtreamStream
+import com.streamvault.data.remote.xtream.LiveCategoryLoad
 import com.streamvault.data.remote.xtream.OkHttpXtreamApiService
 import com.streamvault.data.remote.xtream.XtreamApiService
 import com.streamvault.data.remote.xtream.XtreamProvider
@@ -37,69 +38,53 @@ internal class SyncManagerXtreamFetcher(
             action = "get_live_streams",
             extraQueryParams = mapOf("category_id" to category.categoryId)
         )
-        var mappedChannels: List<Channel> = emptyList()
+        val batchSize = stageBatchSize?.takeIf { it > 0 }
+        val mappedChannels = ArrayList<Channel>()
+        val rawBatch = ArrayList<XtreamLiveStreamRow>(batchSize ?: 256)
         var rawCount = 0
         var categoryFailure: Throwable? = null
-        val streamingStageBatchSize = stageBatchSize?.takeIf { it > 0 }
 
         suspend fun emitMappedChannels(channels: List<Channel>) {
             if (channels.isEmpty()) return
-            onMappedBatch?.invoke(channels)
-            if (onMappedBatch == null) {
-                mappedChannels = mappedChannels + channels
+            if (onMappedBatch != null) {
+                onMappedBatch(channels)
+            } else {
+                mappedChannels += channels
             }
         }
 
-        suspend fun streamThinRowsInBatches(): Pair<Int, List<Channel>> {
-            val batchSize = streamingStageBatchSize
-            if (batchSize == null || onMappedBatch == null) {
-                val rows = ArrayList<XtreamLiveStreamRow>()
-                val streamedCount = xtreamCatalogHttpService.streamLiveStreamRows(endpoint) { row -> rows += row }
-                return streamedCount to api.mapLiveStreamRowsSequence(rows.asSequence()).toList()
-            }
-
-            val rawBatch = ArrayList<XtreamLiveStreamRow>(batchSize)
-            var streamedCount = 0
-
-            suspend fun flushRawBatch() {
-                if (rawBatch.isEmpty()) return
-                emitMappedChannels(api.mapLiveStreamRowsSequence(rawBatch.asSequence()).toList())
-                rawBatch.clear()
-            }
-
-            xtreamCatalogHttpService.streamLiveStreamRows(endpoint) { row ->
-                rawBatch += row
-                streamedCount++
-                if (rawBatch.size >= batchSize) {
-                    flushRawBatch()
-                }
-            }
-            flushRawBatch()
-            return streamedCount to emptyList()
+        suspend fun flushRawBatch() {
+            if (rawBatch.isEmpty()) return
+            emitMappedChannels(api.mapLiveStreamRowsSequence(rawBatch.asSequence()).toList())
+            rawBatch.clear()
         }
 
         val elapsedMs = measureTimeMillis {
             when (val attempt = xtreamSupport.attemptNonCancellation {
                 xtreamSupport.retryXtreamCatalogTransient(provider.id) {
                     xtreamSupport.executeXtreamRequest(provider.id, XtreamAdaptiveSyncPolicy.Stage.CATEGORY) {
-                        val thinResult = runCatching {
-                            streamThinRowsInBatches()
-                        }
-                        val thinCount = thinResult.getOrNull()?.first ?: 0
-                        val thinChannels = thinResult.getOrNull()?.second.orEmpty()
-                        if (thinResult.isSuccess && (thinCount == 0 || thinChannels.isNotEmpty() || onMappedBatch != null)) {
-                            rawCount = thinCount
-                            mappedChannels = thinChannels
-                        } else {
-                            thinResult.exceptionOrNull()?.let { error ->
-                                Log.w(
-                                    XTREAM_FETCHER_TAG,
-                                    "Xtream live category '${category.categoryName}' thin decode failed; retrying legacy decode: ${sanitizeThrowableMessage(error)}"
-                                )
+                        // Single HTTP request: thin rows are streamed to the batcher and, on
+                        // thin decode failure, the same captured body is re-decoded with the
+                        // legacy DTO — no second request for payloads within the buffer cap.
+                        when (val load = xtreamCatalogHttpService.loadLiveCategory(
+                            endpoint = endpoint,
+                            onThinRow = { row ->
+                                rawBatch += row
+                                if (batchSize != null && rawBatch.size >= batchSize) {
+                                    flushRawBatch()
+                                }
                             }
-                            val legacyStreams = xtreamCatalogApiService.getLiveStreams(endpoint)
-                            rawCount = legacyStreams.size
-                            emitMappedChannels(api.mapLiveStreamsResponse(legacyStreams))
+                        )) {
+                            is LiveCategoryLoad.Thin -> {
+                                rawCount = load.rawCount
+                                flushRawBatch()
+                            }
+                            is LiveCategoryLoad.Legacy -> {
+                                rawCount = load.rawCount
+                                // Discard any channels accumulated from a partial thin decode.
+                                mappedChannels.clear()
+                                emitMappedChannels(api.mapLiveStreamsResponse(load.streams))
+                            }
                         }
                     }
                 }

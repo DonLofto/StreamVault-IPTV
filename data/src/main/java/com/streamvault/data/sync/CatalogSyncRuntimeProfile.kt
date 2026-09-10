@@ -77,7 +77,13 @@ internal data class CatalogSyncRuntimeProfile(
                 DeviceSyncTier.LOW -> CatalogSyncRuntimeProfile(
                     tier = tier,
                     stageBatchSize = LOW_STAGE_BATCH_SIZE,
-                    maxCategoryConcurrency = 1,
+                    // LOW devices (e.g. Fire TV Stick, 192MB heap) now fetch up to 2 live
+                    // categories concurrently. Measured on-device: sequential category
+                    // fetches dominated index wall-time (~2.7s/category), while the stick
+                    // had CPU headroom (load ~6.5 sustained, 194% idle). 2 concurrent
+                    // requests keep peak in-flight JSON payloads modest thanks to the
+                    // buffered single-request category loader (16MB cap per category).
+                    maxCategoryConcurrency = 2,
                     preferSegmentedLiveOnboarding = false,
                     deferBackgroundWorkOnLowMemory = true,
                     snapshot = snapshot

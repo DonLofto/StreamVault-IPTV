@@ -165,7 +165,7 @@ class XtreamLiveSyncPolicyTest {
             DeviceSyncTier.HIGH -> 500
         },
         maxCategoryConcurrency = when (tier) {
-            DeviceSyncTier.LOW -> 1
+            DeviceSyncTier.LOW -> 2
             DeviceSyncTier.MID -> 2
             DeviceSyncTier.HIGH -> Int.MAX_VALUE
         },

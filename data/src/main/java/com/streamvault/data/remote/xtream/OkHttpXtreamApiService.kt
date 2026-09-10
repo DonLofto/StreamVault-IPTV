@@ -20,6 +20,8 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.io.PushbackInputStream
+import java.io.ByteArrayInputStream
+import java.io.SequenceInputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -40,6 +42,24 @@ import java.util.concurrent.TimeUnit.SECONDS
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+/**
+ * Result of a single-request live-category load.
+ *
+ * The category payload is captured once in memory (up to a caller-defined cap); if the
+ * "thin" streaming row decode fails, the legacy decoder re-parses the *same* captured
+ * bytes instead of issuing a second HTTP request. [Legacy] carries the full
+ * [XtreamStream] list so callers can map with the legacy response mapper.
+ */
+sealed class LiveCategoryLoad {
+    abstract val rawCount: Int
+
+    /** Thin rows were decoded and delivered through the [loadLiveCategory] callback. */
+    data class Thin(override val rawCount: Int) : LiveCategoryLoad()
+
+    /** Thin decode failed and the captured body was re-decoded with the legacy DTO. */
+    data class Legacy(override val rawCount: Int, val streams: List<XtreamStream>) : LiveCategoryLoad()
+}
+
 @OptIn(ExperimentalSerializationApi::class)
 class OkHttpXtreamApiService(
     private val client: OkHttpClient,
@@ -56,6 +76,15 @@ class OkHttpXtreamApiService(
         const val MAX_FULL_SERIES_CATALOG_BYTES = 100L * 1024L * 1024L
         const val MAX_PARTIAL_CATALOG_BYTES = 40L * 1024L * 1024L
         const val MAX_EPG_BYTES = 12L * 1024L * 1024L
+
+        /**
+         * In-memory cap for a single category payload when the thin decode may need a
+         * legacy re-decode of the same body. 16MB covers every observed category on the
+         * target provider (largest ~8MB) while keeping two concurrent category loads
+         * (LOW tier concurrency = 2) within the 192MB heap of Fire TV Sticks. Payloads
+         * larger than this keep the previous streaming path with a legacy re-request.
+         */
+        const val MAX_BUFFERED_CATEGORY_BODY_BYTES = 16L * 1024L * 1024L
     }
 
     private enum class RequestProfile {
@@ -393,6 +422,261 @@ class OkHttpXtreamApiService(
                 }
             }
         })
+    }
+
+    /**
+     * Single-request live-category loader.
+     *
+     * Fetches the category payload once. The body is captured into an in-memory buffer
+     * (up to [maxBufferBytes]) while it is streamed through the thin row decoder, so
+     * that when the thin decode fails the legacy decoder can re-parse the exact same
+     * bytes — no second HTTP request is needed for the common malformed/mismatched
+     * payload case. Only payloads larger than the buffer cap fall back to the previous
+     * behavior (thin decode, then a legacy re-request).
+     */
+    suspend fun loadLiveCategory(
+        endpoint: String,
+        requestProfile: HttpRequestProfile = HttpRequestProfile(),
+        maxBufferBytes: Long = MAX_BUFFERED_CATEGORY_BODY_BYTES,
+        onThinRow: suspend (XtreamLiveStreamRow) -> Unit
+    ): LiveCategoryLoad = withContext(Dispatchers.IO) {
+        val descriptor = describeEndpoint(endpoint)
+        val effectiveProfile = requestProfileFor(descriptor, RequestProfile.HEAVY_CATALOG)
+        val effectiveRequestProfile = requestProfile.mergedWithDefaults(defaultRequestProfile)
+        val request = Request.Builder()
+            .url(endpoint)
+            .get()
+            .build()
+            .withRequestProfile(effectiveRequestProfile)
+        try {
+            val call = clientFor(effectiveProfile).newCall(request)
+            executeCancellable(call).use { response ->
+                if (!response.isSuccessful) {
+                    val message = "HTTP ${response.code}"
+                    Log.w(
+                        TAG,
+                        "Xtream live category request failed for ${descriptor.hint} (${response.request.safeRequestIdentitySummary(effectiveRequestProfile)}): $message"
+                    )
+                    when (response.code) {
+                        401 -> throw XtreamAuthenticationException(response.code, message)
+                        403 -> {
+                            if (descriptor.action.isNullOrBlank()) {
+                                throw XtreamAuthenticationException(response.code, message)
+                            }
+                            throw XtreamRequestException(response.code, message)
+                        }
+                        in 500..599, 429 -> throw XtreamNetworkException(message)
+                        else -> throw XtreamRequestException(response.code, message)
+                    }
+                }
+                val body = response.body
+                    ?: throw XtreamParsingException("Empty response body from ${descriptor.hint}")
+                val effectiveMaxBytes = responseBudgetFor(descriptor)?.plus(RESPONSE_BUDGET_HEADROOM_BYTES)
+                val announcedLength = body.contentLength()
+                if (effectiveMaxBytes != null && announcedLength > effectiveMaxBytes) {
+                    throw XtreamResponseTooLargeException(
+                        hint = descriptor.hint,
+                        observedBytes = announcedLength,
+                        maxAllowedBytes = effectiveMaxBytes
+                    )
+                }
+                val charset = body.contentType()?.charset(Charsets.UTF_8) ?: Charsets.UTF_8
+                val contentType = response.header("Content-Type")
+
+                // Consume the bounded body stream: read the preview, then replay it ahead
+                // of the remainder so the capture sees the exact original bytes in order.
+                val bounded = BoundedInputStream(
+                    delegate = body.byteStream(),
+                    descriptor = descriptor,
+                    maxAllowedBytes = effectiveMaxBytes
+                )
+                val previewBytes = readPreviewBytes(bounded)
+                if (previewBytes.isEmpty()) {
+                    throw XtreamParsingException("Empty response body from ${descriptor.hint}")
+                }
+                val preview = previewBytes.toString(charset)
+                inspectResponseShape(
+                    body = preview,
+                    contentType = contentType,
+                    descriptor = descriptor
+                )?.let { throw it }
+                val combined = SequenceInputStream(
+                    ByteArrayInputStream(previewBytes),
+                    bounded
+                )
+                val capture = CaptureInputStream(combined, maxBytes = maxBufferBytes.toInt())
+
+                val thinResult = runCatching {
+                    decodeThinLiveRows(
+                        input = capture,
+                        charset = charset,
+                        preview = preview,
+                        descriptor = descriptor,
+                        onRow = onThinRow
+                    )
+                }
+                if (thinResult.isSuccess) {
+                    return@withContext LiveCategoryLoad.Thin(thinResult.getOrThrow())
+                }
+                if (!capture.overflowed) {
+                    // Thin decode failed but the whole body fits in the buffer: drain the
+                    // remainder, then re-decode the same bytes with the legacy DTO.
+                    val drainBuffer = ByteArray(8192)
+                    while (capture.read(drainBuffer) != -1) {
+                        // Drain to complete the capture.
+                    }
+                    if (capture.overflowed) {
+                        // The remaining bytes exceeded the cap while draining; fall back
+                        // to a legacy re-request (giant malformed payload).
+                        val legacyStreams = getLegacyStreamsForOverflow(
+                            endpoint = endpoint,
+                            requestProfile = requestProfile,
+                            descriptor = descriptor
+                        )
+                        return@withContext LiveCategoryLoad.Legacy(legacyStreams.size, legacyStreams)
+                    }
+                    val streams = decodeLegacyLiveStreams(
+                        input = ByteArrayInputStream(capture.capturedBytes),
+                        preview = preview,
+                        descriptor = descriptor
+                    )
+                    return@withContext LiveCategoryLoad.Legacy(streams.size, streams)
+                }
+                // Payload exceeded the buffer cap; preserve the previous fallback: re-request
+                // with the legacy decoder.
+                val legacyStreams = getLegacyStreamsForOverflow(
+                    endpoint = endpoint,
+                    requestProfile = requestProfile,
+                    descriptor = descriptor
+                )
+                return@withContext LiveCategoryLoad.Legacy(legacyStreams.size, legacyStreams)
+            }
+        } catch (e: XtreamApiException) {
+            throw e
+        } catch (e: IOException) {
+            Log.w(
+                TAG,
+                "Xtream live category network failure for ${descriptor.hint} (${request.safeRequestIdentitySummary(effectiveRequestProfile)}): ${XtreamUrlFactory.sanitizeLogMessage(e.message ?: "Network request failed")}"
+            )
+            throw XtreamNetworkException(XtreamUrlFactory.sanitizeLogMessage(e.message ?: "Network request failed"), e)
+        }
+    }
+
+    private suspend fun getLegacyStreamsForOverflow(
+        endpoint: String,
+        requestProfile: HttpRequestProfile,
+        descriptor: EndpointDescriptor
+    ): List<XtreamStream> {
+        Log.w(
+            TAG,
+            "Xtream live category payload for ${descriptor.hint} exceeded the in-memory buffer; falling back to a legacy re-request."
+        )
+        return get(endpoint, RequestProfile.HEAVY_CATALOG, requestProfile)
+    }
+
+    private suspend fun decodeThinLiveRows(
+        input: InputStream,
+        charset: Charset,
+        preview: String,
+        descriptor: EndpointDescriptor,
+        onRow: suspend (XtreamLiveStreamRow) -> Unit
+    ): Int {
+        val reader = JsonReader(InputStreamReader(input, charset))
+        reader.isLenient = true
+        return when (reader.peek()) {
+            JsonToken.BEGIN_ARRAY -> {
+                var emittedCount = 0
+                reader.beginArray()
+                while (reader.hasNext()) {
+                    val element = try {
+                        JsonParser.parseReader(reader)
+                    } catch (e: RuntimeException) {
+                        throw XtreamParsingException(
+                            "Malformed JSON from ${descriptor.hint}${sanitizedPreview(preview)?.let { " (preview=$it)" } ?: ""}",
+                            e
+                        )
+                    }
+                    val row = try {
+                        json.decodeFromString(XtreamLiveStreamRow.serializer(), element.toString())
+                    } catch (e: SerializationException) {
+                        throw XtreamParsingException(
+                            "Malformed JSON from ${descriptor.hint}${sanitizedPreview(preview)?.let { " (preview=$it)" } ?: ""}",
+                            e
+                        )
+                    }
+                    onRow(row)
+                    emittedCount++
+                }
+                reader.endArray()
+                emittedCount
+            }
+            JsonToken.NULL -> {
+                reader.nextNull()
+                0
+            }
+            else -> throw XtreamParsingException(
+                "Expected JSON array from ${descriptor.hint}${sanitizedPreview(preview)?.let { " (preview=$it)" } ?: ""}"
+            )
+        }
+    }
+
+    private fun decodeLegacyLiveStreams(
+        input: InputStream,
+        preview: String,
+        descriptor: EndpointDescriptor
+    ): List<XtreamStream> {
+        return try {
+            json.decodeFromStream<List<XtreamStream>>(input)
+        } catch (e: SerializationException) {
+            throw XtreamParsingException(
+                "Malformed JSON from ${descriptor.hint}${sanitizedPreview(preview)?.let { " (preview=$it)" } ?: ""}",
+                e
+            )
+        }
+    }
+
+    /**
+     * Forwards the delegate stream to a bounded in-memory capture while decoding.
+     * If the delegate exceeds [maxBytes] the capture is truncated and [overflowed]
+     * becomes true (the caller then falls back to a re-request instead of re-decoding
+     * a partial body).
+     */
+    private class CaptureInputStream(
+        delegate: InputStream,
+        private val maxBytes: Int
+    ) : java.io.FilterInputStream(delegate) {
+        private val buffer = java.io.ByteArrayOutputStream()
+        private var overflowedFlag = false
+
+        val overflowed: Boolean get() = overflowedFlag
+        val capturedBytes: ByteArray get() = buffer.toByteArray()
+
+        override fun read(): Int {
+            val value = super.read()
+            if (value != -1) {
+                capture(byteArrayOf(value.toByte()), 0, 1)
+            }
+            return value
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            val n = super.read(b, off, len)
+            if (n > 0) {
+                capture(b, off, n)
+            }
+            return n
+        }
+
+        private fun capture(b: ByteArray, off: Int, n: Int) {
+            if (overflowedFlag) return
+            val remaining = maxBytes - buffer.size()
+            if (remaining >= n) {
+                buffer.write(b, off, n)
+            } else {
+                buffer.write(b, off, remaining.coerceAtLeast(0))
+                overflowedFlag = true
+            }
+        }
     }
 
     private inline fun <reified T> decodeBodyBounded(

@@ -37,7 +37,7 @@ internal class SyncManagerXtreamSupport(
         sequentialModeWarning: String,
         onProgress: ((String) -> Unit)?,
         fetch: suspend (XtreamCategory) -> TimedCategoryOutcome<T>,
-        onCategoryCompleted: ((completed: Int, total: Int, currentLabel: String) -> Unit)? = null
+        onCategoryCompleted: (suspend (completed: Int, total: Int, currentLabel: String) -> Unit)? = null
     ): CategoryExecutionPlan<T> {
         if (categories.isEmpty()) {
             return CategoryExecutionPlan(emptyList())
@@ -76,7 +76,6 @@ internal class SyncManagerXtreamSupport(
             // la derniere categorie de la fenetre (pertinent en mode sequentiel ; en mode
             // concurrent, la fenetre est petite donc le label reste representatif).
             onCategoryCompleted?.invoke(completed, categories.size, window.last().categoryName)
-
             if (!forceSequential && shouldRecoverRemainingCategoryRequests(categories.size, completed, outcomes.map { it.outcome })) {
                 forceSequential = true
                 warnings += sequentialModeWarning

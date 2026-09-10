@@ -20,7 +20,6 @@ import com.streamvault.domain.model.Result
 import com.streamvault.player.timeshift.TimeshiftDiskManager
 import dagger.Lazy
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -42,11 +41,11 @@ class StartupCoordinator @Inject constructor(
     private val watchNextManager: Lazy<WatchNextManager>,
     private val launcherRecommendationsManager: Lazy<LauncherRecommendationsManager>,
     private val tvInputChannelSyncManager: Lazy<TvInputChannelSyncManager>,
-    ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val deferredStarted = AtomicBoolean(false)
     private val updateCheckMutex = Mutex()
+
 
     fun onFirstFrameRendered(isTv: Boolean = context.isTelevisionDevice()) {
         if (!deferredStarted.compareAndSet(false, true)) return
