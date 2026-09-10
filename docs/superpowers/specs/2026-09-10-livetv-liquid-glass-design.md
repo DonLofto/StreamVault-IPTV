@@ -217,10 +217,13 @@ over the last frame), playing, error (message + Retry), locked (PIN prompt).
    Unused motion tokens are removed; dead tokens are how a design system drifts.
 2. **Draw-phase only.** Focus scale and alpha run inside `graphicsLayer`; focus changes never
    recompose. Only three files use `graphicsLayer` today.
-3. **Reserved focus pitch — a defect today.** Rows scale 1.055 while the rail uses
-   `Arrangement.spacedBy(2.dp)` in dense mode. A 64dp row grows ~3.5dp, ~1.75dp per side —
-   within 0.25dp of overlapping its neighbour. Rule: rail spacing reserves
-   `rowHeight × (scale − 1) / 2 + 4dp`.
+3. **Reserved focus pitch.** Rows scale 1.055 and the rail spaces them by
+   `channelListSpacing` — 2dp in PRO (52dp rows) and COMPACT (54dp), 8dp in COMFORTABLE (92dp).
+   A focused row grows `rowHeight × (scale − 1) / 2` per side: **1.43dp** in PRO, **1.49dp** in
+   COMPACT. That leaves only ~0.5dp of clearance, so it does **not** overlap today — but any
+   increase in row height, which this redesign introduces following Apple's guidance that lists
+   and forms get larger row height and padding, would cause it. Rule: rail spacing reserves
+   `rowHeight × (scale − 1) / 2 + 4dp` (≈5.4dp in PRO), applied *before* row heights change.
 4. **No crossfade on stream swap.** The video cuts hard and the connecting state covers the
    gap. Crossfading two live streams means double-decoding or a black frame.
 5. **Accessibility.** Honour the system animation scale: when
