@@ -109,11 +109,25 @@ class StalkerProvider(
     private var accountProfileCache: StalkerProviderProfile? = null
     private val categoryCache = mutableMapOf<ContentType, List<CategorySeed>>()
 
+    /**
+     * Position indexes over [categoryCache], rebuilt whenever the cache is populated.
+     *
+     * [resolveCategory] runs once per catalog item, and the previous `firstOrNull` scanned the whole
+     * category list for each one — O(items x categories) with two string comparisons per element.
+     * Positions (not seeds) are stored so that "first match in list order wins" is preserved exactly:
+     * the original scan did not prefer a rawId match over a name match, it preferred whichever
+     * category came first in the list.
+     */
+    private val categoryNamePositions = mutableMapOf<ContentType, Map<String, Int>>()
+    private val categoryRawIdPositions = mutableMapOf<ContentType, Map<String, Int>>()
+
     suspend fun invalidateAuthentication() {
         authMutex.withLock {
             sessionCache = null
             accountProfileCache = null
             categoryCache.clear()
+            categoryNamePositions.clear()
+            categoryRawIdPositions.clear()
             sharedAuthCache.remove(authCacheKey())
         }
     }
@@ -700,7 +714,7 @@ class StalkerProvider(
                             name = record.name
                         )
                     }
-                    categoryCache[type] = categories
+                    cacheCategories(type, categories)
                     Result.success(
                         categories.map { seed ->
                             Category(
@@ -1473,14 +1487,31 @@ class StalkerProvider(
             providerId = providerId
         )
 
+    /** Populates [categoryCache] and the position indexes in one step so they cannot drift apart. */
+    private fun cacheCategories(type: ContentType, categories: List<CategorySeed>) {
+        categoryCache[type] = categories
+        val namePositions = HashMap<String, Int>(categories.size * 2)
+        val rawIdPositions = HashMap<String, Int>(categories.size * 2)
+        categories.forEachIndexed { position, category ->
+            namePositions.putIfAbsent(category.name.lowercase(Locale.ROOT), position)
+            rawIdPositions.putIfAbsent(category.rawId, position)
+        }
+        categoryNamePositions[type] = namePositions
+        categoryRawIdPositions[type] = rawIdPositions
+    }
+
     private fun resolveCategory(type: ContentType, rawId: String?, rawName: String?): CategorySeed {
         val normalizedName = rawName?.trim().takeUnless { it.isNullOrBlank() }
         val normalizedRawId = rawId?.trim().takeUnless { it.isNullOrBlank() }
-        val cached = categoryCache[type]
-            ?.firstOrNull { category ->
-                category.rawId == normalizedRawId ||
-                    (normalizedName != null && category.name.equals(normalizedName, ignoreCase = true))
-            }
+        val rawIdPosition = normalizedRawId?.let { categoryRawIdPositions[type]?.get(it) }
+        val namePosition = normalizedName
+            ?.let { categoryNamePositions[type]?.get(it.lowercase(Locale.ROOT)) }
+        val position = when {
+            rawIdPosition == null -> namePosition
+            namePosition == null -> rawIdPosition
+            else -> minOf(rawIdPosition, namePosition)
+        }
+        val cached = position?.let { categoryCache[type]?.getOrNull(it) }
         if (cached != null) {
             return cached
         }

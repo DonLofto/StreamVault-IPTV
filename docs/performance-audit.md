@@ -252,7 +252,7 @@ Impact tiers are judged **against the AFTSSS baseline**, not against a flagship.
 - **Location:** `data/src/main/java/com/streamvault/data/remote/xtream/OkHttpXtreamApiService.kt:780` + `:788`; same shape at `:592` + `:600`
 - **Evidence:** Verified by reading; sits in the same Xtream sync pass as A1–A3, which the thread dump measured at 135–320 % CPU.
 - **Mechanism:** Gson tree parse → `element.toString()` (new `StringWriter` + `JsonWriter` + full re-emit) → kotlinx `decodeFromString` reparses that String. Three traversals plus a transient String per item. At ~500 bytes/item × 15 000 items that is ~7 MB of throwaway strings per sync plus a full object tree and ~375 000 `JsonPrimitive` wrappers.
-- **Fix:** `json.decodeFromJsonElement(deserializer, element)` — already used at `LenientJsonSerializers.kt:257`.
+- **Fix (corrected 2026-09-11):** the originally proposed `decodeFromJsonElement` **does not compile** — `JsonParser.parseReader` yields a **Gson** `JsonElement`, not a kotlinx one. The fix must remove Gson from the per-item path entirely (kotlinx `decodeFromStream` / a `JsonDecoder` over a reader), which also changes lenient-parsing behaviour. See `docs/planFix.md` A4 for the corrected approach and the tests it needs.
 
 #### A5. `XmltvParser.parseDate` throws up to 11 exceptions per call, twice per programme
 - **Location:** `data/src/main/java/com/streamvault/data/parser/XmltvParser.kt:567-616`; call sites `:146-147`, `:265-266`, `:415-416`

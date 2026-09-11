@@ -210,11 +210,32 @@ stuck-player timeout, no unintended MPEG-TS fallback, on **two** channels.
 ### A4 · Every catalog item is JSON-decoded three times
 **Location:** `data/src/main/java/com/streamvault/data/remote/xtream/OkHttpXtreamApiService.kt:780` + `:788`; same shape at `:592` + `:600`
 **Cause:** `JsonParser.parseReader` builds a Gson tree → `element.toString()` re-serialises it to a fresh `String` → `json.decodeFromString(deserializer, element.toString())` parses that String again. Three traversals plus a transient JSON String per item.
-**Change:** replace with `json.decodeFromJsonElement(deserializer, element)` at both sites. This API is already used in-repo (`LenientJsonSerializers.kt:257`), so no new dependency.
+**Change (CORRECTED 2026-09-11 — the original suggestion does not compile):** an earlier revision of
+this card proposed `json.decodeFromJsonElement(deserializer, element)`. **That is wrong**:
+`JsonParser.parseReader` returns a **Gson** `com.google.gson.JsonElement`, while
+`decodeFromJsonElement` requires a **kotlinx** `kotlinx.serialization.json.JsonElement`. The mismatch
+was confirmed by attempting it — `Argument type mismatch: actual type is 'com.google.gson.JsonElement!',
+but 'kotlinx.serialization.json.JsonElement' was expected` at both sites.
+
+The real fix must remove **Gson** from the per-item path, not just the `toString()`:
+
+1. Replace the Gson `JsonReader` framing loop with a kotlinx streaming decoder
+   (`Json.decodeFromStream` in kotlinx-serialization 1.9.0, or a `JsonDecoder` over a reader),
+   decoding `XtreamLiveStreamRow` directly from the stream.
+2. Preserve the existing failure contract: `XtreamParsingException` carrying `descriptor.hint` and the
+   sanitized preview, raised on both a JSON syntax error and a serializer error. The loop currently
+   relies on Gson's `isLenient = true`; kotlinx `Json { isLenient = true }` is the analogue but the two
+   are **not** identical, so malformed-input behaviour must be pinned by tests before switching.
+3. The same treatment applies to the generic path at `:780`/`:788`.
+
 **Files:** `OkHttpXtreamApiService.kt`
-**Test:** unit test decoding a captured fixture row asserting an identical DTO both ways; keep `XtreamParsingException` behaviour on malformed input (the surrounding `try/catch` must still fire).
-**Validate:** `Debug.getGlobalAllocCount()` deltas across one catalog sync, before/after. Expect ~7 MB fewer transient strings per 15k-channel sync.
-**Risk:** low — behaviour-preserving API swap. **Effort:** S
+**Test:** golden fixtures for (a) a well-formed array, (b) a malformed element mid-array, (c) a payload
+relying on lenient parsing — asserting identical DTOs and identical `XtreamParsingException` messages
+before and after.
+**Validate:** `Debug.getGlobalAllocCount()` deltas across one catalog sync. Expect ~7 MB fewer
+transient strings per 15k-channel sync.
+**Risk:** **med** (was "low") — rewrites a parser on the ingest path and swaps the JSON engine for that
+loop. **Effort:** M (was S)
 
 ### A5 · `XmltvParser.parseDate` throws up to 11 exceptions per call, twice per programme
 **Location:** `data/src/main/java/com/streamvault/data/parser/XmltvParser.kt:567-616`; call sites `:146-147`, `:265-266`, `:415-416`

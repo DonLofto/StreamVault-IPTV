@@ -116,22 +116,27 @@ internal class FallbackCategoryCollector(
         val resolvedCategoryId = categoryId ?: return
         val resolvedCategoryName = categoryName?.trim().takeUnless { it.isNullOrEmpty() }
             ?: "Category $resolvedCategoryId"
-        val candidate = CategoryEntity(
-            categoryId = resolvedCategoryId,
-            name = resolvedCategoryName,
-            parentId = 0,
-            type = type,
-            providerId = providerId,
-            isAdult = isAdult || AdultContentClassifier.isAdultCategoryName(resolvedCategoryName)
-        )
+        val resolvedIsAdult = isAdult || AdultContentClassifier.isAdultCategoryName(resolvedCategoryName)
+
+        // Only build the entity on first sight of a category. The previous version always
+        // constructed one and then discarded it in favour of copy() for every repeat channel
+        // (a few hundred distinct categories vs ~15k channels per sync).
+        // The dropped `isUserProtected` clause was `existing.isUserProtected || false` — the
+        // candidate never set it, so copy() preserving the existing value is equivalent.
         val existing = categories[resolvedCategoryId]
         categories[resolvedCategoryId] = if (existing == null) {
-            candidate
+            CategoryEntity(
+                categoryId = resolvedCategoryId,
+                name = resolvedCategoryName,
+                parentId = 0,
+                type = type,
+                providerId = providerId,
+                isAdult = resolvedIsAdult
+            )
         } else {
             existing.copy(
-                name = preferredCategoryName(existing.name, candidate.name, resolvedCategoryId),
-                isAdult = existing.isAdult || candidate.isAdult,
-                isUserProtected = existing.isUserProtected || candidate.isUserProtected
+                name = preferredCategoryName(existing.name, resolvedCategoryName, resolvedCategoryId),
+                isAdult = existing.isAdult || resolvedIsAdult
             )
         }
     }
