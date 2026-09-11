@@ -76,14 +76,15 @@ class EpgRowWindowCompositionTest {
     fun rowComposesOnlyTheVisibleProgrammeWindow() {
         setRow(programmes(7))
 
-        // 7 h of programmes in a 3 h viewport is 3/7 of the timeline, plus the 30 minute overscan on
-        // each side: programmes 0..2 intersect the range, and 0 is the one under the playhead.
+        // A 3 h viewport over a 7 h window is 3/7 of the timeline. With the 30 minute overscan the
+        // row must compose [windowStart - 30m, windowStart + 3h30m], which is programmes 0..3.
         assertThatCount("Programme 0", 1)
         assertThatCount("Programme 1", 1)
         assertThatCount("Programme 2", 1)
+        assertThatCount("Programme 3", 1)
 
-        // Everything beyond the visible window must not be composed at all. Without A18 these were.
-        assertThatCount("Programme 3", 0)
+        // Everything beyond that must not be composed at all. Before A18 all seven were, for every
+        // visible channel row.
         assertThatCount("Programme 4", 0)
         assertThatCount("Programme 5", 0)
         assertThatCount("Programme 6", 0)

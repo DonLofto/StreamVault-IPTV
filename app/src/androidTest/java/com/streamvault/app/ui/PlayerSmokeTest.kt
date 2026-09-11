@@ -95,6 +95,7 @@ class PlayerSmokeTest {
                     onOpenVideoTracks = {},
                     onOpenSplitScreen = {},
                     onToggleMute = {},
+                    currentChannel = null,
                     clockLabelOverride = TestFixtures.fixedClock
                 )
                 LaunchedEffect(Unit) {
@@ -143,6 +144,7 @@ class PlayerSmokeTest {
                     onOpenVideoTracks = {},
                     onOpenSplitScreen = {},
                     onToggleMute = {},
+                    currentChannel = null,
                     clockLabelOverride = TestFixtures.fixedClock
                 )
             }

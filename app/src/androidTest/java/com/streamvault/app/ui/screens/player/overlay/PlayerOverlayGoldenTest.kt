@@ -65,6 +65,7 @@ class PlayerOverlayGoldenTest {
                         onOpenVideoTracks = {},
                         onOpenSplitScreen = {},
                         onToggleMute = {},
+                        currentChannel = null,
                         clockLabelOverride = TestFixtures.fixedClock
                     )
                 }
