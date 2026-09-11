@@ -153,10 +153,14 @@ class EpgRepositoryImpl @Inject constructor(
             }
         }
 
-        return repositoryTimingReporter.measure(label = "epg.programsForChannelsSnapshot", rowCount = { entities.size }) {
-            entities
-                .map { it.toDomain().shifted(offsetMs) }
-                .groupBy { it.channelId }
+        // Room dispatches the query off-main, but the continuation resumes on the caller's
+        // dispatcher - Main for the guide-open path. Map/group ~840-1700 rows off it instead.
+        return withContext(Dispatchers.Default) {
+            repositoryTimingReporter.measure(label = "epg.programsForChannelsSnapshot", rowCount = { entities.size }) {
+                entities
+                    .map { it.toDomain().shifted(offsetMs) }
+                    .groupBy { it.channelId }
+            }
         }
     }
 
