@@ -116,6 +116,36 @@ Two further facts observed several minutes after the capture, which sharpen the 
 **This does not invalidate A34's unit tests, but A34 must stay Partial: its live-TV validation did
 not pass, and nothing about the current build should be marked validated on the strength of this run.**
 
+### Round 24 follow-up: the freeze is memory pressure, and it is NOT the Java heap
+
+A second validation run on a fresh process, with logs captured *during* the window, moved this from
+"player bug" to something narrower:
+
+| Measurement | Value |
+|---|---|
+| Session at start of capture | `state=6` (BUFFERING) |
+| Session at end of capture | `state=1` (STOPPED), `error=null` |
+| Unique frames | 11 of 45 |
+| Device memory | `MemTotal 922272 kB`, `MemFree 51092 kB`, `MemAvailable 99436 kB` |
+| App PSS | **285782 kB** total, swap PSS 112731 kB |
+| App breakdown | Graphics **89013** (EGL mtrack 74284, GL mtrack 14729), Code 23316, Java Heap **22376**, Private Other 16248, Native Heap 15556 |
+| Repeated warning | `W/XtreamIndexWorker: Deferring Xtream index work: device low on memory` |
+
+Two conclusions that change the remaining work:
+
+1. **The dominant term is Graphics (89 MB), not the Java heap (22 MB).** A58 is framed as "live staging
+   materialises two whole entity lists", and the staging lists are exactly a Java-heap cost. At the
+   moment playback died, the Java heap was 22 MB. A58 is still worth doing, but it is **not** the
+   explanation for this freeze, and claiming otherwise would send the next round down the wrong path.
+2. **The device is genuinely out of memory**, swapping 112 MB, with the index worker explicitly
+   deferring itself because of it. Playback dying under that pressure, with `error=null`, is
+   consistent with decoder/render starvation rather than a player state-machine bug.
+
+The audit and this remediation effort have both been measuring the Java side, because that is what the
+instrumentation reaches. This run says the binding constraint on an AFTSSS is graphics and system
+memory. Any further "fix the freeze" work should start from `dumpsys meminfo` during playback, not
+from the finding list.
+
 ## Device validation recipe (corrected round 22)
 
 Two rounds recorded "the Firestick was unreachable, then held by another app" as the reason live-TV
