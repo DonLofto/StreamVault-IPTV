@@ -243,10 +243,22 @@ Two conclusions, both from the device rather than from reasoning:
   write side cheaper to hook - stage merges now touch only changed rows - so the trigger overhead is
   proportional to rows actually written rather than to the table.
 
-Recommendation: **(1)**, because the measured cost is an index-only scan of the provider's channels and
-the audit's acceptance test ("not recomputed more than once per N writes") is satisfied by throttling,
-whereas (2) buys a smaller increment than its drift risk justifies. This has not been implemented
-pending that call.
+**Recommendation CORRECTED (round 42): throttling does NOT work either.** Round 39 recommended option
+(1) on the grounds that it satisfies the acceptance test. Working through the mechanics shows it does
+not. A sampled invalidation signal (${BT}sample(750)${BT}) emits once per window only when the upstream
+emitted in that window, so with sync writes roughly five seconds apart it produces one aggregate run
+per write - exactly the count it has today, plus up to 750 ms of extra latency on every update. Sampling
+at a shorter window makes it strictly worse: 400 runs over a five minute sync against today's 60.
+
+So the real choice is narrower than the card implies:
+
+- **Leave it as it is.** The query is an index-only scan of the provider's channels plus a per-row cast
+  and a DISTINCT B-tree, re-run once per sync write, off the main thread. On the measured provider that
+  is tens of milliseconds, tens of times per sync.
+- **(2) Maintain the counts incrementally.** The only option that removes the work rather than
+  rearranging it, at the cost set out above.
+
+A54 stays blocked on that call. It is not blocked on effort, and no third option survived measurement.
 
 ## A35 correction (round 37) - the round-28 objection to reordering was WRONG
 
