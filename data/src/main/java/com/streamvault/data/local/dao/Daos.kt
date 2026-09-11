@@ -483,6 +483,22 @@ abstract class ChannelDao {
     @Query("SELECT * FROM channels WHERE provider_id = :providerId")
     abstract suspend fun getByProviderSync(providerId: Long): List<ChannelEntity>
 
+    /**
+     * A58 - only the channels belonging to [categoryIds].
+     *
+     * The live ingest used to call [getByProviderSync] and filter in Kotlin to pick out the handful of
+     * channels in hidden categories, materialising the provider's entire channel table to discard
+     * almost all of it - on a path where two other full channel lists are already alive.
+     *
+     * Callers must pass a non-empty list: SQLite parses an empty IN list and evaluates it false, which
+     * happens to be the right answer here, but the sentinel keeps that from being load-bearing.
+     */
+    @Query("SELECT * FROM channels WHERE provider_id = :providerId AND category_id IN (:categoryIds)")
+    abstract suspend fun getByProviderAndCategoryIdsSync(
+        providerId: Long,
+        categoryIds: List<Long>
+    ): List<ChannelEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     abstract suspend fun insertAll(channels: List<ChannelEntity>)
 

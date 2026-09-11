@@ -5400,8 +5400,12 @@ class SyncManager @Inject constructor(
         sessionId: Long,
         hiddenLiveCategoryIds: Set<Long>
     ) {
-        val hiddenChannels = channelDao.getByProviderSync(providerId)
-            .filter { channel -> channel.categoryId != null && channel.categoryId in hiddenLiveCategoryIds }
+        // A58 - ask the database for the hidden categories instead of materialising every channel of
+        // the provider and discarding all but a handful.
+        val hiddenChannels = channelDao.getByProviderAndCategoryIdsSync(
+            providerId,
+            hiddenLiveCategoryIds.toList()
+        )
         if (hiddenChannels.isNotEmpty()) {
             syncCatalogStore.stageChannelBatch(providerId, sessionId, hiddenChannels)
         }
@@ -5435,8 +5439,12 @@ class SyncManager @Inject constructor(
 
         val hiddenCategories = categoryDao.getByProviderAndTypeSync(providerId, ContentType.LIVE.name)
             .filter { category -> category.categoryId in hiddenLiveCategoryIds }
-        val hiddenChannels = channelDao.getByProviderSync(providerId)
-            .filter { channel -> channel.categoryId != null && channel.categoryId in hiddenLiveCategoryIds }
+        // A58 - the same full-table read as mergeHiddenChannelsIntoStaging, on a path that already
+        // holds the provider's whole visible channel list.
+        val hiddenChannels = channelDao.getByProviderAndCategoryIdsSync(
+            providerId,
+            hiddenLiveCategoryIds.toList()
+        )
 
         val mergedCategories = ((visibleCategories ?: emptyList()) + hiddenCategories)
             .distinctBy { it.categoryId to it.type }

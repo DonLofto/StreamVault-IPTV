@@ -957,19 +957,23 @@ class SyncManagerTest {
                     )
                 )
             )
-            org.mockito.kotlin.whenever(channelDao.getByProviderSync(1L)).thenReturn(
-                listOf(
-                    ChannelEntity(
-                        streamId = 2002L,
-                        name = "Hidden Sports Channel",
-                        streamUrl = "xtream://1/live/2002?ext=ts",
-                        categoryId = 2L,
-                        categoryName = "Hidden Sports",
-                        providerId = 1L,
-                        number = 2
-                    )
-                )
+            val hiddenStoredChannel = ChannelEntity(
+                streamId = 2002L,
+                name = "Hidden Sports Channel",
+                streamUrl = "xtream://1/live/2002?ext=ts",
+                categoryId = 2L,
+                categoryName = "Hidden Sports",
+                providerId = 1L,
+                number = 2
             )
+            org.mockito.kotlin.whenever(channelDao.getByProviderSync(1L)).thenReturn(
+                listOf(hiddenStoredChannel)
+            )
+            // A58 - the live ingest now asks the database for the hidden categories directly rather
+            // than loading every channel and filtering in Kotlin.
+            org.mockito.kotlin.whenever(
+                channelDao.getByProviderAndCategoryIdsSync(1L, listOf(2L))
+            ).thenReturn(listOf(hiddenStoredChannel))
         }
         xtreamBackend.respond(
             action = "get_live_categories",
