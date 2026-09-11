@@ -1,5 +1,6 @@
 package com.streamvault.app.ui.screens.epg
 
+import com.streamvault.app.ui.model.archivePlaybackCapability
 import com.streamvault.app.ui.model.isArchivePlayable
 import com.streamvault.app.ui.model.guideLookupKey
 import androidx.lifecycle.ViewModel
@@ -1951,8 +1952,14 @@ class EpgViewModel @Inject constructor(
                 GuideChannelMode.ANCHORED -> programs.any { program ->
                     baseSnapshot.guideAnchorTime in program.startTime until program.endTime
                 }
-                GuideChannelMode.ARCHIVE_READY -> programs.any { program ->
-                    channel.isArchivePlayable(program, baseSnapshot.guideAnchorTime)
+                GuideChannelMode.ARCHIVE_READY -> {
+                    // Channel-level gate first. archivePlaybackCapability() allocates a data class and
+                    // is a pure function of the channel, but isArchivePlayable() was re-deriving it
+                    // per PROGRAMME - roughly 840-1680 allocations per pass over the candidate set.
+                    val capability = channel.archivePlaybackCapability()
+                    capability.canBuildReplayCandidate && programs.any { program ->
+                        channel.isArchivePlayable(program, capability, baseSnapshot.guideAnchorTime)
+                    }
                 }
             }
             matchesScheduled && matchesMode

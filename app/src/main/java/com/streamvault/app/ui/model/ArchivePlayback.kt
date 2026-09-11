@@ -79,10 +79,22 @@ fun Channel.archivePlaybackCapability(): ArchivePlaybackCapability {
 fun Channel.isArchivePlayable(
     program: Program,
     now: Long = System.currentTimeMillis()
+): Boolean = isArchivePlayable(program, archivePlaybackCapability(), now)
+
+/**
+ * Overload taking a precomputed [capability].
+ *
+ * [archivePlaybackCapability] is a pure function of the channel, but it allocates a data class, and
+ * callers that evaluate playability for EVERY programme of a channel were paying that allocation per
+ * programme instead of per channel. The guide's ARCHIVE_READY filter is the main such caller.
+ */
+fun Channel.isArchivePlayable(
+    program: Program,
+    capability: ArchivePlaybackCapability,
+    now: Long = System.currentTimeMillis()
 ): Boolean {
     if (id <= 0L || providerId <= 0L) return false
     if (program.startTime <= 0L || program.endTime <= program.startTime) return false
-    val capability = archivePlaybackCapability()
     if (!capability.canBuildReplayCandidate) return false
     if (program.hasArchive) return true
     if (!catchUpSupported || program.endTime > now) return false
