@@ -25,6 +25,16 @@ class JellyfinImageAuthInterceptor @Inject constructor(
     @Volatile
     private var cacheExpiresAtMillis: Long = 0L
 
+    /**
+     * Decrypted token per (provider id, stored password).
+     *
+     * AndroidKeystoreCredentialCrypto does KeyStore.load(null) + getKey + Cipher.init/doFinal, and
+     * the key is non-extractable so the AES-GCM op runs in the keystore daemon / TEE. That was two
+     * hardware round trips per image request for a value that cannot change between them. Cleared
+     * whenever the provider list is refreshed.
+     */
+    private val tokenCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     override fun intercept(chain: Interceptor.Chain): okhttp3.Response {
         val request = chain.request()
         if (!request.header("Authorization").isNullOrBlank()) {
@@ -33,9 +43,12 @@ class JellyfinImageAuthInterceptor @Inject constructor(
 
         val provider = jellyfinProviders().firstOrNull { candidate -> candidate.matches(request.url) }
             ?: return chain.proceed(request)
-        val accessToken = runCatching { credentialCrypto.decryptIfNeeded(provider.password) }
-            .getOrNull()
-            ?.takeIf { it.isNotBlank() }
+        val cacheKey = provider.id.toString() + '|' + provider.password
+        val accessToken = tokenCache[cacheKey]
+            ?: runCatching { credentialCrypto.decryptIfNeeded(provider.password) }
+                .getOrNull()
+                ?.takeIf { it.isNotBlank() }
+                ?.also { tokenCache[cacheKey] = it }
             ?: return chain.proceed(request)
 
         return chain.proceed(
@@ -56,6 +69,7 @@ class JellyfinImageAuthInterceptor @Inject constructor(
         val refreshed = runCatching { providerDao.getByTypeSync(ProviderType.JELLYFIN) }
             .getOrDefault(emptyList())
         cachedProviders = refreshed
+        tokenCache.clear()
         cacheExpiresAtMillis = now + CACHE_TTL_MILLIS
         return refreshed
     }
