@@ -211,11 +211,14 @@ class EpgResolutionEngine @Inject constructor(
 
             // 5. No EPG
             unresolvedCount++
-            Log.v(TAG, "Unresolved: channel=${channel.name} (id=${channel.id}), " +
-                "epgId=${channelEpgId ?: "null"}, " +
-                "normalizedName=$channelNormalizedName, " +
-                "idInAnySource=${enabledAssignments.any { channelEpgId != null && channelEpgId in (exactIdIndex[it.epgSourceId] ?: emptySet()) }}, " +
-                "nameInAnySource=${enabledAssignments.any { channelNormalizedName in (nameIndex[it.epgSourceId] ?: emptyMap()) }}")
+            // Guarded: Log.v level alone does not stop the string concat or the two any{} scans below.
+            if (Log.isLoggable(TAG, Log.VERBOSE)) {
+                Log.v(TAG, "Unresolved: channel=${channel.name} (id=${channel.id}), " +
+                    "epgId=${channelEpgId ?: "null"}, " +
+                    "normalizedName=$channelNormalizedName, " +
+                    "idInAnySource=${enabledAssignments.any { channelEpgId != null && channelEpgId in (exactIdIndex[it.epgSourceId] ?: emptySet()) }}, " +
+                    "nameInAnySource=${enabledAssignments.any { channelNormalizedName in (nameIndex[it.epgSourceId] ?: emptyMap()) }}")
+            }
             ChannelEpgMappingEntity(
                 providerChannelId = channel.id,
                 providerId = providerId,
