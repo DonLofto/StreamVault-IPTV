@@ -3,7 +3,7 @@
 Tracks implementation of the 59 findings in `docs/performance-audit.md`.
 Plan: `docs/planFix.md`. Baseline commit: `740bd55f`.
 
-**52 done · 4 partial · 1 superseded · 2 open.** Commits marked DONE are on `master`; the working
+**53 done · 3 partial · 1 superseded · 2 open.** Commits marked DONE are on `master`; the working
 tree is clean. Verification for every DONE item was a module compile plus the relevant test suite;
 Room-validated SQL and byte-identical golden output are called out where they apply.
 
@@ -57,6 +57,7 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | A19 | `7d874cd2` | EPG grid callbacks capture stable values, not the whole uiState |
 | A4 | `76872471` + see below | Xtream decode paths stream with kotlinx; Gson removed entirely |
 | A6 / A9 | `fc72267c` | `classify` memoised; catalog reclassification made an O(1) lookup. **Device-verified: 4/16 → 1/16 samples with app code actively executing** (see below). |
+| A18 | `737f5e1d`, `29c9fb16`, `117851e0` | Guide rows compose only the programmes intersecting the visible range plus a 30 minute overscan, read through `derivedStateOf`. Verified three ways: unit tests for the range arithmetic, an A/B D-pad traversal against the parent commit, and the card's composition-count Compose test, which now runs on device |
 | A38 | `e8479530` | All 18 blocking OkHttp `execute()` sites now go through `awaitResponse()` (a local copy in `:player`, which cannot see `:data`); background-sync client bounded by `callTimeout` |
 | A27 | `f35468c6` | Xtream URL recognised once: the mapper carries the internal-LIVE flag and container extension across on the entity as transient body fields, so the staging fingerprint no longer re-parses the URL. Guard test pins carried == re-parsed. |
 | A25 | `68adb5a2`, `d3ece615`, `99cf4d26`, `47b16bb3` | `app/ui` category filter/sort moved off Main at all five audit sites (Movies, Series x2, Home, Epg) via the `@DefaultDispatcher` binding. The audit's EpgViewModel:1101 pointer is stale line drift; the real site is :1125. |
@@ -70,7 +71,7 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | **A5** | Moved to Done (`35e0364c`). Each date-format candidate now carries a **necessary** condition on the input, so shapes that provably cannot match are skipped instead of being discovered by a thrown and caught `DateTimeParseException`. The throwing parse stays authoritative and the priority order is unchanged, so a format that matched before still runs. Worst cases eliminated: ISO timestamps (five guaranteed throws) and short dates (ten). Offset-less compact timestamps still cost four, because the offset formats must precede the local ones. **Both earlier attempts are recorded below and must not be retried**: the `ParsePosition` route is closed by a stack trace. |
 | **A58** | Part 1 done (`1fb250fc`): staged channel rows are built as a `Sequence` and written in 500-row chunks, so the second whole-provider list is gone; the `List`-returning builder stays for the two fresh-session callers. Pinned by a 100k-channel test asserting chunk size, total count and ordinal contiguity. **Open:** the larger half - streaming the Xtream/M3U ingest chain itself, which is upstream of the staging boundary - is untouched. **Note:** this is explicitly *not* the fix for the live-TV freeze; round 24 measured that at a 22 MB Java heap against 89 MB of graphics and a fully consumed device swap. |
 | **A20** | Implemented (`7d2eeb27`): Stalker gets a dedicated `@StalkerClient` and the EPG client is genuinely isolated, both via `newIsolatedClient` (a plain `newBuilder()` shares Dispatcher and ConnectionPool by reference). Unit tests pin both the defect and the fix, plus configuration inheritance. **Open:** the card rates this high risk because it changes network admission, so it needs the full live-TV protocol - blocked on the same memory-pressure freeze as A34. |
-| **A18** | Implemented (`737f5e1d`): guide rows compose only the programmes intersecting the visible time range plus a 30 minute overscan, read through `derivedStateOf`, so a per-pixel scroll does not recompose the row. Item layout, marker layer and focus callbacks are untouched. Range arithmetic extracted and unit-tested (4 cases). **D-pad traversal verified by A/B** (round 31): reverting A18 to its parent and repeating the same scripted traversal on the same channel produces the identical focus pattern, so the windowing does not change focus behaviour - see the A18 focus-traversal section. **Open:** the composition-count Compose test the card asks for - the card flags grid focus as delicate (prior audit B7). **The card's LazyRow prescription does not fit this component** - see the A18 re-analysis above. |
+| **A18** | Moved to Done - see the Done table. |
 | **A34** | Implemented (`fd6b1859`): the MEMORY backend now evicts on a byte ceiling derived from the heap class (quarter of the heap, clamped to 8-48 MB) in addition to the wall-clock depth, for both progressive chunks and HLS segments. **Open:** the plan's validation is `dumpsys meminfo` across a 5-minute live session, and this is a playback/timeshift change, so it still needs the full AGENTS.md live-TV protocol (61 screenshots, 2 channels, media session `PLAYING`, `error=null`). Unit-tested only so far. |
 | **A25** | Moved to Done - see the Done table. |
 | **A38** | Moved to Done - see the Done table. |
@@ -394,7 +395,7 @@ static reading and was wrong about an API.
 
 ## Open (2)
 
-A35, A54. A5 is now Done. A34, A18, A20 and A58 moved to Partial - all four are implemented and unit-tested; A34 and
+A35, A54. A5 and A18 are now Done. A34, A20 and A58 moved to Partial - all four are implemented and unit-tested; A34 and
 A20 await the AGENTS.md live-TV protocol (which this build currently fails for memory-pressure reasons
 unrelated to either change), A18 awaits the composition-count Compose test plus a D-pad check on a TV,
 and A58 has had only its staging-boundary half done.
