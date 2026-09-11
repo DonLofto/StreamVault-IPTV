@@ -15,6 +15,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.platform.LocalContext
@@ -951,7 +952,10 @@ fun PlayerScreen(
 
         if (currentChannelRecording?.status == com.streamvault.domain.model.RecordingStatus.RECORDING) {
             val recordingPulse = rememberInfiniteTransition(label = "recordingPulse")
-            val recordingAlpha by recordingPulse.animateFloat(
+            // Held as State and read in the draw phase below. Reading it with `by` in composition
+            // invalidated the restart scope of this whole ~1370-line composable every animation
+            // frame (~60 Hz) for the entire duration of a recording.
+            val recordingAlpha = recordingPulse.animateFloat(
                 initialValue = 1f,
                 targetValue = 0.2f,
                 animationSpec = infiniteRepeatable(
@@ -972,7 +976,8 @@ fun PlayerScreen(
                 Box(
                     modifier = Modifier
                         .size(10.dp)
-                        .background(Color(0xFFFF4D4F).copy(alpha = recordingAlpha), RoundedCornerShape(999.dp))
+                        .graphicsLayer { alpha = recordingAlpha.value }
+                        .background(Color(0xFFFF4D4F), RoundedCornerShape(999.dp))
                 )
                 Text(
                     text = stringResource(R.string.settings_recording_status_recording),
