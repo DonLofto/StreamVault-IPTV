@@ -17,6 +17,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
+/** Compiled once: the previous inline literal was rebuilt for every track, twice per file. */
+private val GENERIC_TRACK_LABEL_REGEX = Regex("(?i)^track\\s*\\d+$")
+
 class PlayerTrackController(
     private val context: Context
 ) {
@@ -223,7 +226,7 @@ class PlayerTrackController(
 
         val explicitLabel = format.label
             ?.trim()
-            ?.takeIf { it.isNotBlank() && !it.matches(Regex("(?i)^track\\s*\\d+$")) }
+            ?.takeIf { it.isNotBlank() && !it.matches(GENERIC_TRACK_LABEL_REGEX) }
         if (explicitLabel != null) return explicitLabel
 
         val parts = mutableListOf<String>()
@@ -259,7 +262,7 @@ class PlayerTrackController(
         val parts = mutableListOf<String>()
         val explicitLabel = format.label
             ?.trim()
-            ?.takeIf { it.isNotBlank() && !it.matches(Regex("(?i)^track\\s*\\d+$")) }
+            ?.takeIf { it.isNotBlank() && !it.matches(GENERIC_TRACK_LABEL_REGEX) }
         val resolutionLabel = when {
             format.height > 0 -> "${format.height}p"
             format.width > 0 && format.height > 0 -> "${format.width}x${format.height}"

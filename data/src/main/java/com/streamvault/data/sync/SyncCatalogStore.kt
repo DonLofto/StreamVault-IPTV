@@ -25,6 +25,27 @@ import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
 
+private val WHITESPACE_REGEX = Regex("\\s+")
+
+private val HEX_DIGITS = "0123456789abcdef".toCharArray()
+
+/**
+ * Locale-independent lowercase hex.
+ *
+ * Replaces `"%02x".format(...)`, which allocated a `java.util.Formatter` and re-parsed the format
+ * string for *every byte* of every digest — 32 per catalog row — and rendered digits from the
+ * default locale.
+ */
+private fun ByteArray.toHexString(): String {
+    val out = CharArray(size * 2)
+    for (i in indices) {
+        val v = this[i].toInt() and 0xff
+        out[i * 2] = HEX_DIGITS[v ushr 4]
+        out[i * 2 + 1] = HEX_DIGITS[v and 0x0f]
+    }
+    return String(out)
+}
+
 internal class SyncCatalogStore(
     private val channelDao: ChannelDao,
     private val movieDao: MovieDao,
@@ -920,14 +941,14 @@ internal class SyncCatalogStore(
             messageDigest.update(value.toByteArray(Charsets.UTF_8))
             messageDigest.update(0)
         }
-        return messageDigest.digest().joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+        return messageDigest.digest().toHexString()
     }
 
     private fun normalizeText(value: String?): String {
         return value
             .orEmpty()
             .trim()
-            .replace(Regex("\\s+"), " ")
+            .replace(WHITESPACE_REGEX, " ")
             .lowercase()
     }
 

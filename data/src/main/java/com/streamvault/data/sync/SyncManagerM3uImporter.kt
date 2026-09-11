@@ -29,6 +29,9 @@ import java.util.zip.GZIPInputStream
 private const val M3U_PROGRESS_INTERVAL = 5_000
 private const val M3U_IMPORTER_TAG = "SyncManagerM3u"
 
+/** Compiled once: [normalizeTextForIdentity] ran per playlist entry and rebuilt this each time. */
+private val WHITESPACE_REGEX = Regex("\\s+")
+
 internal class SyncManagerM3uImporter(
     private val m3uParser: M3uParser,
     private val okHttpClient: OkHttpClient,
@@ -376,6 +379,6 @@ internal class SyncManagerM3uImporter(
     }
 
     private fun normalizeTextForIdentity(value: String?): String {
-        return value.orEmpty().lowercase().replace(Regex("\\s+"), " ").trim()
+        return value.orEmpty().lowercase().replace(WHITESPACE_REGEX, " ").trim()
     }
 }

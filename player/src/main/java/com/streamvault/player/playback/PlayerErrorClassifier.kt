@@ -29,6 +29,9 @@ enum class PlaybackErrorCategory {
 }
 
 object PlayerErrorClassifier {
+
+    /** Compiled once: [parseHttpStatus] runs per cause-chain element on every classified error. */
+    private val httpStatusRegex = Regex("""\b(204|401|403|408|429|456|500|502|503|504|509)\b""")
     fun classify(error: Throwable): PlaybackErrorCategory {
         val chain = generateSequence(error) { it.cause }.toList()
         val playbackException = chain.filterIsInstance<PlaybackException>().firstOrNull()
@@ -79,7 +82,7 @@ object PlayerErrorClassifier {
     }
 
     private fun parseHttpStatus(message: String?): Int? {
-        return Regex("""\b(204|401|403|408|429|456|500|502|503|504|509)\b""").find(message.orEmpty())
+        return httpStatusRegex.find(message.orEmpty())
             ?.groupValues
             ?.getOrNull(1)
             ?.toIntOrNull()

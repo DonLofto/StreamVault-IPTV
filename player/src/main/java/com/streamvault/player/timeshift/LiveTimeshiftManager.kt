@@ -53,6 +53,16 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 
+/**
+ * Compiled once. The HLS master and MPD parsers run on every poll (every few seconds) for the whole
+ * life of a live-rewind session, and previously rebuilt these patterns on each pass.
+ */
+private val BANDWIDTH_REGEX = Regex("""BANDWIDTH=(\d+)""")
+private val PT_DAYS_REGEX = Regex("""(\d+(?:\.\d+)?)D""")
+private val PT_HOURS_REGEX = Regex("""(\d+(?:\.\d+)?)H""")
+private val PT_MINUTES_REGEX = Regex("""(\d+(?:\.\d+)?)M""")
+private val PT_SECONDS_REGEX = Regex("""(\d+(?:\.\d+)?)S""")
+
 internal interface LiveTimeshiftManager {
     val state: StateFlow<LiveTimeshiftState>
     suspend fun startSession(streamInfo: StreamInfo, channelKey: String, config: TimeshiftConfig)
@@ -916,7 +926,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                 var pendingBandwidth = 0
                 lines.forEachIndexed { index, line ->
                     if (line.startsWith("#EXT-X-STREAM-INF", ignoreCase = true)) {
-                        pendingBandwidth = Regex("""BANDWIDTH=(\d+)""")
+                        pendingBandwidth = BANDWIDTH_REGEX
                             .find(line)
                             ?.groupValues
                             ?.getOrNull(1)
@@ -1411,10 +1421,10 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             } else {
                 afterP to ""
             }
-            Regex("""(\d+(?:\.\d+)?)D""").find(datePart)?.groupValues?.get(1)?.toDoubleOrNull()?.let { ms += (it * 86_400_000).toLong() }
-            Regex("""(\d+(?:\.\d+)?)H""").find(timePart)?.groupValues?.get(1)?.toDoubleOrNull()?.let { ms += (it * 3_600_000).toLong() }
-            Regex("""(\d+(?:\.\d+)?)M""").find(timePart)?.groupValues?.get(1)?.toDoubleOrNull()?.let { ms += (it * 60_000).toLong() }
-            Regex("""(\d+(?:\.\d+)?)S""").find(timePart)?.groupValues?.get(1)?.toDoubleOrNull()?.let { ms += (it * 1_000).toLong() }
+            PT_DAYS_REGEX.find(datePart)?.groupValues?.get(1)?.toDoubleOrNull()?.let { ms += (it * 86_400_000).toLong() }
+            PT_HOURS_REGEX.find(timePart)?.groupValues?.get(1)?.toDoubleOrNull()?.let { ms += (it * 3_600_000).toLong() }
+            PT_MINUTES_REGEX.find(timePart)?.groupValues?.get(1)?.toDoubleOrNull()?.let { ms += (it * 60_000).toLong() }
+            PT_SECONDS_REGEX.find(timePart)?.groupValues?.get(1)?.toDoubleOrNull()?.let { ms += (it * 1_000).toLong() }
             return ms.takeIf { it > 0L } ?: 5_000L
         }
 

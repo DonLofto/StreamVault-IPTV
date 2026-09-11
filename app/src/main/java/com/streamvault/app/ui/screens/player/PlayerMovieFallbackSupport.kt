@@ -8,6 +8,7 @@ import java.util.Locale
 private val AVC_CODEC_TOKENS = listOf("avc", "h264", "x264")
 private val HEVC_CODEC_TOKENS = listOf("hevc", "h265", "x265", "hev1", "hvc1")
 private val MOVIE_CODEC_TOKEN_REGEX = Regex("""[^a-z0-9]+""")
+private val WHITESPACE_REGEX = Regex("""\s+""")
 
 internal suspend fun PlayerViewModel.tryFallbackToAvcMovieVariant(
     requestVersion: Long,
@@ -77,7 +78,7 @@ private fun movieCodecFallbackPriority(title: String): Int {
 private fun normalizeMovieVariantCodecText(value: String): String {
     val normalized = value.lowercase(Locale.ROOT)
         .replace(MOVIE_CODEC_TOKEN_REGEX, " ")
-        .replace(Regex("""\s+"""), " ")
+        .replace(WHITESPACE_REGEX, " ")
         .trim()
     return " $normalized "
 }

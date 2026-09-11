@@ -51,6 +51,11 @@ data class XmltvProgramme(
  * - Timezone offsets
  * - Missing/malformed data (graceful skip)
  */
+/** Compiled once: the fallback branch used to rebuild these on every unparseable timestamp. */
+private val NON_DIGIT_REGEX = Regex("""[^\d]""")
+private val COMPACT_LOCAL_DATE_TIME: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("yyyyMMddHHmmss", Locale.US)
+
 class XmltvParser {
 
     private val logger = Logger.getLogger(XmltvParser::class.java.name)
@@ -598,11 +603,11 @@ class XmltvParser {
                  dateStr.contains('+') ||
                  dateStr.lastIndexOf('-') > 12)
             if (!hasTimezoneMarker) {
-                val cleaned = dateStr.replace("""[^\d]""".toRegex(), "")
+                val cleaned = dateStr.replace(NON_DIGIT_REGEX, "")
                 if (cleaned.length >= 14) {
                     return parseLocalDateTime(
                         cleaned.substring(0, 14),
-                        DateTimeFormatter.ofPattern("yyyyMMddHHmmss", Locale.US),
+                        COMPACT_LOCAL_DATE_TIME,
                         parsingZoneId
                     ) ?: 0
                 }

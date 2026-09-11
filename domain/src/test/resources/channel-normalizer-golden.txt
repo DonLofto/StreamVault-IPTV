@@ -1,0 +1,202 @@
+# name	url	logicalGroupId	canonicalName	resolutionLabel	declaredHeight	qualityTier	codecLabel	transportLabel	frameRate	isHdr	sourceHint	regionHint	languageHint	rawTags
+BBC One HD		42_bbcone	BBC One	720p	720	3	-	-	-	false	-	-	-	720p
+BBC One FHD		42_bbcone	BBC One	1080p	1080	4	-	-	-	false	-	-	-	1080p
+BBC One UHD		42_bbcone	BBC One	4K	2160	6	-	-	-	false	-	-	-	4K
+BBC One 4K		42_bbcone	BBC One	4K	2160	6	-	-	-	false	-	-	-	4K
+BBC One 2K		42_bbcone	BBC One	1440p	1440	5	-	-	-	false	-	-	-	1440p
+BBC One 1080p		42_bbcone	BBC One	1080p	1080	4	-	-	-	false	-	-	-	1080p
+BBC One 720p		42_bbcone	BBC One	720p	720	3	-	-	-	false	-	-	-	720p
+BBC One 576p		42_bbcone	BBC One	576p	576	2	-	-	-	false	-	-	-	576p
+BBC One 540p		42_bbcone	BBC One	540p	540	1	-	-	-	false	-	-	-	540p
+BBC One 480p		42_bbcone	BBC One	480p	480	1	-	-	-	false	-	-	-	480p
+BBC One 360p		42_bbcone	BBC One	360p	360	1	-	-	-	false	-	-	-	360p
+BBC One 240p		42_bbcone	BBC One	240p	240	1	-	-	-	false	-	-	-	240p
+BBC One SD		42_bbcone	BBC One	576p	576	2	-	-	-	false	-	-	-	576p
+BBC One HQ		42_bbcone	BBC One	576p	576	2	-	-	-	false	-	-	-	576p
+ITV 1 HD		42_itv1	ITV 1	720p	720	3	-	-	-	false	-	-	-	720p
+Channel 4 HD		42_channel4	Channel 4	720p	720	3	-	-	-	false	-	-	-	720p
+Channel 5 +1		42_channel51	Channel 5 + 1	-	-	0	-	-	-	false	-	-	-	
+5USA HD		42_5usa	5USA	720p	720	3	-	-	-	false	-	-	-	720p
+Sky Sports Main Event HD		42_skysportsmainevent	Sky Sports Main Event	720p	720	3	-	-	-	false	-	-	-	720p
+Sky Sports F1 UHD		42_skysportsf1	Sky Sports F1	4K	2160	6	-	-	-	false	-	-	-	4K
+Sky Sports Premier League FHD		42_skysportspremierleague	Sky Sports Premier League	1080p	1080	4	-	-	-	false	-	-	-	1080p
+TNT Sports 1 HD		42_tntsports1	TNT Sports 1	720p	720	3	-	-	-	false	-	-	-	720p
+Eurosport 1 HD		42_eurosport1	Eurosport 1	720p	720	3	-	-	-	false	-	-	-	720p
+Discovery Channel HD		42_discoverychannel	Discovery Channel	720p	720	3	-	-	-	false	-	-	-	720p
+National Geographic HD		42_nationalgeographic	National Geographic	720p	720	3	-	-	-	false	-	-	-	720p
+Animal Planet HD		42_animalplanet	Animal Planet	720p	720	3	-	-	-	false	-	-	-	720p
+History HD		42_history	History	720p	720	3	-	-	-	false	-	-	-	720p
+UK: BBC One HD		42_bbcone	BBC One	720p	720	3	-	-	-	false	-	UK	-	720p,UK
+US: CNN		42_cnn	CNN	-	-	0	-	-	-	false	-	US	-	US
+FR: TF1 HD		42_tf1	TF1	720p	720	3	-	-	-	false	-	FR	FR	720p,FR
+DE: ARD HD		42_ard	ARD	720p	720	3	-	-	-	false	-	DE	DE	720p,DE
+IT: Rai 1 HD		42_rai1	Rai 1	720p	720	3	-	-	-	false	-	IT	IT	720p,IT
+ES: La 1 HD		42_la1	La 1	720p	720	3	-	-	-	false	-	ES	ES	720p,ES
+NL: NPO 1 HD		42_npo1	NPO 1	720p	720	3	-	-	-	false	-	NL	-	720p,NL
+PT: RTP 1 HD		42_rtp1	RTP 1	720p	720	3	-	-	-	false	-	PT	PT	720p,PT
+AR: MBC 1 HD		42_mbc1	MBC 1	720p	720	3	-	-	-	false	-	AR	AR	720p,AR
+TR: TRT 1 HD		42_trt1	TRT 1	720p	720	3	-	-	-	false	-	TR	-	720p,TR
+PL: TVP 1 HD		42_tvp1	TVP 1	720p	720	3	-	-	-	false	-	PL	-	720p,PL
+RU: Perviy HD		42_perviy	Perviy	720p	720	3	-	-	-	false	-	RU	-	720p,RU
+UK - Sky News		42_skynews	Sky News	-	-	0	-	-	-	false	-	UK	-	UK
+US - Fox News HD		42_foxnews	Fox News	720p	720	3	-	-	-	false	-	US	-	720p,US
+UK - BBC Two		42_bbctwo	BBC Two	-	-	0	-	-	-	false	-	UK	-	UK
+FR| Canal+ HD		42_frcanal	FR Canal +	720p	720	3	-	-	-	false	-	-	FR	720p,FR
+DE| ZDF HD		42_dezdf	DE ZDF	720p	720	3	-	-	-	false	-	-	DE	720p,DE
+IT| Canale 5 HD		42_itcanale5	IT Canale 5	720p	720	3	-	-	-	false	-	-	IT	720p,IT
+BBC: One: HD		42_one	One	720p	720	3	-	-	-	false	-	BBC	-	720p,BBC
+UK:FR: Mixed HD		42_frmixed	FR Mixed	720p	720	3	-	-	-	false	-	UK	FR	720p,UK,FR
+Sky Sports F1 HEVC		42_skysportsf1	Sky Sports F1	-	-	0	HEVC	-	-	false	-	-	-	HEVC
+Sky Sports F1 H265		42_skysportsf1	Sky Sports F1	-	-	0	HEVC	-	-	false	-	-	-	HEVC
+Sky Sports F1 x265		42_skysportsf1	Sky Sports F1	-	-	0	HEVC	-	-	false	-	-	-	HEVC
+Sky Sports F1 H264		42_skysportsf1	Sky Sports F1	-	-	0	H.264	-	-	false	-	-	-	H.264
+Sky Sports F1 x264		42_skysportsf1	Sky Sports F1	-	-	0	H.264	-	-	false	-	-	-	H.264
+Sky Sports F1 H.264		42_skysportsf1h264	Sky Sports F1 H 264	-	-	0	-	-	-	false	-	-	-	
+Sky Sports F1 AV1		42_skysportsf1	Sky Sports F1	-	-	0	AV1	-	-	false	-	-	-	AV1
+BT Sport HDR		42_btsport	BT Sport	-	-	0	HDR	-	-	true	-	-	-	HDR
+BT Sport HDR10		42_btsport	BT Sport	-	-	0	HDR10	-	-	true	-	-	-	HDR10,HDR
+BT Sport Dolby Vision		42_btsport	BT Sport	-	-	0	Dolby Vision	-	-	true	-	-	-	Dolby Vision
+BT Sport DV		42_btsport	BT Sport	-	-	0	Dolby Vision	-	-	true	-	-	-	Dolby Vision
+BT Sport dv		42_btsport	BT Sport	-	-	0	Dolby Vision	-	-	true	-	-	-	Dolby Vision
+Movie Channel HEVC HDR		42_moviechannel	Movie Channel	-	-	0	HDR	-	-	true	-	-	-	HDR
+4K HDR Sports		42_sports	Sports	4K	2160	6	HDR	-	-	true	-	-	-	4K,HDR
+UHD HDR10 Test		42_uhdhdr10test	UHD HDR10 Test	4K	2160	6	HDR10	-	-	true	Test	-	-	4K,HDR10,Test,HDR
+DV		42_dv	DV	-	-	0	Dolby Vision	-	-	true	-	-	-	Dolby Vision
+hdr		42_hdr	hdr	-	-	0	HDR	-	-	true	-	-	-	HDR
+h265		42_h265	h265	-	-	0	HEVC	-	-	false	-	-	-	HEVC
+x265		42_x265	x265	-	-	0	HEVC	-	-	false	-	-	-	HEVC
+av1		42_av1	av1	-	-	0	AV1	-	-	false	-	-	-	AV1
+Dolby		42_dolby	Dolby	-	-	0	-	-	-	false	-	-	-	
+Vision		42_vision	Vision	-	-	0	-	-	-	false	-	-	-	
+Sports HD HLS		42_sports	Sports	720p	720	3	-	HLS	-	false	-	-	-	720p,HLS
+Sports HD m3u8		42_sports	Sports	720p	720	3	-	HLS	-	false	-	-	-	720p,HLS
+Sports HD M3U8		42_sports	Sports	720p	720	3	-	HLS	-	false	-	-	-	720p,HLS
+Sports MPEG-TS		42_sports	Sports	-	-	0	-	MPEG-TS	-	false	-	-	-	MPEG-TS
+Sports mpeg ts		42_sports	Sports	-	-	0	-	MPEG-TS	-	false	-	-	-	MPEG-TS
+Sports mpeg-ts		42_sports	Sports	-	-	0	-	MPEG-TS	-	false	-	-	-	MPEG-TS
+News Channel TS		42_newschannel	News Channel	-	-	0	-	MPEG-TS	-	false	-	-	-	MPEG-TS
+News .ts		42_news	News	-	-	0	-	MPEG-TS	-	false	-	-	-	MPEG-TS
+TS		42_ts	TS	-	-	0	-	MPEG-TS	-	false	-	-	-	MPEG-TS
+HLS		42_hls	HLS	-	-	0	-	HLS	-	false	-	-	-	HLS
+mpeg ts		42_mpegts	mpeg ts	-	-	0	-	MPEG-TS	-	false	-	-	-	MPEG-TS
+mpeg-ts		42_mpegts	mpeg-ts	-	-	0	-	MPEG-TS	-	false	-	-	-	MPEG-TS
+Sky Sports Backup		42_skysports	Sky Sports	-	-	0	-	-	-	false	Backup	-	-	Backup
+Sky Sports Alt		42_skysports	Sky Sports	-	-	0	-	-	-	false	Alternate	-	-	Alternate
+Sky Sports Alternate		42_skysports	Sky Sports	-	-	0	-	-	-	false	Alternate	-	-	Alternate
+Sky Sports Raw		42_skysports	Sky Sports	-	-	0	-	-	-	false	Raw	-	-	Raw
+Sky Sports Lite		42_skysports	Sky Sports	-	-	0	-	-	-	false	Lite	-	-	Lite
+Sky Sports Mobile		42_skysports	Sky Sports	-	-	0	-	-	-	false	Mobile	-	-	Mobile
+Sky Sports Test		42_skysports	Sky Sports	-	-	0	-	-	-	false	Test	-	-	Test
+Sky Sports Low		42_skysports	Sky Sports	-	-	0	-	-	-	false	Low	-	-	Low
+Sky Sports VIP		42_skysports	Sky Sports	-	-	0	-	-	-	false	VIP	-	-	VIP
+Sky Sports Premium		42_skysports	Sky Sports	-	-	0	-	-	-	false	Premium	-	-	Premium
+Sky Sports Pro		42_skysports	Sky Sports	-	-	0	-	-	-	false	Pro	-	-	Pro
+Premier Sports 1 Backup HD		42_premiersports1	Premier Sports 1	720p	720	3	-	-	-	false	Backup	-	-	720p,Backup
+ALT		42_alt	ALT	-	-	0	-	-	-	false	Alternate	-	-	Alternate
+Raw		42_raw	Raw	-	-	0	-	-	-	false	Raw	-	-	Raw
+VIP		42_vip	VIP	-	-	0	-	-	-	false	VIP	-	-	VIP
+BBC One EN		42_bbconeen	BBC One EN	-	-	0	-	-	-	false	-	-	EN	EN
+BBC One English		42_bbconeenglish	BBC One English	-	-	0	-	-	-	false	-	-	EN	EN
+TF1 FR		42_tf1fr	TF1 FR	-	-	0	-	-	-	false	-	-	FR	FR
+TF1 French		42_tf1french	TF1 French	-	-	0	-	-	-	false	-	-	FR	FR
+ARD DE		42_ardde	ARD DE	-	-	0	-	-	-	false	-	-	DE	DE
+ARD German		42_ardgerman	ARD German	-	-	0	-	-	-	false	-	-	DE	DE
+Rai 1 IT		42_rai1it	Rai 1 IT	-	-	0	-	-	-	false	-	-	IT	IT
+Rai 1 Italian		42_rai1italian	Rai 1 Italian	-	-	0	-	-	-	false	-	-	IT	IT
+La 1 ES		42_la1es	La 1 ES	-	-	0	-	-	-	false	-	-	ES	ES
+La 1 Spanish		42_la1spanish	La 1 Spanish	-	-	0	-	-	-	false	-	-	ES	ES
+RTP 1 PT		42_rtp1pt	RTP 1 PT	-	-	0	-	-	-	false	-	-	PT	PT
+RTP 1 Portuguese		42_rtp1portuguese	RTP 1 Portuguese	-	-	0	-	-	-	false	-	-	PT	PT
+MBC 1 AR		42_mbc1ar	MBC 1 AR	-	-	0	-	-	-	false	-	-	AR	AR
+MBC 1 Arabic		42_mbc1arabic	MBC 1 Arabic	-	-	0	-	-	-	false	-	-	AR	AR
+EN		42_en	EN	-	-	0	-	-	-	false	-	-	EN	EN
+IT		42_it	IT	-	-	0	-	-	-	false	-	-	IT	IT
+Pro		42_pro	Pro	-	-	0	-	-	-	false	Pro	-	-	Pro
+[HD] BBC One		42_bbcone	BBC One	720p	720	3	-	-	-	false	-	HD	-	720p,HD
+(US) CNN		42_cnn	CNN	-	-	0	-	-	-	false	-	US	-	US
+|UK| Sky News		42_skynews	Sky News	-	-	0	-	-	-	false	-	UK	-	UK
+BBC One [FHD]		42_bbcone	BBC One	1080p	1080	4	-	-	-	false	-	FHD	-	1080p,FHD
+CNN (HD)		42_cnn	CNN	720p	720	3	-	-	-	false	-	HD	-	720p,HD
+Sky News |UK|		42_skynews	Sky News	-	-	0	-	-	-	false	-	UK	-	UK
+BBC One (1080p)		42_bbcone	BBC One	1080p	1080	4	-	-	-	false	-	-	-	1080p
+[4K] Sports		42_sports	Sports	4K	2160	6	-	-	-	false	-	-	-	4K
+Sky (Sports) 1 [HD] (UK)		42_sky1	Sky 1	720p	720	3	-	-	-	false	-	HD	-	720p,HD
+Sports 50fps		42_sports	Sports	-	-	0	-	-	50	false	-	-	-	50fps
+Sports 60fps		42_sports	Sports	-	-	0	-	-	60	false	-	-	-	60fps
+Sports 24fps		42_sports	Sports	-	-	0	-	-	24	false	-	-	-	24fps
+Sports 25fps		42_sports	Sports	-	-	0	-	-	25	false	-	-	-	25fps
+Sports 30fps		42_sports	Sports	-	-	0	-	-	30	false	-	-	-	30fps
+Sports 50 FPS		42_sports50	Sports 50	-	-	0	-	-	50	false	-	-	-	50fps
+Sports fps 50		42_sports50	Sports 50	-	-	0	-	-	-	false	-	-	-	
+Sports 120fps		42_sports120fps	Sports 120fps	-	-	0	-	-	-	false	-	-	-	
+Sports 15fps		42_sports15fps	Sports 15fps	-	-	0	-	-	-	false	-	-	-	
+101 BBC One HD		42_101bbcone	101 BBC One	720p	720	3	-	-	-	false	-	-	-	720p
+Sky 401 Sports HD		42_sky401sports	Sky 401 Sports	720p	720	3	-	-	-	false	-	-	-	720p
+Sky Sports 1		42_skysports1	Sky Sports 1	-	-	0	-	-	-	false	-	-	-	
+Channel 5 HD		42_channel5	Channel 5	720p	720	3	-	-	-	false	-	-	-	720p
+Sport 24 HD		42_sport24	Sport 24	720p	720	3	-	-	-	false	-	-	-	720p
+News 24		42_news24	News 24	-	-	0	-	-	-	false	-	-	-	
+#### GENERAL HD/4K ####		42_general	#### GENERAL ####	4K	2160	6	-	-	-	false	-	-	-	4K
+## SPORTS ##		42_sports	## SPORTS ##	-	-	0	-	-	-	false	-	-	-	
+#### UK ENTERTAINMENT ####		42_ukentertainment	#### UK ENTERTAINMENT ####	-	-	0	-	-	-	false	-	-	-	
+## MOVIES 24/7 ##		42_movies247	## MOVIES 24 7 ##	-	-	0	-	-	-	false	-	-	-	
+Café TV HD		42_cafetv	Café TV	720p	720	3	-	-	-	false	-	-	-	720p
+München TV HD		42_munchentv	München TV	720p	720	3	-	-	-	false	-	-	-	720p
+Télé France HD		42_telefrance	Télé France	720p	720	3	-	-	-	false	-	-	-	720p
+España TV HD		42_espanatv	España TV	720p	720	3	-	-	-	false	-	-	-	720p
+Rai Città HD		42_raicitta	Rai Città	720p	720	3	-	-	-	false	-	-	-	720p
+Zürich Sport HD		42_zurichsport	Zürich Sport	720p	720	3	-	-	-	false	-	-	-	720p
+Île de France TV		42_iledefrancetv	Île de France TV	-	-	0	-	-	-	false	-	-	DE	DE
+Sky-Sports-1-HD		42_sports1	Sports 1	720p	720	3	-	-	-	false	-	SKY	-	720p,SKY
+Sky_Sports_1_HD		42_skysports1	Sky Sports 1	720p	720	3	-	-	-	false	-	-	-	720p
+Sky.Sports.1.HD		42_skysports1	Sky Sports 1	720p	720	3	-	-	-	false	-	-	-	720p
+Sky/Sports/1/HD		42_skysports1	Sky Sports 1	720p	720	3	-	-	-	false	-	-	-	720p
+Sky Sports 1 +1		42_skysports11	Sky Sports 1 + 1	-	-	0	-	-	-	false	-	-	-	
+Sky Sports 1: Extra		42_skysports1extra	Sky Sports 1 Extra	-	-	0	-	-	-	false	-	-	-	
+  Padded  Name  HD  		42_paddedname	Padded Name	720p	720	3	-	-	-	false	-	-	-	720p
+Tabs	And	Spaces HD		42_tabsandspaces	Tabs And Spaces	720p	720	3	-	-	-	false	-	-	-	720p
+Advance TV		42_advancetv	Advance TV	-	-	0	-	-	-	false	-	-	-	
+Adventure HD		42_adventure	Adventure	720p	720	3	-	-	-	false	-	-	-	720p
+DVD Movies		42_dvdmovies	DVD Movies	-	-	0	-	-	-	false	-	-	-	
+Energy TV		42_energytv	Energy TV	-	-	0	-	-	-	false	-	-	-	
+Item Shop		42_itemshop	Item Shop	-	-	0	-	-	-	false	-	-	-	
+Tests HD		42_tests	Tests	720p	720	3	-	-	-	false	-	-	-	720p
+Latest News		42_latestnews	Latest News	-	-	0	-	-	-	false	-	-	-	
+Remote Control		42_remotecontrol	Remote Control	-	-	0	-	-	-	false	-	-	-	
+Backupster TV		42_backupstertv	Backupster TV	-	-	0	-	-	-	false	-	-	-	
+Litehouse TV		42_litehousetv	Litehouse TV	-	-	0	-	-	-	false	-	-	-	
+Profile TV		42_profiletv	Profile TV	-	-	0	-	-	-	false	-	-	-	
+Provider One		42_providerone	Provider One	-	-	0	-	-	-	false	-	-	-	
+Alternatives HD		42_alternatives	Alternatives	720p	720	3	-	-	-	false	-	-	-	720p
+UK: SKY SPORTS PREMIER LEAGUE FHD 1080p HEVC HDR 50fps Backup EN		42_skysportspremierleagueen	SKY SPORTS PREMIER LEAGUE EN	1080p	1080	4	HDR	-	50	true	Backup	UK	EN	1080p,50fps,HDR,Backup,UK,EN
+US - HBO MAX MOVIES 4K UHD DOLBY VISION HDR10 x265 60fps		42_hbomaxmovies	HBO MAX MOVIES	4K	2160	6	Dolby Vision	-	60	true	-	US	-	4K,60fps,Dolby Vision,US,HDR
+FR: CANAL+ SPORT 4K HDR HEVC 50fps VIP		42_canalsport	CANAL + SPORT	4K	2160	6	HDR	-	50	true	VIP	FR	FR	4K,50fps,HDR,VIP,FR
+DE: SKY SPORT BUNDESLIGA UHD HDR10 HEVC 50fps Backup		42_skysportbundesliga	SKY SPORT BUNDESLIGA	4K	2160	6	HDR10	-	50	true	Backup	DE	DE	4K,50fps,HDR10,Backup,DE,HDR
+AR: MBC ACTION HD 1080p x264 25fps Premium Arabic		42_mbcactionarabic	MBC ACTION Arabic	1080p	1080	4	H.264	-	25	false	Premium	AR	AR	1080p,25fps,H.264,Premium,AR
+UK: BT SPORT 1 HD 1080p H.264 50fps Alt English		42_btsport1h264english	BT SPORT 1 H 264 English	1080p	1080	4	-	-	50	false	Alternate	UK	EN	1080p,50fps,Alternate,UK,EN
+HD		42_hd	HD	720p	720	3	-	-	-	false	-	-	-	720p
+1080p		42_1080p	1080p	1080p	1080	4	-	-	-	false	-	-	-	1080p
+UHD		42_uhd	UHD	4K	2160	6	-	-	-	false	-	-	-	4K
+4K		42_4k	4K	4K	2160	6	-	-	-	false	-	-	-	4K
+SD		42_sd	SD	576p	576	2	-	-	-	false	-	-	-	576p
+mp4		42_mp4	mp4	-	-	0	-	-	-	false	-	-	-	
+Test		42_test	Test	-	-	0	-	-	-	false	Test	-	-	Test
+Backup		42_backup	Backup	-	-	0	-	-	-	false	Backup	-	-	Backup
+Premium		42_premium	Premium	-	-	0	-	-	-	false	Premium	-	-	Premium
+Low		42_low	Low	-	-	0	-	-	-	false	Low	-	-	Low
+Mobile		42_mobile	Mobile	-	-	0	-	-	-	false	Mobile	-	-	Mobile
+		42_channel	Channel	-	-	0	-	-	-	false	-	-	-	
+   		42_channel	Channel	-	-	0	-	-	-	false	-	-	-	
+A		42_a	A	-	-	0	-	-	-	false	-	-	-	
+12		42_12	12	-	-	0	-	-	-	false	-	-	-	
+Sports Channel	http://example.com/live/user/pass/12345.ts	42_sportschannel	Sports Channel	-	-	0	-	MPEG-TS	-	false	-	-	-	MPEG-TS
+Sports Channel	http://example.com/live/user/pass/12345.m3u8	42_sportschannel	Sports Channel	-	-	0	-	HLS	-	false	-	-	-	HLS
+Sports Channel	http://example.com/live/user/pass/12345.mpd	42_sportschannel	Sports Channel	-	-	0	-	-	-	false	-	-	-	
+Sports Channel	http://example.com/1080p/stream.ts	42_sportschannel	Sports Channel	1080p	1080	4	-	MPEG-TS	-	false	-	-	-	1080p,MPEG-TS
+Sports Channel	http://example.com/720p/stream.m3u8	42_sportschannel	Sports Channel	720p	720	3	-	HLS	-	false	-	-	-	720p,HLS
+Sports Channel	http://example.com/hevc/stream.m3u8	42_sportschannel	Sports Channel	-	-	0	HEVC	HLS	-	false	-	-	-	HEVC,HLS
+Sports Channel	http://example.com/h265/stream.m3u8	42_sportschannel	Sports Channel	-	-	0	HEVC	HLS	-	false	-	-	-	HEVC,HLS
+Sports Channel	http://example.com/mpeg-ts/stream	42_sportschannel	Sports Channel	-	-	0	-	MPEG-TS	-	false	-	-	-	MPEG-TS
+Sports Channel	http://example.com/hls/stream	42_sportschannel	Sports Channel	-	-	0	-	HLS	-	false	-	-	-	HLS
+Sports Channel	http://example.com/av1/stream.m3u8	42_sportschannel	Sports Channel	-	-	0	AV1	HLS	-	false	-	-	-	AV1,HLS
+Sports Channel	http://example.com/uhd/hdr/stream.m3u8	42_sportschannel	Sports Channel	-	-	0	HDR	HLS	-	false	-	-	-	HDR,HLS
