@@ -79,6 +79,27 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | **A17** | Moved to Done (`84833e08`, `a6c12378`). Both halves: the search passes run in `withContext(guideWorkDispatcher)`, and the two category-visibility filters run in SQL via `ChannelRepository.getGuideSearchScopeChannels` (which reuses `observeChannels`, so parental and hidden-channel visibility are unchanged). Covered by `ChannelGuideScopeDaoTest` against a real in-memory Room database for all three filter shapes. **Two premises in the plan card were wrong** - see the A17 analysis above: the metadata predicate cannot be pushed, and the base snapshot cannot stand in for the load because `allChannels` is capped at `MAX_CHANNELS` (60). |
 | **A27** | Moved to Done (see the Done table). The reflective-codec half was **withdrawn as wrong** — see below. |
 
+### Round 35: the app's D-pad focus is the live blocker, and the update banner is the suspect
+
+The no-focus state from round 34 is **not** first-run state - it persisted many minutes later, and the
+library had long since synced. What was found:
+
+- With the app in the foreground and the Home UI fully rendered, ${BT}uiautomator dump${BT} reported
+  ${BT}focused_nodes=0${BT} - nothing focusable, so D-pad input moved nothing.
+- A single ${BT}KEYCODE_BACK${BT} restored ${BT}focused_nodes=1${BT}, and the Home content appeared ("Live Shortcuts",
+  "Recently Added Movies"). **But navigation still did not move**: Up x3 then Left x8 then Centre left the
+  screen on Home.
+- The one clear difference from round 31, where the identical build navigated fine, is the
+  **"StreamVault 1.0.17.1 is available" banner** on Home. Round 31's dump had no such banner. It is the
+  prime suspect for intercepting or holding D-pad focus.
+
+App data has now been cleared to drop the cached update and the banner. ${BT}pm clear${BT} succeeded and the app
+relaunched; the device is in a fresh state and will need a new library sync before validation.
+
+**A20 and A34 are unchanged** - implemented, unit-tested, still awaiting a completed live-TV run. Four
+rounds of device work have now gone into reaching the point where that run can start, and the remaining
+obstacle is a UI state problem in the app itself rather than the findings.
+
 ### Round 34: validation still did not run, and two operational causes were found
 
 ${BT}always_finish_activities${BT} is confirmed **0** now, so the round-33 hypothesis that it caused the
