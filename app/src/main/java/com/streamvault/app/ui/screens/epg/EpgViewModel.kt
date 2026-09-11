@@ -1985,7 +1985,11 @@ class EpgViewModel @Inject constructor(
     private suspend fun buildSearchGuideSnapshot(
         baseSnapshot: GuideBaseSnapshot,
         searchQuery: String
-    ): Pair<List<Channel>, Map<String, List<Program>>> {
+    ): Pair<List<Channel>, Map<String, List<Program>>> = withContext(Dispatchers.Default) {
+        // A17: this runs on the guide-search path, which is debounced at only 150 ms, and it does
+        // several full passes over EVERY channel of the provider - the lookup map, the metadata
+        // match, the matched-key build, plus a mapNotNull/associateWith over the result. It ran on
+        // viewModelScope, i.e. Dispatchers.Main.immediate, so all of that was on the UI thread.
         val scopedChannels = loadGuideSearchScopeChannels(baseSnapshot)
         val scopedChannelsByLookup = scopedChannels.mapNotNull { channel ->
             channel.guideLookupKey()?.let { lookupKey -> lookupKey to channel }
@@ -2037,7 +2041,7 @@ class EpgViewModel @Inject constructor(
                 repositoryMatchedPrograms[lookupKey].orEmpty()
             }
         }
-        return matchedChannels to matchedPrograms
+        matchedChannels to matchedPrograms
     }
 
     private suspend fun loadGuideSearchScopeChannels(baseSnapshot: GuideBaseSnapshot): List<Channel> {
