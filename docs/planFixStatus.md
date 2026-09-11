@@ -78,6 +78,26 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | **A17** | Moved to Done (`84833e08`, `a6c12378`). Both halves: the search passes run in `withContext(guideWorkDispatcher)`, and the two category-visibility filters run in SQL via `ChannelRepository.getGuideSearchScopeChannels` (which reuses `observeChannels`, so parental and hidden-channel visibility are unchanged). Covered by `ChannelGuideScopeDaoTest` against a real in-memory Room database for all three filter shapes. **Two premises in the plan card were wrong** - see the A17 analysis above: the metadata predicate cannot be pushed, and the base snapshot cannot stand in for the load because `allChannels` is capped at `MAX_CHANNELS` (60). |
 | **A27** | Moved to Done (see the Done table). The reflective-codec half was **withdrawn as wrong** — see below. |
 
+## The :app instrumentation source set does not compile either (discovered round 32)
+
+Round 18 found the app **unit** test source set had never compiled. The same is true of the app
+**instrumentation** source set, so **no Compose UI test in this project has ever run**:
+
+```
+ui/PlayerSmokeTest.kt:98:21                          No value passed for parameter 'currentChannel'.
+ui/PlayerSmokeTest.kt:146:21                         No value passed for parameter 'currentChannel'.
+ui/screens/player/overlay/PlayerOverlayGoldenTest.kt:68:25
+                                                     No value passed for parameter 'currentChannel'.
+ui/PremiumRouteGoldenTest.kt:276:55                  Unresolved reference 'FAVORITES'.
+ui/components/LiveChannelProgressClockTest.kt:8:33   Unresolved reference 'onAllNodes'.
+ui/components/LiveChannelProgressClockTest.kt:40:33  Unresolved reference 'rememberLiveChannelProgressNowMs'.
+```
+
+All six are small - three missing arguments for a parameter some composable gained, one renamed
+constant, one import that moved from a top-level extension to a member in this Compose version, and one
+renamed composable. None is deep. Fixing them is the prerequisite for the composition-count test the
+A18 card asks for, which is written and compiles cleanly but **has never been executed**.
+
 ## A18 focus-traversal A/B (round 31) - traversal is unchanged, and the quirk is pre-existing
 
 The A18 card flags grid focus as delicate (prior audit B7) and asks for traversal to be verified

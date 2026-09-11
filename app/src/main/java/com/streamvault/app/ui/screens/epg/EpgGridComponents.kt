@@ -102,6 +102,12 @@ internal fun guideRowVisibleRangeMs(
     if (viewportFraction >= 1f) {
         return windowStart until (windowStart + durationMs)
     }
+    // Before the first layout the scroll range is not known yet. Composing the whole window is the
+    // safe answer there - it is what the row did before A18 - and the derived state recomputes once
+    // the range arrives.
+    if (scrollMaxValue <= 0) {
+        return windowStart until (windowStart + durationMs)
+    }
     // scrollMaxValue is the scrollable range in pixels, i.e. total minus viewport. Dividing by
     // (1 - viewport fraction) recovers the total timeline width in pixels without the density.
     val totalPx = scrollMaxValue / (1f - viewportFraction)
