@@ -177,6 +177,49 @@ Conclusions:
 A18 therefore still lacks only the composition-count Compose test the card asks for. The D-pad check
 it asks for is done, and it passed.
 
+## A54 - measured, and the third option is dead (round 39)
+
+The card offers debouncing (which does not stop the SQL - Room re-executes on invalidation before any
+downstream operator sees it) or maintaining counts incrementally. Round 29 added that neither
+short-cut is safe. Round 39 tested the option the card does not mention - an **expression index** over
+exactly the counted expression - because it would be engine-maintained and could not drift the way a
+trigger-maintained count table can.
+
+${BT}CategoryCountPlanTest${BT} runs the real grouped-count query on an in-memory Room database on the AFTSSS
+and reports ${BT}EXPLAIN QUERY PLAN${BT} before and after creating that index:
+
+${BT}${BT}${BT}
+without index         -> SEARCH TABLE channels USING COVERING INDEX index_channels_provider_id_category_id_logical_group_id (provider_id=?)
+with expression index -> SEARCH TABLE channels USING COVERING INDEX index_channels_provider_id_category_id_logical_group_id (provider_id=?)
+${BT}${BT}${BT}
+
+Two conclusions, both from the device rather than from reasoning:
+
+1. **SQLite does not choose the expression index.** It keeps the existing covering index. That option
+   is measured dead, so it is not worth a migration.
+2. **The query is already better than the card implies.** ${BT}SEARCH ... USING COVERING INDEX${BT} means it is
+   an index-only scan, ordered by ${BT}(provider_id, category_id, logical_group_id)${BT} - no table lookups.
+   What remains is the per-row ${BT}CAST(id AS TEXT)${BT} allocation and the DISTINCT B-tree, over the
+   provider's channel count, per invalidation.
+
+**A54 is therefore BLOCKED on a decision, and this is the decision:**
+
+- **(1) Throttle the count flows** - drive the aggregate from a sampled invalidation signal so it runs
+  at most once per N seconds. Safe, small, no schema change. Payoff is limited: it caps re-runs rather
+  than eliminating them, and sync writes are seconds apart, so a debounce window shorter than that
+  coalesces nothing.
+- **(2) Maintain the counts incrementally** - a counts table kept current by triggers on ${BT}channels${BT}.
+  Removes the work entirely at read time. Cost: the counts must cover four variants (plain,
+  decorative-filtered, grouped, grouped+decorative), the decorative filter depends on ${BT}name${BT} so name changes
+  must move rows between variants, and any bug shows up as a wrong badge count. A52 does make the
+  write side cheaper to hook - stage merges now touch only changed rows - so the trigger overhead is
+  proportional to rows actually written rather than to the table.
+
+Recommendation: **(1)**, because the measured cost is an index-only scan of the provider's channels and
+the audit's acceptance test ("not recomputed more than once per N writes") is satisfied by throttling,
+whereas (2) buys a smaller increment than its drift risk justifies. This has not been implemented
+pending that call.
+
 ## A35 correction (round 37) - the round-28 objection to reordering was WRONG
 
 Round 28 recorded that "start from the live edge" could not be done because ${BT}DashWindow${BT} is an
