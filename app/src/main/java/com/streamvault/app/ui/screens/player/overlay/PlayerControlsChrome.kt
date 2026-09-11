@@ -362,6 +362,32 @@ fun PlayerResolutionBadge(
     }
 }
 
+/**
+ * Self-contained blinking live dot.
+ *
+ * The toggle used to live in the enclosing scrubber composable, so flipping it every 700 ms
+ * re-executed that whole subtree - including the live-edge scrubber geometry - while only a 7dp dot
+ * actually changed. Owning the state here keeps the invalidation to this leaf.
+ */
+@Composable
+private fun BlinkingLiveDot() {
+    var visible by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(700L)
+            visible = !visible
+        }
+    }
+    Box(
+        modifier = Modifier
+            .size(7.dp)
+            .background(
+                color = Color.Red.copy(alpha = if (visible) 0.95f else 0.30f),
+                shape = RoundedCornerShape(999.dp)
+            )
+    )
+}
+
 @Composable
 private fun PlayerTopBar(
     title: String,
@@ -1720,14 +1746,6 @@ private fun LiveTimeshiftScrubber(
         bufferedBehindLive
     }
 
-    var liveDotVisible by remember { mutableStateOf(true) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(700L)
-            liveDotVisible = !liveDotVisible
-        }
-    }
-
     val scrubberCd = stringResource(R.string.player_live_scrubber_cd)
 
     Surface(
@@ -1823,14 +1841,7 @@ private fun LiveTimeshiftScrubber(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(7.dp)
-                                .background(
-                                    color = Color.Red.copy(alpha = if (liveDotVisible) 0.95f else 0.30f),
-                                    shape = RoundedCornerShape(999.dp)
-                                )
-                        )
+                        BlinkingLiveDot()
                         Text(
                             text = stringResource(R.string.player_jump_to_live_short),
                             style = MaterialTheme.typography.labelSmall,
