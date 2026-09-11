@@ -3,7 +3,7 @@
 Tracks implementation of the 59 findings in `docs/performance-audit.md`.
 Plan: `docs/planFix.md`. Baseline commit: `740bd55f`.
 
-**41 done · 6 partial · 1 superseded · 11 open.** Commits marked DONE are on `master`; the working
+**42 done · 6 partial · 1 superseded · 10 open.** Commits marked DONE are on `master`; the working
 tree is clean. Verification for every DONE item was a module compile plus the relevant test suite;
 Room-validated SQL and byte-identical golden output are called out where they apply.
 
@@ -51,7 +51,8 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | A11 | `01dc8a06` | Whole-body retries capped at 2 attempts and jittered |
 | A13 | `d0531dfc` | EPG resolution skipped when guide data did not change and mappings exist |
 | A57 | `5f971bbf` | Watch Next refresh throttled to once per minute of playback |
-| A55 | see below | VOD duplicate-resolution indices added (migration 64 -> 65) |
+| A55 | `8f78a388` | VOD duplicate-resolution indices added (migration 64 -> 65) |
+| A8 | see below | Progressive-chunk writes no longer force a directory walk every 2 s |
 | A6 / A9 | `fc72267c` | `classify` memoised; catalog reclassification made an O(1) lookup. **Device-verified: 4/16 → 1/16 samples with app code actively executing** (see below). |
 
 ## Partial
@@ -93,9 +94,9 @@ static reading and was wrong about an API.
   measured baseline. Worse, "fixing" it by calling the `Charset` overload directly would compile
   against `compileSdk = 36` and throw `NoSuchMethodError` on API 25–32, i.e. on the target device.
 
-## Open (11)
+## Open (10)
 
-A4, A8, A12, A14, A18, A19, A20, A34, A35, A54, A58.
+A4, A12, A14, A18, A19, A20, A34, A35, A54, A58.
 
 Grouped by why they are still open:
 
