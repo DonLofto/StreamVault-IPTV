@@ -8,6 +8,8 @@ import com.streamvault.data.local.dao.ChannelDao
 import com.streamvault.data.local.dao.MovieDao
 import com.streamvault.data.local.dao.SeriesDao
 import com.streamvault.data.local.dao.TmdbIdentityDao
+import com.streamvault.data.local.entity.ChannelEntity
+import com.streamvault.data.local.entity.ChannelImportStageEntity
 import com.streamvault.data.local.entity.MovieEntity
 import com.streamvault.data.local.entity.MovieImportStageEntity
 import kotlinx.coroutines.runBlocking
@@ -15,6 +17,8 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Before
 import org.junit.Test
 import org.mockito.kotlin.any
+import org.mockito.kotlin.argumentCaptor
+import org.mockito.kotlin.atLeastOnce
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.verify
@@ -54,6 +58,48 @@ class SyncCatalogStoreMemoryTest {
             whenever(movieDao.getByProviderSync(any())).thenReturn(emptyList())
             whenever(catalogSyncDao.getMovieStages(any(), any())).thenReturn(emptyList())
         }
+    }
+
+    /**
+     * A58 - the live path stages a whole provider catalog per batch. The staged rows used to be
+     * materialised as a second full list before being written; they are now built and written in
+     * bounded chunks. This pins the chunking and, with it, that the rows reach the database whole
+     * and in order - the ordinal sequence is what the progress-commit watermark depends on.
+     */
+    @Test
+    fun stageChannelBatch_withLargeCatalog_insertsInBoundedChunks() = runTest {
+        val providerId = 1L
+        val sessionId = 9L
+        val totalRows = 100_000
+        whenever(catalogSyncDao.maxStagedChannelSeqOrNull(eq(providerId), eq(sessionId))).thenReturn(0L)
+
+        val channels = (0 until totalRows).map { index ->
+            ChannelEntity(
+                streamId = index.toLong() + 1L,
+                name = "Channel $index",
+                providerId = providerId,
+                number = index
+            )
+        }
+
+        store(CatalogSizeLimits(maxMoviesPerProvider = 200_000)).stageChannelBatch(
+            providerId,
+            sessionId,
+            channels
+        )
+
+        val staged = argumentCaptor<List<ChannelImportStageEntity>>()
+        verify(catalogSyncDao, atLeastOnce()).insertChannelStages(staged.capture())
+        val chunks = staged.allValues
+
+        assertThat(chunks.sumOf { it.size }).isEqualTo(totalRows)
+        assertThat(chunks.maxOf { it.size }).isAtMost(500)
+        assertThat(chunks).hasSize(totalRows / 500)
+
+        val ordinals = chunks.flatMap { chunk -> chunk.map { it.stagedSeq } }
+        assertThat(ordinals.first()).isEqualTo(1L)
+        assertThat(ordinals.last()).isEqualTo(totalRows.toLong())
+        assertThat(ordinals.toSet()).hasSize(totalRows)
     }
 
     @Test

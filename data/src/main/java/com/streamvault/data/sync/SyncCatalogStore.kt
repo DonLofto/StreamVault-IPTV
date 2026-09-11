@@ -373,9 +373,25 @@ internal class SyncCatalogStore(
      */
     suspend fun stageChannelBatch(providerId: Long, sessionId: Long, channels: List<ChannelEntity>): Long {
         val baseSeq = catalogSyncDao.maxStagedChannelSeqOrNull(providerId, sessionId) ?: 0L
-        val rows = buildChannelStages(providerId, sessionId, channels, baseSeq)
-        insertStageRows(rows, catalogSyncDao::insertChannelStages)
-        return rows.maxOfOrNull { it.stagedSeq } ?: baseSeq
+        // A58 - stream the built rows straight into the staged inserts instead of materialising a
+        // second whole-provider list. The full-catalog live path calls this once per batch, and each
+        // ChannelImportStageEntity carries eighteen fields, so the intermediate list was the larger
+        // of the two live copies. insertStageRows already wrote in STAGE_BATCH_SIZE chunks; only the
+        // list in front of it is gone.
+        var lastSeq = baseSeq
+        val batch = ArrayList<ChannelImportStageEntity>(STAGE_BATCH_SIZE)
+        buildChannelStageSequence(providerId, sessionId, channels, baseSeq).forEach { row ->
+            lastSeq = row.stagedSeq
+            batch += row
+            if (batch.size >= STAGE_BATCH_SIZE) {
+                catalogSyncDao.insertChannelStages(batch.toList())
+                batch.clear()
+            }
+        }
+        if (batch.isNotEmpty()) {
+            catalogSyncDao.insertChannelStages(batch)
+        }
+        return lastSeq
     }
 
     suspend fun stageMovieBatch(providerId: Long, sessionId: Long, movies: List<MovieEntity>) {
@@ -608,8 +624,22 @@ internal class SyncCatalogStore(
         sessionId: Long,
         channels: List<ChannelEntity>,
         baseSeq: Long = 0L
-    ): List<ChannelImportStageEntity> {
+    ): List<ChannelImportStageEntity> =
+        buildChannelStageSequence(providerId, sessionId, channels, baseSeq).toList()
+
+    /**
+     * A58 - the staged rows for [channels] as a sequence, so the caller can insert them in chunks
+     * without a second whole-provider list. Only the seen-stream-id set is materialised, which is
+     * a few hundred kilobytes for 30k channels against roughly ten megabytes for the rows.
+     */
+    private fun buildChannelStageSequence(
+        providerId: Long,
+        sessionId: Long,
+        channels: List<ChannelEntity>,
+        baseSeq: Long = 0L
+    ): Sequence<ChannelImportStageEntity> {
         return channels
+            .asSequence()
             .distinctBy { it.streamId }
             .mapIndexed { index, channel ->
                 ChannelImportStageEntity(
