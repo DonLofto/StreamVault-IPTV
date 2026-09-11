@@ -176,6 +176,31 @@ Conclusions:
 A18 therefore still lacks only the composition-count Compose test the card asks for. The D-pad check
 it asks for is done, and it passed.
 
+## A35 correction (round 37) - the round-28 objection to reordering was WRONG
+
+Round 28 recorded that "start from the live edge" could not be done because ${BT}DashWindow${BT} is an
+insertion-ordered ${BT}ArrayDeque${BT}, so downloading newest-first would reverse the playlist, and because
+${BT}prune()${BT} evicts from the front and backfilled (older) segments would evict themselves.
+
+The first half is right: iterating ${BT}asReversed()${BT} with plain ${BT}addMedia${BT} would reverse the snapshot playlist.
+
+The second half is **wrong**. Inserting backfilled segments with ${BT}addFirst${BT} keeps the deque chronological
+(oldest at the front), and ${BT}prune()${BT} removing from the front then removes the genuinely oldest. Once the
+window is full, each further backfilled segment is older than the retention window and is correctly
+evicted - that is the right answer, not self-defeat.
+
+So reordering IS viable. What it still needs, and why it is not done: the poll loop must (a) insert with
+${BT}addFirst${BT} only while backfilling and with ${BT}addLast${BT} once the window is populated, since new segments on later
+polls are newer than everything held, and (b) stop the backfill once ${BT}mediaDurationMs()${BT} reaches the
+retention depth, marking the remaining older URIs as considered so later polls do not re-download and
+evict them. That is a timeshift behaviour change and needs the AGENTS.md live-TV protocol, which has not
+completed a run since round 23.
+
+Also fixed this round: ${BT}CancellableHttpTest${BT} was never flaky. Its ${BT}delay(50)${BT} was a virtual delay under
+${BT}runTest${BT}, and its teardown raced a deliberately delayed response. Both fixed in ${BT}6e72dfe8${BT}; the class now
+passes five consecutive ${BT}--rerun-tasks${BT} runs. Every previous round that reported "the known
+${BT}CancellableHttpTest${BT} flake" was reporting a real, fixable defect.
+
 ## A5 second attempt (round 29) - REVERTED, and the key premise is now disproved
 
 Round 15 tried swapping the helpers to `DateTimeFormatter.parse(CharSequence, ParsePosition)` with a
