@@ -385,8 +385,14 @@ class EpgSourceRepositoryImpl @Inject constructor(
                                 )
                                 programmeCount++
                                 if (programmeBatch.size >= PROGRAMME_BATCH_SIZE) {
-                                    epgProgrammeDao.insertAll(programmeBatch.toList())
+                                    val batch = programmeBatch.toList()
                                     programmeBatch.clear()
+                                    // Without this each batch was its own implicit transaction - a
+                                    // commit, a WAL frame write and an fsync. A 200k-programme
+                                    // source issued ~400 of them per refresh.
+                                    transactionRunner.inTransaction {
+                                        epgProgrammeDao.insertAll(batch)
+                                    }
                                 }
                             }
                         )
@@ -395,10 +401,14 @@ class EpgSourceRepositoryImpl @Inject constructor(
 
                 // Flush remaining staging batches
                 if (channelBatch.isNotEmpty()) {
-                    epgChannelDao.insertAll(channelBatch.toList())
+                    transactionRunner.inTransaction {
+                        epgChannelDao.insertAll(channelBatch.toList())
+                    }
                 }
                 if (programmeBatch.isNotEmpty()) {
-                    epgProgrammeDao.insertAll(programmeBatch.toList())
+                    transactionRunner.inTransaction {
+                        epgProgrammeDao.insertAll(programmeBatch.toList())
+                    }
                 }
 
                 // Atomically swap staging data into the real source ID
