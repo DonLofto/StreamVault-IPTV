@@ -49,7 +49,9 @@ fun ChannelLogoBadge(
         // L3: keep one AsyncImage mounted and layer the initials/fallback beneath it, so
         // success/failure state changes never remount the image request (and its painter).
         Text(
-            text = channelInitials(channelName),
+            // ~5 allocations per badge per recomposition, and a badge renders in every guide
+            // row, list row and card.
+            text = remember(channelName) { channelInitials(channelName) },
             style = textStyle,
             color = textColor,
             fontWeight = FontWeight.Bold
