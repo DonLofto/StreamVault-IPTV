@@ -43,17 +43,20 @@ class StreamVaultApp : Application(), SingletonImageLoader.Factory {
     @Inject
     lateinit var startupCoordinator: com.streamvault.app.startup.StartupCoordinator
 
+    // Deferred: field-injecting these built the whole network graph - OkHttp client plus two
+    // DiskLruCache journals - during Application.onCreate, on the main thread, BEFORE the
+    // startDeferredStartup() checkpoint that exists to keep exactly this off the cold-start path.
     @Inject
-    lateinit var okHttpClient: OkHttpClient
+    lateinit var okHttpClient: dagger.Lazy<OkHttpClient>
 
     @Inject
     lateinit var jellyfinImageAuthInterceptor: JellyfinImageAuthInterceptor
 
     @Inject
-    lateinit var appCacheQuota: AppCacheQuota
+    lateinit var appCacheQuota: dagger.Lazy<AppCacheQuota>
 
     private val imageOkHttpClient: OkHttpClient by lazy {
-        okHttpClient.newBuilder()
+        okHttpClient.get().newBuilder()
             .addInterceptor(jellyfinImageAuthInterceptor)
             .build()
     }
@@ -96,7 +99,7 @@ class StreamVaultApp : Application(), SingletonImageLoader.Factory {
             .diskCache {
                 DiskCache.Builder()
                     .directory(this.cacheDir.resolve("image_cache").toOkioPath())
-                    .maxSizeBytes(appCacheQuota.budgets.imageCacheBytes)
+                    .maxSizeBytes(appCacheQuota.get().budgets.imageCacheBytes)
                     .build()
             }
             // Limit concurrent decoding and fetching to 6 for TV hardware constraints
