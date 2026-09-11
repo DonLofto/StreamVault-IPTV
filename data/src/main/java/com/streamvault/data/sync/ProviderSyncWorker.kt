@@ -104,6 +104,7 @@ class ProviderSyncWorker(
         fun syncMetadataRepository(): SyncMetadataRepository
         fun xtreamIndexJobDao(): XtreamIndexJobDao
         fun xtreamLiveOnboardingDao(): XtreamLiveOnboardingDao
+        fun playbackNetworkAdmissionGate(): PlaybackNetworkAdmissionGate
     }
 
     override suspend fun doWork(): Result {
@@ -120,6 +121,21 @@ class ProviderSyncWorker(
             }
             if (providers.isEmpty()) {
                 return Result.success()
+            }
+
+            // H6 defers background catalog/EPG traffic while playback is active, but only the
+            // Stalker index worker and the background EPG worker consulted the gate. A full
+            // provider sync - Xtream catalog plus every EPG refresh - otherwise ran at full
+            // concurrency during live playback, on the same client and the same radio, which is
+            // exactly the contention that makes live TV rebuffer.
+            val admissionGate = entryPoint.playbackNetworkAdmissionGate()
+            if (admissionGate.awaitBackgroundAdmission(
+                    trafficClass = PlaybackNetworkAdmissionGate.TrafficClass.BACKGROUND_CATALOG,
+                    maxWaitMs = 30_000L
+                ) == PlaybackNetworkAdmissionGate.Admission.DEFER
+            ) {
+                Log.w(TAG, "Deferring provider sync: playback is active")
+                return Result.retry()
             }
 
             var sawRetryableFailure = false
