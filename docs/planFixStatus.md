@@ -3,7 +3,7 @@
 Tracks implementation of the 59 findings in `docs/performance-audit.md`.
 Plan: `docs/planFix.md`. Baseline commit: `740bd55f`.
 
-**46 done · 5 partial · 1 superseded · 7 open.** Commits marked DONE are on `master`; the working
+**46 done · 6 partial · 1 superseded · 6 open.** Commits marked DONE are on `master`; the working
 tree is clean. Verification for every DONE item was a module compile plus the relevant test suite;
 Room-validated SQL and byte-identical golden output are called out where they apply.
 
@@ -64,6 +64,7 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | ID | State |
 |---|---|
 | **A5** | Parse-time half DONE (`3b8cb2c5`: fallback `Regex` and `DateTimeFormatter` hoisted). **The exception-driven format probing itself is still open** — `parseDate` still constructs and throws up to 11 `DateTimeParseException`s per date, twice per programme. **ATTEMPTED AND REVERTED 2026-09-11 — read this before retrying.** Swapping the three helpers to `DateTimeFormatter.parse(CharSequence, ParsePosition)` with a `position.index == text.length` full-consumption check **changed behaviour**: 5 `XmltvParserTest` cases failed, all of them offset-less timestamps (`20250101140000` with pattern `yyyyMMddHHmmss`) that previously parsed and now returned null, plus a `DateTimeParseException` escaping for genuinely malformed input (so the ParsePosition overload can still throw). The naive swap is **not** behaviour-preserving. Retry only by first writing failing tests that pin the offset-less case, then establishing empirically what the ParsePosition overload does to `position.index` and to field resolution for these patterns. The single-`DateTimeFormatterBuilder`-with-`optionalOffset()` route may be the better shape. |
+| **A34** | Implemented (`fd6b1859`): the MEMORY backend now evicts on a byte ceiling derived from the heap class (quarter of the heap, clamped to 8-48 MB) in addition to the wall-clock depth, for both progressive chunks and HLS segments. **Open:** the plan's validation is `dumpsys meminfo` across a 5-minute live session, and this is a playback/timeshift change, so it still needs the full AGENTS.md live-TV protocol (61 screenshots, 2 channels, media session `PLAYING`, `error=null`). Unit-tested only so far. |
 | **A25** | Repository half DONE (`68adb5a2`: `flowOn(Dispatchers.Default)` on movie/series `getCategories`). **Open:** the `app/ui` ViewModel `combine` transforms named in the audit (MoviesViewModel:145-171, SeriesViewModel:161/322, HomeViewModel:484, EpgViewModel:1101) still run on `Main.immediate`. |
 | **A38** | Partial. Blocking `Call.execute()` removed from `OkHttpStalkerApiService` (3 sites), `StremioProvider` (1), `DownloadManagerImpl.captureDownload` (1) and `RecordingCaptureEngine.capture` (1) via the existing `CancellableHttp.awaitResponse()`. **Still open:** `JellyfinProvider.executeRequest`, `EmbyProvider.executeRequest`, `RecordingCaptureEngine.fetchText`/`fetchBytes` and `RecordingSourceResolver.probeAdaptiveType` are non-suspend helpers whose *callers* are also non-suspend (`authenticateSession`, `fetchItems`, `fetchSeriesEpisodes`), so converting them ripples outward and needs a deliberate cascade pass. **The `callTimeout` half is not done** — the main client serves EPG under a 200 MB budget, so a blanket total-call cap could abort legitimate slow downloads. Needs a per-client decision. |
 | **A38 site count CORRECTED 2026-09-11** | `docs/performance-audit.md` lists 9 blocking `execute()` sites. A repo-wide sweep finds **18 OkHttp sites**: `GoogleDriveBackupSyncManager` (3), `RecordingSourceResolver` (2), `RecordingCaptureEngine.fetchText`/`fetchBytes` (2), `LiveTranslationClient` (3), `LiveTimeshiftManager` (2), `JellyfinProvider`, `EmbyProvider`, `InternetSpeedTestRunner`, `PlayerViewModel:1396`, `GitHubReleaseChecker`, `StreamVaultPluginManager` (1 each). The audit additionally MISSED `PlayerViewModel`, `GitHubReleaseChecker`, `StreamVaultPluginManager` and `LiveTranslationClient` entirely. The 19th grep hit is `SlowQueryLoggingOpenHelperFactory.delegate.execute()` — a SQLite API, not OkHttp, and correctly excluded. **Twelve are now converted, leaving 12.** The remainder splits two ways: `GoogleDriveBackupSyncManager` (3), `RecordingSourceResolver` (2), `RecordingCaptureEngine.fetchText`/`fetchBytes` (2), `JellyfinProvider`, `EmbyProvider` and `InternetSpeedTestRunner` sit in **non-suspend** functions whose callers are also non-suspend, so they need a deliberate cascade pass; and `LiveTimeshiftManager:469`/`:616` **cannot use the helper at all**, because the `player` module depends only on `:domain` and so cannot see `com.streamvault.data.remote.http.awaitResponse` — that needs the helper moved to `:domain` (or a local copy in `player`). |
@@ -97,25 +98,28 @@ static reading and was wrong about an API.
   measured baseline. Worse, "fixing" it by calling the `Charset` overload directly would compile
   against `compileSdk = 36` and throw `NoSuchMethodError` on API 25–32, i.e. on the target device.
 
-## Open (7)
+## Open (6)
 
-A12, A18, A20, A34, A35, A54, A58.
+A12, A18, A20, A35, A54, A58. A34 moved to Partial (implemented, live-TV validation pending).
 
 Grouped by why they are still open:
 
-- **Need a design decision, not a mechanical edit** — A52's watermark (what counts as "newly staged"),
-  A8 (incremental byte counter must over-estimate, never under, or timeshift fills the device),
-  A13 (skipping resolution is only safe if mappings are known to exist), A55 (Room migration),
-  A34 (MEMORY-backend cap vs the 192 MB heap class).
-- **Need device validation under the `AGENTS.md` live-TV protocol** (61 screenshots, two channels,
-  media session `PLAYING`) — A14, A20, A57, and any playback/timeshift/network-admission change.
-- **Need dedicated test fixtures before changing behaviour** — A4, A6/A9 (classify-once refactor
-  guarded by the `ChannelNormalizerGoldenTest` baseline), A12, A17, A56.
-- **Compose recomposition work** — A16, A18, A19, A24, A40. Measure with `dumpsys gfxinfo` and
-  Compose metrics before and after; the audit's recomposition findings are reasoned from code, not
-  measured, so they need a before/after to confirm the fix helps.
-- **A11, A38** — retry-scope and timeout changes that could break legitimate large transfers
-  (EPG carries a 200 MB budget); both need a `MockWebServer` fixture first.
+- **Needs a schema or download-layer change** — **A12**. The rewrite itself cannot be made cheaper
+  (see the A12 correction below); the win is skipping it for an unchanged feed, which needs a stored
+  feed identity. Decision 2 (per-provider content hash) is taken.
+- **Needs a multi-file streaming refactor** — **A58**. A `Sequence` at the staging boundary is too
+  late; the whole Xtream/M3U ingest chain has to stream.
+- **Needs an upstream signal the code does not have** — **A35** (DASH timeshift must start at the live
+  edge) and **A54** (Room re-executes the aggregate on every `channels` invalidation, so a debounce
+  *downstream* of the query does not stop the SQL from running; it needs a debounced invalidation
+  signal driving a one-shot query, or incremental counts).
+- **Needs the `AGENTS.md` live-TV protocol** (61 screenshots, two channels, media session
+  `PLAYING`, `error=null`) — **A20**, and **A34**, which is implemented but validated by unit test
+  only.
+- **Needs visual review on a TV** — **A18** (LazyRow conversion; correctness is testable, the
+  scroll/DPad feel is not).
+
+Partial items and their remaining halves are in the table above.
 
 ## A6 / A9 device acceptance measurement (2026-09-11)
 
