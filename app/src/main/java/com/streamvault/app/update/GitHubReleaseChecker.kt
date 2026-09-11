@@ -1,6 +1,7 @@
 package com.streamvault.app.update
 
 import com.streamvault.app.BuildConfig
+import com.streamvault.data.remote.http.awaitResponse
 import com.streamvault.domain.model.Result
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -45,7 +46,7 @@ class GitHubReleaseChecker @Inject constructor(
                 .header("User-Agent", "StreamVault-Update-Checker")
                 .build()
 
-            okHttpClient.newCall(request).execute().use { response ->
+            okHttpClient.newCall(request).awaitResponse().use { response ->
                 if (!response.isSuccessful) {
                     return@withContext Result.error("Update check failed: HTTP ${response.code}")
                 }

@@ -1,5 +1,6 @@
 package com.streamvault.app.player
 
+import com.streamvault.data.remote.http.awaitResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -46,7 +47,7 @@ class LiveTranslationClient(
             .url("${endpoint.trimEnd('/')}/v1/live-translation/session")
             .post(requestPayload.toString().toRequestBody(JSON_MEDIA_TYPE))
             .build()
-        okHttpClient.newCall(request).execute().use { response ->
+        okHttpClient.newCall(request).awaitResponse().use { response ->
             if (!response.isSuccessful) {
                 throw IllegalStateException("Live translation start failed (${response.code})")
             }
@@ -71,7 +72,7 @@ class LiveTranslationClient(
                 .url(url)
                 .post(pcm16Mono16k.toRequestBody(PCM_MEDIA_TYPE))
                 .build()
-            okHttpClient.newCall(request).execute().use { response ->
+            okHttpClient.newCall(request).awaitResponse().use { response ->
                 if (!response.isSuccessful) {
                     throw IllegalStateException("Live translation audio upload failed (${response.code})")
                 }
@@ -87,7 +88,7 @@ class LiveTranslationClient(
                 .delete()
                 .build()
             runCatching {
-                okHttpClient.newCall(request).execute().use { /* best-effort */ }
+                okHttpClient.newCall(request).awaitResponse().use { /* best-effort */ }
             }
         }
     }

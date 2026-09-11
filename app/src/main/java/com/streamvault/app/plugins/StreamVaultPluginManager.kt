@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.net.Uri
+import com.streamvault.data.remote.http.awaitResponse
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -125,7 +126,7 @@ class StreamVaultPluginManager @Inject constructor(
         runCatching {
             target.parentFile?.mkdirs()
             val request = Request.Builder().url(normalizedUrl).build()
-            okHttpClient.newCall(request).execute().use { response ->
+            okHttpClient.newCall(request).awaitResponse().use { response ->
                 if (!response.isSuccessful) error("HTTP ${response.code}")
                 val body = response.body ?: error("Empty response")
                 target.outputStream().use { output -> body.byteStream().copyTo(output) }

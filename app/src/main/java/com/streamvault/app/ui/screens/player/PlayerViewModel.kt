@@ -16,6 +16,7 @@ import com.streamvault.app.plugins.StreamVaultPluginManager
 import com.streamvault.app.util.isPlaybackComplete
 import com.streamvault.app.tv.LauncherRecommendationsManager
 import com.streamvault.app.tv.WatchNextManager
+import com.streamvault.data.remote.http.awaitResponse
 import com.streamvault.data.sync.SyncManager
 import com.streamvault.data.remote.stalker.StalkerUrlFactory
 import com.streamvault.data.remote.xtream.XtreamStreamUrlResolver
@@ -1393,7 +1394,9 @@ class PlayerViewModel @Inject constructor(
                 } else {
                     okHttpClient
                 }
-                probeClient.newCall(request).execute().use { response ->
+                // awaitResponse, not execute(): a blocking call ignores OkHttp's Dispatcher caps
+                // (they govern enqueue() only) and cannot be cancelled with its coroutine.
+                probeClient.newCall(request).awaitResponse().use { response ->
                     resolvePlaybackProbeFailure(response.code)
                 }
             }
