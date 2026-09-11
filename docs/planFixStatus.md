@@ -108,9 +108,30 @@ Grouped by why they are still open:
 - **Needs a multi-file streaming refactor** — **A58**. A `Sequence` at the staging boundary is too
   late; the whole Xtream/M3U ingest chain has to stream.
 - **Needs an upstream signal the code does not have** — **A35** (DASH timeshift must start at the live
-  edge) and **A54** (Room re-executes the aggregate on every `channels` invalidation, so a debounce
-  *downstream* of the query does not stop the SQL from running; it needs a debounced invalidation
-  signal driving a one-shot query, or incremental counts).
+  edge).
+
+### A54 - what the obvious fixes do and do not buy (analysed 2026-09-11, not implemented)
+
+Both options in the plan card were re-examined against the actual queries (`Daos.kt:526-575`). Neither
+short form works:
+
+- **Debounce/coalesce downstream of the DAO flow does not help.** `channelDao.getGroupedCategoryCounts`
+  is a Room `Flow`; Room re-executes the SQL itself on every `channels` invalidation and only then
+  emits. A `debounce`/`sample` placed after it suppresses downstream recomposition, not the query.
+  Moving the debounce upstream means observing the table through `InvalidationTracker.createFlow` and
+  driving a one-shot query from it - a real restructure, and one that only coalesces writes that land
+  inside the same window. Progress commits are seconds apart, so it would coalesce almost nothing.
+- **Dropping `CAST(id AS TEXT)` is not behaviour-preserving.** Replacing the `ELSE` branch with the raw
+  `id` looks free, because SQLite's `DISTINCT` treats INTEGER 5 and TEXT '5' as different values
+  rather than equal - but that is exactly the difference: today a grouped channel whose
+  `logical_group_id` is the text `'5'` and an ungrouped channel with `id = 5` collapse to one count,
+  and afterwards they would not. Counts drive UI badges, so that is a user-visible change to make on a
+  guess.
+- **Incremental counts** (the card's option 2) is the only fix that actually removes the work, and it
+  is a table plus write-path maintenance plus its own invalidation story.
+
+So A54 is open pending a decision between "restructure the count flows behind a debounced invalidation
+signal and accept minimal coalescing" and "maintain counts incrementally on write".
 - **Needs the `AGENTS.md` live-TV protocol** (61 screenshots, two channels, media session
   `PLAYING`, `error=null`) — **A20**, and **A34**, which is implemented but validated by unit test
   only.
