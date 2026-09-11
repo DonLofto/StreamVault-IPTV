@@ -111,8 +111,21 @@ internal class SyncManagerXtreamSupport(
         return CategoryExecutionPlan(outcomes = outcomes, warnings = warnings.distinct())
     }
 
+    /**
+     * Retries a whole operation.
+     *
+     * The default is **2** attempts, not 3. Every caller of this wraps an operation that re-does the
+     * entire body when it fails - a whole XMLTV feed (up to a 200 MB budget) or a whole M3U playlist.
+     * Nothing here is resumable, so a failure at 90 % restarts from byte 0, and the third attempt made
+     * the worst case triple the WAN bytes, the XML parse and the staging inserts precisely when the
+     * network was already unhealthy. Two attempts bounds that at double while keeping one retry for
+     * genuinely transient failures; connect-phase failures are largely covered a layer down anyway by
+     * OkHttp's retryOnConnectionFailure.
+     *
+     * A caller that genuinely needs more attempts can pass them explicitly.
+     */
     suspend fun <T> retryTransient(
-        maxAttempts: Int = 3,
+        maxAttempts: Int = 2,
         initialDelayMs: Long = 700L,
         block: suspend () -> T
     ): T {
@@ -131,13 +144,19 @@ internal class SyncManagerXtreamSupport(
                 if (attempt >= maxAttempts || !isRetryable(t)) {
                     throw t
                 }
-                delay(delayMs)
+                // Jitter, so concurrent workers failing against the same unhealthy provider do not
+                // retry in lockstep and re-synchronise their load on the next attempt.
+                delay(delayMs + jitterFor(delayMs))
                 delayMs *= 2
             }
         }
 
         throw lastError ?: IllegalStateException("Unknown sync retry failure")
     }
+
+    /** Up to 25% of [delayMs], so retries de-align instead of marching in step. */
+    private fun jitterFor(delayMs: Long): Long =
+        if (delayMs <= 0L) 0L else kotlin.random.Random.nextLong(delayMs / 4 + 1)
 
     suspend fun <T> attemptNonCancellation(block: suspend () -> T): Attempt<T> {
         return try {
