@@ -3,7 +3,7 @@
 Tracks implementation of the 59 findings in `docs/performance-audit.md`.
 Plan: `docs/planFix.md`. Baseline commit: `740bd55f`.
 
-**41 done · 5 partial · 1 superseded · 12 open.** Commits marked DONE are on `master`; the working
+**41 done · 6 partial · 1 superseded · 11 open.** Commits marked DONE are on `master`; the working
 tree is clean. Verification for every DONE item was a module compile plus the relevant test suite;
 Room-validated SQL and byte-identical golden output are called out where they apply.
 
@@ -62,6 +62,7 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | **A25** | Repository half DONE (`68adb5a2`: `flowOn(Dispatchers.Default)` on movie/series `getCategories`). **Open:** the `app/ui` ViewModel `combine` transforms named in the audit (MoviesViewModel:145-171, SeriesViewModel:161/322, HomeViewModel:484, EpgViewModel:1101) still run on `Main.immediate`. |
 | **A38** | Partial. Blocking `Call.execute()` removed from `OkHttpStalkerApiService` (3 sites), `StremioProvider` (1), `DownloadManagerImpl.captureDownload` (1) and `RecordingCaptureEngine.capture` (1) via the existing `CancellableHttp.awaitResponse()`. **Still open:** `JellyfinProvider.executeRequest`, `EmbyProvider.executeRequest`, `RecordingCaptureEngine.fetchText`/`fetchBytes` and `RecordingSourceResolver.probeAdaptiveType` are non-suspend helpers whose *callers* are also non-suspend (`authenticateSession`, `fetchItems`, `fetchSeriesEpisodes`), so converting them ripples outward and needs a deliberate cascade pass. **The `callTimeout` half is not done** — the main client serves EPG under a 200 MB budget, so a blanket total-call cap could abort legitimate slow downloads. Needs a per-client decision. |
 | **A38 site count CORRECTED 2026-09-11** | `docs/performance-audit.md` lists 9 blocking `execute()` sites. A repo-wide sweep finds **18 OkHttp sites**: `GoogleDriveBackupSyncManager` (3), `RecordingSourceResolver` (2), `RecordingCaptureEngine.fetchText`/`fetchBytes` (2), `LiveTranslationClient` (3), `LiveTimeshiftManager` (2), `JellyfinProvider`, `EmbyProvider`, `InternetSpeedTestRunner`, `PlayerViewModel:1396`, `GitHubReleaseChecker`, `StreamVaultPluginManager` (1 each). The audit additionally MISSED `PlayerViewModel`, `GitHubReleaseChecker`, `StreamVaultPluginManager` and `LiveTranslationClient` entirely. The 19th grep hit is `SlowQueryLoggingOpenHelperFactory.delegate.execute()` — a SQLite API, not OkHttp, and correctly excluded. **Twelve are now converted, leaving 12.** The remainder splits two ways: `GoogleDriveBackupSyncManager` (3), `RecordingSourceResolver` (2), `RecordingCaptureEngine.fetchText`/`fetchBytes` (2), `JellyfinProvider`, `EmbyProvider` and `InternetSpeedTestRunner` sit in **non-suspend** functions whose callers are also non-suspend, so they need a deliberate cascade pass; and `LiveTimeshiftManager:469`/`:616` **cannot use the helper at all**, because the `player` module depends only on `:domain` and so cannot see `com.streamvault.data.remote.http.awaitResponse` — that needs the helper moved to `:domain` (or a local copy in `player`). |
+| **A17** | Partial. The guide-search passes (`buildSearchGuideSnapshot`: the lookup map, the metadata match, the matched-key build and the `mapNotNull`/`associateWith` over the result) now run in `withContext(Dispatchers.Default)` instead of `Dispatchers.Main.immediate`, so the UI thread is no longer doing several full passes over every channel of the provider on a path debounced at only 150 ms. **Still open:** `loadGuideSearchScopeChannels` still calls `channelRepository.getChannels(providerId).first()` with **no LIMIT**, so the whole provider channel table is still loaded into memory per search. Pushing the predicate into SQL is feasible — `matchesGuideMetadataSearch` matches `name` OR `categoryName`, both channel columns — but it needs a new DAO query plus the hidden-category and `accessibleCategoryIds` logic moved with it, and it risks changing search completeness. |
 | **A27** | Reclassified DONE (`c3929c86`). The reflective-codec half was **withdrawn as wrong** — see below. **Open:** the duplicate URL parse (`EntityMappers.kt:196` and `SyncCatalogStore.kt:822` both call `parseInternalStreamUrl`) — carry the `XtreamStreamToken` forward. |
 | **A52** | Row-value half DONE (`8aad07e7`: all four stage merges, 880→510 lines, Room-validated). **Open:** the monotonic watermark, so the progress commit stops re-scanning the whole provider catalog every 500 channels. |
 
@@ -92,9 +93,9 @@ static reading and was wrong about an API.
   measured baseline. Worse, "fixing" it by calling the `Charset` overload directly would compile
   against `compileSdk = 36` and throw `NoSuchMethodError` on API 25–32, i.e. on the target device.
 
-## Open (12)
+## Open (11)
 
-A4, A8, A12, A14, A17, A18, A19, A20, A34, A35, A54, A58.
+A4, A8, A12, A14, A18, A19, A20, A34, A35, A54, A58.
 
 Grouped by why they are still open:
 
