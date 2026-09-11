@@ -56,48 +56,156 @@ private val NON_DIGIT_REGEX = Regex("""[^\d]""")
 private val COMPACT_LOCAL_DATE_TIME: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyyMMddHHmmss", Locale.US)
 
+private const val COMPACT_PREFIX_LENGTH = 14
+private const val ISO_MIN_LENGTH = 19
+private const val SPACE_SEPARATED_DATE_TIME_LENGTH = 19
+
+/** Necessary condition of every `yyyyMMddHHmmss…` pattern: fourteen leading digits. */
+private fun hasCompactDateTimePrefix(dateStr: String): Boolean {
+    if (dateStr.length < COMPACT_PREFIX_LENGTH) return false
+    for (index in 0 until COMPACT_PREFIX_LENGTH) {
+        if (!dateStr[index].isDigit()) return false
+    }
+    return true
+}
+
+/**
+ * Necessary condition of `yyyyMMddHHmmss xx`: fourteen digits, a space, then a signed offset.
+ *
+ * Without the offset test, a date that simply has no offset - by far the most common case - would be
+ * offered to all four compact offset formats and rejected by each of them with a thrown exception.
+ */
+private fun hasSpacedCompactOffset(dateStr: String): Boolean {
+    if (!hasCompactDateTimePrefix(dateStr) || dateStr.length < 16) return false
+    if (dateStr[14] != ' ') return false
+    val sign = dateStr[15]
+    return sign == '+' || sign == '-'
+}
+
+/** Necessary condition of `yyyyMMddHHmmssxx`, `…XXX` and `…X`: an attached offset marker. */
+private fun hasAttachedCompactOffset(dateStr: String): Boolean {
+    if (!hasCompactDateTimePrefix(dateStr) || dateStr.length < 15) return false
+    return when (dateStr[14]) {
+        'Z', 'z', '+', '-' -> true
+        else -> false
+    }
+}
+
+/** Necessary condition of every `yyyy-MM-dd'T'…` pattern. */
+private fun isIsoDateTime(dateStr: String): Boolean =
+    dateStr.length >= ISO_MIN_LENGTH && dateStr[4] == '-' && dateStr[10] == 'T'
+
+/** Necessary condition of `yyyy-MM-dd HH:mm:ss`. */
+private fun isSpaceSeparatedDateTime(dateStr: String): Boolean =
+    dateStr.length == SPACE_SEPARATED_DATE_TIME_LENGTH && dateStr[4] == '-' && dateStr[10] == ' '
+
+/** The throwing parse demands full consumption, so `yyyyMMddHHmmss` needs exactly fourteen digits. */
+private fun isExactlyCompactDateTime(dateStr: String): Boolean =
+    dateStr.length == COMPACT_PREFIX_LENGTH && hasCompactDateTimePrefix(dateStr)
+
+/** `yyyyMMddHHmm`: exactly twelve digits. */
+private fun isExactlyCompactDateTimeMinute(dateStr: String): Boolean =
+    dateStr.length == 12 && dateStr.all(Char::isDigit)
+
+/** `yyyyMMdd`: exactly eight digits. */
+private fun isExactlyCompactDate(dateStr: String): Boolean =
+    dateStr.length == 8 && dateStr.all(Char::isDigit)
+
 class XmltvParser {
 
     private val logger = Logger.getLogger(XmltvParser::class.java.name)
 
-    private val offsetDateFormats = listOf(
+    /**
+     * A5 - a candidate format together with a **necessary** condition on the input string.
+     *
+     * [couldMatch] only ever returns false when the pattern provably cannot match - a fixed-width
+     * literal or field position that the string does not have. A format that matched before still
+     * runs, in the same order; only formats that were going to throw are skipped, and each skip saves
+     * constructing and catching a [java.time.format.DateTimeParseException]. A feed date is probed
+     * against up to eleven candidates twice per programme.
+     */
+    private class DateFormatCandidate(
+        val formatter: DateTimeFormatter,
+        val couldMatch: (String) -> Boolean,
+        val parse: (String, DateTimeFormatter, ZoneId) -> Long?
+    )
+
+    private val dateFormatCandidates: List<DateFormatCandidate> = listOf(
         // Space-separated numeric offset: "20250101120000 +0300"
-        DateTimeFormatterBuilder()
-            .parseCaseInsensitive()
-            .appendPattern("yyyyMMddHHmmss xx")
-            .toFormatter(Locale.US),
+        DateFormatCandidate(
+            DateTimeFormatterBuilder()
+                .parseCaseInsensitive()
+                .appendPattern("yyyyMMddHHmmss xx")
+                .toFormatter(Locale.US),
+            ::hasSpacedCompactOffset,
+            { dateStr, formatter, _ -> parseOffsetDateTime(dateStr, formatter) }
+        ),
         // No-space numeric offset: "20250101120000+0300"
-        DateTimeFormatterBuilder()
-            .parseCaseInsensitive()
-            .appendPattern("yyyyMMddHHmmssxx")
-            .toFormatter(Locale.US),
+        DateFormatCandidate(
+            DateTimeFormatterBuilder()
+                .parseCaseInsensitive()
+                .appendPattern("yyyyMMddHHmmssxx")
+                .toFormatter(Locale.US),
+            ::hasAttachedCompactOffset,
+            { dateStr, formatter, _ -> parseOffsetDateTime(dateStr, formatter) }
+        ),
         // No-space colon offset: "20250101120000+03:00"
-        DateTimeFormatterBuilder()
-            .parseCaseInsensitive()
-            .appendPattern("yyyyMMddHHmmssXXX")
-            .toFormatter(Locale.US),
+        DateFormatCandidate(
+            DateTimeFormatterBuilder()
+                .parseCaseInsensitive()
+                .appendPattern("yyyyMMddHHmmssXXX")
+                .toFormatter(Locale.US),
+            ::hasAttachedCompactOffset,
+            { dateStr, formatter, _ -> parseOffsetDateTime(dateStr, formatter) }
+        ),
         // No-space short/Z offset: "20250101120000Z" or "20250101120000+03"
-        DateTimeFormatterBuilder()
-            .parseCaseInsensitive()
-            .appendPattern("yyyyMMddHHmmssX")
-            .toFormatter(Locale.US),
+        DateFormatCandidate(
+            DateTimeFormatterBuilder()
+                .parseCaseInsensitive()
+                .appendPattern("yyyyMMddHHmmssX")
+                .toFormatter(Locale.US),
+            ::hasAttachedCompactOffset,
+            { dateStr, formatter, _ -> parseOffsetDateTime(dateStr, formatter) }
+        ),
         // ISO-8601 with colon offset
-        DateTimeFormatterBuilder()
-            .parseCaseInsensitive()
-            .appendPattern("yyyy-MM-dd'T'HH:mm:ssXXX")
-            .toFormatter(Locale.US)
-    )
-
-    private val localDateTimeFormats = listOf(
-        DateTimeFormatter.ofPattern("yyyyMMddHHmmss", Locale.US),
-        DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss", Locale.US),
-        DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssX"),
-        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.US),
-        DateTimeFormatter.ofPattern("yyyyMMddHHmm", Locale.US)
-    )
-
-    private val localDateFormats = listOf(
-        DateTimeFormatter.ofPattern("yyyyMMdd", Locale.US)
+        DateFormatCandidate(
+            DateTimeFormatterBuilder()
+                .parseCaseInsensitive()
+                .appendPattern("yyyy-MM-dd'T'HH:mm:ssXXX")
+                .toFormatter(Locale.US),
+            ::isIsoDateTime,
+            { dateStr, formatter, _ -> parseOffsetDateTime(dateStr, formatter) }
+        ),
+        DateFormatCandidate(
+            DateTimeFormatter.ofPattern("yyyyMMddHHmmss", Locale.US),
+            ::isExactlyCompactDateTime,
+            { dateStr, formatter, zone -> parseLocalDateTime(dateStr, formatter, zone) }
+        ),
+        DateFormatCandidate(
+            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss", Locale.US),
+            ::isIsoDateTime,
+            { dateStr, formatter, zone -> parseLocalDateTime(dateStr, formatter, zone) }
+        ),
+        DateFormatCandidate(
+            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssX"),
+            ::isIsoDateTime,
+            { dateStr, formatter, zone -> parseLocalDateTime(dateStr, formatter, zone) }
+        ),
+        DateFormatCandidate(
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.US),
+            ::isSpaceSeparatedDateTime,
+            { dateStr, formatter, zone -> parseLocalDateTime(dateStr, formatter, zone) }
+        ),
+        DateFormatCandidate(
+            DateTimeFormatter.ofPattern("yyyyMMddHHmm", Locale.US),
+            ::isExactlyCompactDateTimeMinute,
+            { dateStr, formatter, zone -> parseLocalDateTime(dateStr, formatter, zone) }
+        ),
+        DateFormatCandidate(
+            DateTimeFormatter.ofPattern("yyyyMMdd", Locale.US),
+            ::isExactlyCompactDate,
+            { dateStr, formatter, zone -> parseLocalDate(dateStr, formatter, zone) }
+        )
     )
 
     private fun newPullParser(inputStream: InputStream): XmlPullParser {
@@ -572,17 +680,12 @@ class XmltvParser {
     private fun parseDate(dateStr: String?, parsingZoneId: ZoneId): Long {
         if (dateStr.isNullOrBlank()) return 0
 
-        offsetDateFormats.firstNotNullOfOrNull { formatter ->
-            parseOffsetDateTime(dateStr, formatter)
-        }?.let { return it }
-
-        localDateTimeFormats.firstNotNullOfOrNull { formatter ->
-            parseLocalDateTime(dateStr, formatter, parsingZoneId)
-        }?.let { return it }
-
-        localDateFormats.firstNotNullOfOrNull { formatter ->
-            parseLocalDate(dateStr, formatter, parsingZoneId)
-        }?.let { return it }
+        // A5 - candidates are still tried in priority order, but one whose necessary condition the
+        // string fails is skipped outright rather than by way of a thrown and caught exception.
+        for (candidate in dateFormatCandidates) {
+            if (!candidate.couldMatch(dateStr)) continue
+            candidate.parse(dateStr, candidate.formatter, parsingZoneId)?.let { return it }
+        }
 
         // Last resort: extract the timestamp portion only if no timezone offset is detectable.
         //
