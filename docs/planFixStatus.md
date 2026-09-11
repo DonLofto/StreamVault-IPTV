@@ -107,6 +107,12 @@ Caveats that a follow-up must close before this is called a product regression:
 - The player's own log lines were absent from `logcat -d` by the time it was read - the 2-minute
   capture plus system logging had rotated the buffer. Capture logs *during* the run next time.
 
+Two further facts observed several minutes after the capture, which sharpen the diagnosis:
+- The screen was **still showing the same frozen frame** (identical byte size to the index-30 capture),
+  so this is not a transient stall that recovered.
+- `XtreamIndexWorker` was logging `Worker result RETRY` in a loop throughout, i.e. a background index
+  worker was failing and rescheduling while playback died. That is the first thread to pull.
+
 **This does not invalidate A34's unit tests, but A34 must stay Partial: its live-TV validation did
 not pass, and nothing about the current build should be marked validated on the strength of this run.**
 
