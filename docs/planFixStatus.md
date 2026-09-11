@@ -80,6 +80,34 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | **A17** | Moved to Done (`84833e08`, `a6c12378`). Both halves: the search passes run in `withContext(guideWorkDispatcher)`, and the two category-visibility filters run in SQL via `ChannelRepository.getGuideSearchScopeChannels` (which reuses `observeChannels`, so parental and hidden-channel visibility are unchanged). Covered by `ChannelGuideScopeDaoTest` against a real in-memory Room database for all three filter shapes. **Two premises in the plan card were wrong** - see the A17 analysis above: the metadata predicate cannot be pushed, and the base snapshot cannot stand in for the load because `allChannels` is capped at `MAX_CHANNELS` (60). |
 | **A27** | Moved to Done (see the Done table). The reflective-codec half was **withdrawn as wrong** — see below. |
 
+### Round 40: a VPN app was overlaying StreamVault during every validation attempt
+
+${BT}adb shell dumpsys activity activities${BT} reported:
+
+${BT}${BT}${BT}
+mResumedActivity: ActivityRecord{... com.privateinternetaccess.android/.ui.tv.DashboardActivity t976}
+${BT}${BT}${BT}
+
+while ${BT}mCurrentFocus${BT} reported StreamVault's MainActivity and ${BT}uiautomator dump${BT} showed the VPN app's UI
+("DISCONNECTED | Search | Automatic | ... | Public IP | PERFORMANCE"). A **VPN app was the resumed
+activity, drawn over StreamVault**, so D-pad input went to it.
+
+This reframes three earlier conclusions:
+
+1. The round-34/35 "the app exposes no D-pad focus" finding was at least partly this - input was being
+   delivered to an overlay, not dropped by the app.
+2. The update banner blamed in round 35 was a red herring.
+3. The live-TV freeze in rounds 23/24 and 26 has a new candidate that is not device capacity: a VPN
+   dashboard taking the foreground mid-playback. This is testable and should be tested before any
+   further memory work.
+
+Force-stopping ${BT}com.privateinternetaccess.android${BT} put StreamVault genuinely in front.
+
+**Validation now needs the user.** The app shows "Set up a provider to unlock the home screen" because
+its data was cleared in round 35, and the provider credentials are not mine to re-enter - so the
+live-TV protocol cannot be restarted from here. The remaining sequence is: re-add the provider, let the
+library sync, then play two channels for the two-minute window.
+
 ### Round 35: the app's D-pad focus is the live blocker, and the update banner is the suspect
 
 The no-focus state from round 34 is **not** first-run state - it persisted many minutes later, and the
