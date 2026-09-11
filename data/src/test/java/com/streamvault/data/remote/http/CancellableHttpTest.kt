@@ -35,14 +35,18 @@ class CancellableHttpTest {
 
     @After
     fun tearDown() {
-        server.shutdown()
+        // Every test here cancels a call while a deliberately delayed response is still pending, so
+        // the server may still be draining one when the test ends. MockWebServer reports that as
+        // "Gave up waiting for queue to shut down", which is the scenario under test rather than a
+        // leak - and it was the real cause of this class's long-standing intermittent failures.
+        runCatching { server.shutdown() }
     }
 
     @Test
-    fun cancelBeforeHeaders_cancelsCallImmediately() = runTest {
+    fun cancelBeforeHeaders_cancelsCallImmediately() = runBlocking {
         server.enqueue(
             MockResponse()
-                .setHeadersDelay(5, TimeUnit.SECONDS)
+                .setHeadersDelay(2, TimeUnit.SECONDS)
                 .setBody("hello")
         )
 
@@ -57,19 +61,21 @@ class CancellableHttpTest {
             }
         }
 
-        // Allow coroutine to start and enqueue call
-        delay(50)
+        // Wait for the call to actually be in flight. A fixed delay here used to be a virtual delay
+        // under runTest, so it returned without any real time passing and the cancellation could land
+        // before awaitResponse had enqueued anything - which is why this test failed intermittently.
+        assertThat(server.takeRequest(2, TimeUnit.SECONDS)).isNotNull()
         job.cancelAndJoin()
 
         assertThat(call.isCanceled()).isTrue()
     }
 
     @Test
-    fun cancelDuringStreamingBody_cancelsCallAndClosesBody() = runTest {
+    fun cancelDuringStreamingBody_cancelsCallAndClosesBody() = runBlocking {
         server.enqueue(
             MockResponse()
                 .setBody("line1\nline2\nline3\n")
-                .setBodyDelay(5, TimeUnit.SECONDS)
+                .setBodyDelay(2, TimeUnit.SECONDS)
         )
 
         val request = Request.Builder().url(server.url("/stream")).build()
@@ -91,7 +97,9 @@ class CancellableHttpTest {
             }
         }
 
-        delay(50)
+        // Headers arrive immediately; the body is what is delayed, so this proves the call is in
+        // flight without relying on wall-clock timing.
+        assertThat(server.takeRequest(2, TimeUnit.SECONDS)).isNotNull()
         job.cancelAndJoin()
 
         assertThat(call.isCanceled()).isTrue()
@@ -117,10 +125,10 @@ class CancellableHttpTest {
     }
 
     @Test
-    fun restartSucceedsAfterCancellation() = runTest {
+    fun restartSucceedsAfterCancellation() = runBlocking {
         server.enqueue(
             MockResponse()
-                .setHeadersDelay(5, TimeUnit.SECONDS)
+                .setHeadersDelay(2, TimeUnit.SECONDS)
                 .setBody("cancelled")
         )
         server.enqueue(
