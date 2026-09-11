@@ -3,7 +3,7 @@
 Tracks implementation of the 59 findings in `docs/performance-audit.md`.
 Plan: `docs/planFix.md`. Baseline commit: `740bd55f`.
 
-**44 done · 6 partial · 1 superseded · 8 open.** Commits marked DONE are on `master`; the working
+**45 done · 6 partial · 1 superseded · 7 open.** Commits marked DONE are on `master`; the working
 tree is clean. Verification for every DONE item was a module compile plus the relevant test suite;
 Room-validated SQL and byte-identical golden output are called out where they apply.
 
@@ -54,7 +54,8 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | A55 | `8f78a388` | VOD duplicate-resolution indices added (migration 64 -> 65) |
 | A8 | `cec7e087` | Progressive-chunk writes no longer force a directory walk every 2 s |
 | A14 | `285b330f` | Playback EPG shift/sort moved off Main; redundant third sort removed |
-| A19 | see below | EPG grid callbacks capture stable values, not the whole uiState |
+| A19 | `7d874cd2` | EPG grid callbacks capture stable values, not the whole uiState |
+| A4 | `76872471` + see below | Xtream decode paths stream with kotlinx; Gson removed entirely |
 | A6 / A9 | `fc72267c` | `classify` memoised; catalog reclassification made an O(1) lookup. **Device-verified: 4/16 → 1/16 samples with app code actively executing** (see below). |
 
 ## Partial
@@ -96,9 +97,9 @@ static reading and was wrong about an API.
   measured baseline. Worse, "fixing" it by calling the `Charset` overload directly would compile
   against `compileSdk = 36` and throw `NoSuchMethodError` on API 25–32, i.e. on the target device.
 
-## Open (8)
+## Open (7)
 
-A4, A12, A18, A20, A34, A35, A54, A58.
+A12, A18, A20, A34, A35, A54, A58.
 
 Grouped by why they are still open:
 
