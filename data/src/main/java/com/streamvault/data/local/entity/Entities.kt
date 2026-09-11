@@ -485,7 +485,8 @@ data class CategoryEntity(
     )],
     indices = [
         Index(value = ["provider_id"]),
-        Index(value = ["session_id", "provider_id"])
+        Index(value = ["session_id", "provider_id"]),
+        Index(value = ["session_id", "provider_id", "staged_seq"])
     ]
 )
 data class ChannelImportStageEntity(
@@ -506,7 +507,19 @@ data class ChannelImportStageEntity(
     @ColumnInfo(name = "is_adult") val isAdult: Boolean = false,
     @ColumnInfo(name = "logical_group_id") val logicalGroupId: String = "",
     @ColumnInfo(name = "error_count") val errorCount: Int = 0,
-    @ColumnInfo(name = "sync_fingerprint") val syncFingerprint: String = ""
+    @ColumnInfo(name = "sync_fingerprint") val syncFingerprint: String = "",
+    /**
+     * A52 - monotonic insertion ordinal, scoped to (session_id, provider_id).
+     *
+     * Progress commits re-ran the full stage merge on every interval, re-scanning every
+     * channel row of the provider even though only the newly staged rows could possibly
+     * have changed. This ordinal lets [com.streamvault.data.local.dao.CatalogSyncDao]
+     * merge only the rows staged since the previous progress commit.
+     *
+     * Assigned by the store at insert time; never renumbered. Existing rows default to 0
+     * so an upgrade merges everything once, which is the previous behaviour.
+     */
+    @ColumnInfo(name = "staged_seq", defaultValue = "0") val stagedSeq: Long = 0L
 )
 
 @Entity(

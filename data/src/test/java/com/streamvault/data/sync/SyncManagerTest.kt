@@ -615,8 +615,8 @@ class SyncManagerTest {
         assertThat(xtreamBackend.requestedActions).doesNotContain("get_live_streams")
         assertThat(states.allValues.map { it.phase }).containsAtLeast("RECOVERING", "COMMITTING", "COMPLETED")
         assertThat(states.allValues.last { it.phase == "COMPLETED" }.stagedSessionId).isNull()
-        verify(catalogSyncDao).updateChangedChannelsFromStage(1L, 123L)
-        verify(catalogSyncDao).insertMissingChannelsFromStage(1L, 123L)
+        verify(catalogSyncDao).updateChangedChannelsFromStage(1L, 123L, 0L)
+        verify(catalogSyncDao).insertMissingChannelsFromStage(1L, 123L, 0L)
         verify(catalogSyncDao).deleteStaleChannelsForStage(1L, 123L)
         verify(catalogSyncDao).clearChannelStages(1L, 123L)
     }
@@ -1063,8 +1063,8 @@ class SyncManagerTest {
         assertThat(mgr.currentSyncState(1L)).isInstanceOf(SyncState.Success::class.java)
         assertThat(syncMetadataRepo.getMetadata(1L)?.liveCount).isEqualTo(1)
         val stagedSessionId = argumentCaptor<Long>()
-        verify(catalogSyncDao).updateChangedChannelsFromStage(eq(1L), stagedSessionId.capture())
-        verify(catalogSyncDao).insertMissingChannelsFromStage(1L, stagedSessionId.firstValue)
+        verify(catalogSyncDao).updateChangedChannelsFromStage(eq(1L), stagedSessionId.capture(), eq(0L))
+        verify(catalogSyncDao).insertMissingChannelsFromStage(eq(1L), eq(stagedSessionId.firstValue), eq(0L))
         verify(catalogSyncDao).clearChannelStages(1L, stagedSessionId.firstValue)
     }
 

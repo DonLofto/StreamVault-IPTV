@@ -1475,6 +1475,70 @@ class StreamVaultDatabaseMigrationTest {
         migratedDb.close()
     }
 
+    /**
+     * A52: the staging ordinal added in 65 -> 66.
+     *
+     * runMigrationsAndValidate already compares the migrated schema against the generated 66 schema,
+     * so this additionally asserts the index exists by name and that pre-existing staged rows survive
+     * with the documented 0 default (so the first merge after upgrade behaves as before).
+     */
+    @Test
+    fun migration_65_to_66() {
+        migrationTestHelper.createDatabase("streamvault-65-66-test", 65).apply {
+            execSQL(
+                """
+                INSERT INTO channel_import_stage (
+                    session_id, provider_id, stream_id, name, logo_url, group_title, category_id,
+                    category_name, stream_url, epg_channel_id, number, catch_up_supported,
+                    catch_up_days, catchUpSource, is_adult, logical_group_id, error_count,
+                    sync_fingerprint
+                ) VALUES (7, 1, 1001, 'Channel One', '', 'Group', 5, 'Group', 'http://test/1.ts',
+                          'epg1', 1, 0, 0, '', 0, '', 0, 'fp-1')
+                """.trimIndent()
+            )
+            execSQL(
+                """
+                INSERT INTO channel_import_stage (
+                    session_id, provider_id, stream_id, name, logo_url, group_title, category_id,
+                    category_name, stream_url, epg_channel_id, number, catch_up_supported,
+                    catch_up_days, catchUpSource, is_adult, logical_group_id, error_count,
+                    sync_fingerprint
+                ) VALUES (7, 1, 1002, 'Channel Two', '', 'Group', 5, 'Group', 'http://test/2.ts',
+                          'epg2', 2, 0, 0, '', 0, '', 0, 'fp-2')
+                """.trimIndent()
+            )
+            close()
+        }
+
+        val migratedDb = migrationTestHelper.runMigrationsAndValidate(
+            "streamvault-65-66-test",
+            66,
+            true,
+            StreamVaultDatabase.MIGRATION_65_66
+        )
+
+        assertEquals(
+            "missing index index_channel_import_stage_session_id_provider_id_staged_seq",
+            1,
+            countRows(
+                migratedDb,
+                "SELECT COUNT(*) FROM pragma_index_list('channel_import_stage') " +
+                    "WHERE name = 'index_channel_import_stage_session_id_provider_id_staged_seq'"
+            )
+        )
+
+        // Both staged rows survive, and both default to the documented ordinal 0.
+        assertEquals(
+            2,
+            countRows(migratedDb, "SELECT COUNT(*) FROM channel_import_stage WHERE session_id = 7 AND provider_id = 1")
+        )
+        assertEquals(
+            0,
+            countRows(migratedDb, "SELECT COUNT(*) FROM channel_import_stage WHERE staged_seq != 0")
+        )
+        migratedDb.close()
+    }
+
     private fun exists(db: androidx.sqlite.db.SupportSQLiteDatabase, sql: String): Boolean {
         db.query(sql).use { cursor ->
             return cursor.moveToFirst()

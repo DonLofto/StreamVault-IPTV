@@ -246,6 +246,9 @@ internal class SyncManagerXtreamLiveStrategy(
         var mappingElapsedMs = 0L
         var stagingElapsedMs = 0L
         var lastProgressCommitChannels = 0
+        // A52 - watermark of the last successful mid-sync progress commit, so each commit
+        // merges only the channel rows staged since the previous one.
+        var lastCommittedStageSeq = 0L
 
         fun abortIfLowMemory() {
             if (isCurrentlyLowOnMemory()) {
@@ -295,10 +298,11 @@ internal class SyncManagerXtreamLiveStrategy(
             if (acceptedCount - lastProgressCommitChannels >= LIVE_PROGRESS_COMMIT_CHANNEL_INTERVAL) {
                 lastProgressCommitChannels = acceptedCount
                 try {
-                    syncCatalogStore.commitStagedLiveCatalogProgress(
+                    lastCommittedStageSeq = syncCatalogStore.commitStagedLiveCatalogProgress(
                         providerId = provider.id,
                         sessionId = stagedSessionId!!,
-                        categories = fallbackCollector.entities().takeIf { it.isNotEmpty() }
+                        categories = fallbackCollector.entities().takeIf { it.isNotEmpty() },
+                        afterSeq = lastCommittedStageSeq
                     )
                 } catch (error: Exception) {
                     Log.w(
@@ -345,6 +349,7 @@ internal class SyncManagerXtreamLiveStrategy(
                     stagedSessionId?.let { sessionId ->
                         syncCatalogStore.discardStagedImport(provider.id, sessionId)
                         stagedSessionId = null
+                        lastCommittedStageSeq = 0L
                     }
                 }
             }
@@ -440,6 +445,9 @@ internal class SyncManagerXtreamLiveStrategy(
         var stagedSessionId: Long? = null
         var stagedAcceptedCount = 0
         var lastProgressCommitAt = 0
+        // A52 - watermark of the last successful mid-sync progress commit (see the
+        // full-stream path above for the rationale).
+        var lastCommittedStageSeq = 0L
 
         suspend fun stageMappedBatch(channels: List<Channel>) {
             if (channels.isEmpty()) return
@@ -465,10 +473,11 @@ internal class SyncManagerXtreamLiveStrategy(
             lastProgressCommitAt = completed
             val sessionId = stagedSessionId ?: return
             try {
-                syncCatalogStore.commitStagedLiveCatalogProgress(
+                lastCommittedStageSeq = syncCatalogStore.commitStagedLiveCatalogProgress(
                     providerId = provider.id,
                     sessionId = sessionId,
-                    categories = fallbackCollector.entities().takeIf { it.isNotEmpty() }
+                    categories = fallbackCollector.entities().takeIf { it.isNotEmpty() },
+                    afterSeq = lastCommittedStageSeq
                 )
             } catch (error: Exception) {
                 Log.w(

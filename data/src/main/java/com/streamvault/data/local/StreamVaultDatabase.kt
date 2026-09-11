@@ -50,7 +50,7 @@ import com.streamvault.data.local.entity.*
         XtreamLiveOnboardingStateEntity::class,
         DownloadEntity::class
     ],
-    version = 65,
+    version = 66,
     exportSchema = true   // ← was false; schema JSON now tracked in version control
 )
 @TypeConverters(RoomEnumConverters::class)
@@ -2755,6 +2755,29 @@ abstract class StreamVaultDatabase : RoomDatabase() {
                 )
                 database.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_series_provider_id_release_date` ON `series` (`provider_id`, `release_date`)"
+                )
+            }
+        }
+
+        /**
+         * A52 - monotonic staging ordinal for the channel stage table.
+         *
+         * Progress commits during a long live sync re-ran the whole stage merge on every
+         * interval, re-scanning every channel row of the provider even though only the rows
+         * staged since the previous commit could have changed. The new column carries the
+         * insertion ordinal so the merge can be restricted to the delta.
+         *
+         * Existing rows default to 0, which makes the first merge after the upgrade behave
+         * exactly as before (merge everything once). Non-destructive: column + index only.
+         */
+        val MIGRATION_65_66 = object : Migration(65, 66) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE `channel_import_stage` ADD COLUMN `staged_seq` INTEGER NOT NULL DEFAULT 0"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_channel_import_stage_session_id_provider_id_staged_seq` " +
+                        "ON `channel_import_stage` (`session_id`, `provider_id`, `staged_seq`)"
                 )
             }
         }

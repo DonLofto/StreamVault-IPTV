@@ -160,7 +160,9 @@ internal class FallbackCategoryCollector(
 internal data class StagedCatalogSnapshot(
     val sessionId: Long?,
     val acceptedCount: Int,
-    val fallbackCategories: List<CategoryEntity>?
+    val fallbackCategories: List<CategoryEntity>?,
+    /** A52 - highest channel-stage ordinal present after this batch; the progress watermark. */
+    val stagedSeq: Long = 0L
 )
 
 internal class StableLongHasher {

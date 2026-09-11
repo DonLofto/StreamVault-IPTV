@@ -226,11 +226,19 @@ internal class SyncCatalogStore(
      * completed categories makes partial results browsable and the UI progress meaningful
      * instead of showing nothing until the whole section has been fetched.
      */
-    suspend fun commitStagedLiveCatalogProgress(providerId: Long, sessionId: Long, categories: List<CategoryEntity>?) {
-        transactionRunner.inTransaction {
+    suspend fun commitStagedLiveCatalogProgress(
+        providerId: Long,
+        sessionId: Long,
+        categories: List<CategoryEntity>?,
+        afterSeq: Long = 0L
+    ): Long {
+        return transactionRunner.inTransaction {
             categories?.let { stageCategories(providerId, sessionId, it) }
             categories?.let { applyCategories(providerId, sessionId, "LIVE", pruneStale = false) }
-            upsertChannels(providerId, sessionId)
+            upsertChannels(providerId, sessionId, afterSeq)
+            // Returned watermark: everything staged up to here is now merged in. Falls back
+            // to the incoming watermark so a missing value can never move it backwards.
+            catalogSyncDao.maxStagedChannelSeqOrNull(providerId, sessionId) ?: afterSeq
         }
     }
 
@@ -355,8 +363,19 @@ internal class SyncCatalogStore(
         }
     }
 
-    suspend fun stageChannelBatch(providerId: Long, sessionId: Long, channels: List<ChannelEntity>) {
-        insertStageRows(buildChannelStages(providerId, sessionId, channels), catalogSyncDao::insertChannelStages)
+    /**
+     * Stages one batch of channels under [sessionId] and returns the highest staged ordinal
+     * now present for that session (A52).
+     *
+     * The ordinal continues an existing sequence so repeated batches within one session share
+     * a single monotonic counter; callers use the returned value as the next progress-commit
+     * watermark.
+     */
+    suspend fun stageChannelBatch(providerId: Long, sessionId: Long, channels: List<ChannelEntity>): Long {
+        val baseSeq = catalogSyncDao.maxStagedChannelSeqOrNull(providerId, sessionId) ?: 0L
+        val rows = buildChannelStages(providerId, sessionId, channels, baseSeq)
+        insertStageRows(rows, catalogSyncDao::insertChannelStages)
+        return rows.maxOfOrNull { it.stagedSeq } ?: baseSeq
     }
 
     suspend fun stageMovieBatch(providerId: Long, sessionId: Long, movies: List<MovieEntity>) {
@@ -489,8 +508,9 @@ internal class SyncCatalogStore(
     }
 
     private suspend fun applyChannels(providerId: Long, sessionId: Long) {
-        catalogSyncDao.updateChangedChannelsFromStage(providerId, sessionId)
-        catalogSyncDao.insertMissingChannelsFromStage(providerId, sessionId)
+        // Authoritative swap: every staged row participates, so the watermark is 0.
+        catalogSyncDao.updateChangedChannelsFromStage(providerId, sessionId, 0L)
+        catalogSyncDao.insertMissingChannelsFromStage(providerId, sessionId, 0L)
         catalogSyncDao.deleteStaleChannelsForStage(providerId, sessionId)
     }
 
@@ -499,9 +519,9 @@ internal class SyncCatalogStore(
      * existing rows. Used when a partial result or size-limit overflow makes it unsafe
      * to treat absent staged rows as deletions.
      */
-    private suspend fun upsertChannels(providerId: Long, sessionId: Long) {
-        catalogSyncDao.updateChangedChannelsFromStage(providerId, sessionId)
-        catalogSyncDao.insertMissingChannelsFromStage(providerId, sessionId)
+    private suspend fun upsertChannels(providerId: Long, sessionId: Long, afterSeq: Long = 0L) {
+        catalogSyncDao.updateChangedChannelsFromStage(providerId, sessionId, afterSeq)
+        catalogSyncDao.insertMissingChannelsFromStage(providerId, sessionId, afterSeq)
         // Intentionally no stale deletion — partial or overflow commits must not remove
         // channels that were not part of the successfully fetched subset.
     }
@@ -586,12 +606,14 @@ internal class SyncCatalogStore(
     private fun buildChannelStages(
         providerId: Long,
         sessionId: Long,
-        channels: List<ChannelEntity>
+        channels: List<ChannelEntity>,
+        baseSeq: Long = 0L
     ): List<ChannelImportStageEntity> {
         return channels
             .distinctBy { it.streamId }
-            .map { channel ->
+            .mapIndexed { index, channel ->
                 ChannelImportStageEntity(
+                    stagedSeq = baseSeq + index + 1L,
                     sessionId = sessionId,
                     providerId = providerId,
                     streamId = channel.streamId,

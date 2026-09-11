@@ -114,7 +114,7 @@ class SyncCatalogStoreTest {
             )
         )
 
-        verify(catalogSyncDao).updateChangedChannelsFromStage(eq(providerId), any())
+        verify(catalogSyncDao).updateChangedChannelsFromStage(eq(providerId), any(), eq(0L))
     }
 
     @Test
@@ -147,7 +147,7 @@ class SyncCatalogStoreTest {
         store(transactionRunner = runner).applyStagedLiveCatalog(providerId = 7L, sessionId = 55L, categories = null)
 
         assertThat(runner.calls).isEqualTo(1)
-        verify(catalogSyncDao).updateChangedChannelsFromStage(eq(7L), eq(55L))
+        verify(catalogSyncDao).updateChangedChannelsFromStage(eq(7L), eq(55L), eq(0L))
         verify(catalogSyncDao).deleteStaleChannelsForStage(eq(7L), eq(55L))
     }
 
@@ -160,13 +160,23 @@ class SyncCatalogStoreTest {
 
         // Two progress commits on the same session: both must run inside a transaction,
         // upsert-only (no stale deletion) and must NOT clear the staged rows that later
-        // category batches still rely on.
-        store.commitStagedLiveCatalogProgress(providerId, sessionId, categories = null)
-        store.commitStagedLiveCatalogProgress(providerId, sessionId, categories = null)
+        // category batches still rely on. The second commit must also resume from the
+        // watermark the first one returned instead of re-merging every staged row (A52).
+        whenever(catalogSyncDao.maxStagedChannelSeqOrNull(providerId, sessionId)).thenReturn(120L, 240L)
+
+        val firstWatermark = store.commitStagedLiveCatalogProgress(providerId, sessionId, categories = null)
+        assertThat(firstWatermark).isEqualTo(120L)
+        store.commitStagedLiveCatalogProgress(
+            providerId,
+            sessionId,
+            categories = null,
+            afterSeq = firstWatermark
+        )
 
         assertThat(runner.calls).isEqualTo(2)
-        verify(catalogSyncDao, times(2)).updateChangedChannelsFromStage(eq(providerId), eq(sessionId))
-        verify(catalogSyncDao, times(2)).insertMissingChannelsFromStage(eq(providerId), eq(sessionId))
+        verify(catalogSyncDao).updateChangedChannelsFromStage(eq(providerId), eq(sessionId), eq(0L))
+        verify(catalogSyncDao).updateChangedChannelsFromStage(eq(providerId), eq(sessionId), eq(120L))
+        verify(catalogSyncDao, times(2)).insertMissingChannelsFromStage(eq(providerId), eq(sessionId), any())
         verify(catalogSyncDao, never()).deleteStaleChannelsForStage(any(), any())
         verify(catalogSyncDao, never()).clearChannelStages(any(), any())
         verify(catalogSyncDao, never()).clearCategoryStages(any(), any())

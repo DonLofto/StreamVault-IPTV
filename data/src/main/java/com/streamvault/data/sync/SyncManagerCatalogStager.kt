@@ -177,17 +177,19 @@ internal class SyncManagerCatalogStager(
             fallbackCollector.record(channel.categoryId, channel.categoryName, channel.isAdult)
             acceptedEntities += channel.toEntity()
         }
+        var stagedSeq = 0L
         if (acceptedEntities.isNotEmpty()) {
             if (resolvedSessionId == null) {
                 syncCatalogStore.clearProviderStaging(providerId)
                 resolvedSessionId = syncCatalogStore.newSessionId()
             }
-            syncCatalogStore.stageChannelBatch(providerId, requireNotNull(resolvedSessionId), acceptedEntities)
+            stagedSeq = syncCatalogStore.stageChannelBatch(providerId, requireNotNull(resolvedSessionId), acceptedEntities)
         }
         return StagedCatalogSnapshot(
             sessionId = resolvedSessionId,
             acceptedCount = acceptedEntities.size,
-            fallbackCategories = fallbackCollector.entities().takeIf { it.isNotEmpty() }
+            fallbackCategories = fallbackCollector.entities().takeIf { it.isNotEmpty() },
+            stagedSeq = stagedSeq
         )
     }
 
@@ -201,12 +203,14 @@ internal class SyncManagerCatalogStager(
         val batch = ArrayList<Channel>(fallbackStageBatchSize)
         var currentSessionId = sessionId
         var acceptedCount = 0
+        var stagedSeq = 0L
 
         suspend fun flushBatch() {
             if (batch.isEmpty()) return
             val staged = stageChannelItems(providerId, batch, seenStreamIds, fallbackCollector, currentSessionId)
             currentSessionId = staged.sessionId
             acceptedCount += staged.acceptedCount
+            stagedSeq = staged.stagedSeq
             batch.clear()
         }
 
@@ -219,7 +223,8 @@ internal class SyncManagerCatalogStager(
         return StagedCatalogSnapshot(
             sessionId = currentSessionId,
             acceptedCount = acceptedCount,
-            fallbackCategories = fallbackCollector.entities().takeIf { it.isNotEmpty() }
+            fallbackCategories = fallbackCollector.entities().takeIf { it.isNotEmpty() },
+            stagedSeq = stagedSeq
         )
     }
 }

@@ -59,6 +59,15 @@ interface CatalogSyncDao {
     @Query("SELECT * FROM channel_import_stage WHERE provider_id = :providerId AND session_id = :sessionId")
     suspend fun getChannelStages(providerId: Long, sessionId: Long): List<ChannelImportStageEntity>
 
+    /**
+     * A52 - highest staged ordinal currently in the channel stage for this session.
+     *
+     * The store reads this before inserting a batch so every batch continues a single
+     * monotonic sequence, and the progress-commit watermark is derived from it.
+     */
+    @Query("SELECT COALESCE(MAX(staged_seq), 0) FROM channel_import_stage WHERE provider_id = :providerId AND session_id = :sessionId")
+    suspend fun maxStagedChannelSeqOrNull(providerId: Long, sessionId: Long): Long?
+
     @Query("SELECT * FROM movie_import_stage WHERE provider_id = :providerId AND session_id = :sessionId")
     suspend fun getMovieStages(providerId: Long, sessionId: Long): List<MovieImportStageEntity>
 
@@ -193,11 +202,12 @@ interface CatalogSyncDao {
               WHERE stage.session_id = :sessionId
                 AND stage.provider_id = :providerId
                 AND stage.stream_id = channels.stream_id
+                AND stage.staged_seq > :afterSeq
                 AND channels.sync_fingerprint != stage.sync_fingerprint
           )
         """
     )
-    suspend fun updateChangedChannelsFromStage(providerId: Long, sessionId: Long)
+    suspend fun updateChangedChannelsFromStage(providerId: Long, sessionId: Long, afterSeq: Long)
 
     @Query(
         """
@@ -243,6 +253,7 @@ interface CatalogSyncDao {
         FROM channel_import_stage AS stage
         WHERE stage.session_id = :sessionId
           AND stage.provider_id = :providerId
+          AND stage.staged_seq > :afterSeq
           AND NOT EXISTS (
               SELECT 1
               FROM channels AS existing
@@ -251,7 +262,7 @@ interface CatalogSyncDao {
           )
         """
     )
-    suspend fun insertMissingChannelsFromStage(providerId: Long, sessionId: Long)
+    suspend fun insertMissingChannelsFromStage(providerId: Long, sessionId: Long, afterSeq: Long)
 
     @Query(
         """
