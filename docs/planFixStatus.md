@@ -3,7 +3,7 @@
 Tracks implementation of the 59 findings in `docs/performance-audit.md`.
 Plan: `docs/planFix.md`. Baseline commit: `740bd55f`.
 
-**37 done · 4 partial · 1 superseded · 17 open.** Commits marked DONE are on `master`; the working
+**38 done · 4 partial · 1 superseded · 16 open.** Commits marked DONE are on `master`; the working
 tree is clean. Verification for every DONE item was a module compile plus the relevant test suite;
 Room-validated SQL and byte-identical golden output are called out where they apply.
 
@@ -49,7 +49,8 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | A56 | `d67ebee3` | VOD browse page built once per fetch instead of twice |
 | A24 | `21c15fd8` | Archive capability evaluated once per channel, not per programme |
 | A11 | `01dc8a06` | Whole-body retries capped at 2 attempts and jittered |
-| A13 | see below | EPG resolution skipped when guide data did not change and mappings exist |
+| A13 | `d0531dfc` | EPG resolution skipped when guide data did not change and mappings exist |
+| A57 | see below | Watch Next refresh throttled to once per minute of playback |
 
 ## Partial
 
@@ -87,9 +88,9 @@ static reading and was wrong about an API.
   measured baseline. Worse, "fixing" it by calling the `Charset` overload directly would compile
   against `compileSdk = 36` and throw `NoSuchMethodError` on API 25–32, i.e. on the target device.
 
-## Open (17)
+## Open (16)
 
-A4, A6, A8, A9, A12, A14, A17, A18, A19, A20, A34, A35, A38, A54, A55, A57, A58.
+A4, A6, A8, A9, A12, A14, A17, A18, A19, A20, A34, A35, A38, A54, A55, A58.
 
 Grouped by why they are still open:
 
