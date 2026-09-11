@@ -98,37 +98,14 @@ interface CatalogSyncDao {
     @Query(
         """
         UPDATE categories
-        SET name = (
-                SELECT stage.name
-                FROM category_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.type = :type
-                  AND stage.category_id = categories.category_id
-            ),
-            parent_id = (
-                SELECT stage.parent_id
-                FROM category_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.type = :type
-                  AND stage.category_id = categories.category_id
-            ),
-            is_adult = (
-                SELECT stage.is_adult
-                FROM category_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.type = :type
-                  AND stage.category_id = categories.category_id
-            ),
-            sync_fingerprint = (
-                SELECT stage.sync_fingerprint
-                FROM category_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.type = :type
-                  AND stage.category_id = categories.category_id
+        SET (name, parent_id, is_adult, sync_fingerprint)
+          = (
+              SELECT stage.name, stage.parent_id, stage.is_adult, stage.sync_fingerprint
+              FROM category_import_stage AS stage
+              WHERE stage.session_id = :sessionId
+                AND stage.provider_id = :providerId
+                AND stage.type = :type
+                AND stage.category_id = categories.category_id
             )
         WHERE provider_id = :providerId
           AND type = :type
@@ -201,110 +178,13 @@ interface CatalogSyncDao {
     @Query(
         """
         UPDATE channels
-        SET name = (
-                SELECT stage.name
-                FROM channel_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = channels.stream_id
-            ),
-            logo_url = (
-                SELECT stage.logo_url
-                FROM channel_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = channels.stream_id
-            ),
-            group_title = (
-                SELECT stage.group_title
-                FROM channel_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = channels.stream_id
-            ),
-            category_id = (
-                SELECT stage.category_id
-                FROM channel_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = channels.stream_id
-            ),
-            category_name = (
-                SELECT stage.category_name
-                FROM channel_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = channels.stream_id
-            ),
-            stream_url = (
-                SELECT stage.stream_url
-                FROM channel_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = channels.stream_id
-            ),
-            epg_channel_id = (
-                SELECT stage.epg_channel_id
-                FROM channel_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = channels.stream_id
-            ),
-            number = (
-                SELECT stage.number
-                FROM channel_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = channels.stream_id
-            ),
-            catch_up_supported = (
-                SELECT stage.catch_up_supported
-                FROM channel_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = channels.stream_id
-            ),
-            catch_up_days = (
-                SELECT stage.catch_up_days
-                FROM channel_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = channels.stream_id
-            ),
-            catchUpSource = (
-                SELECT stage.catchUpSource
-                FROM channel_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = channels.stream_id
-            ),
-            logical_group_id = (
-                SELECT stage.logical_group_id
-                FROM channel_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = channels.stream_id
-            ),
-            error_count = (
-                SELECT stage.error_count
-                FROM channel_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = channels.stream_id
-            ),
-            is_adult = (
-                SELECT stage.is_adult
-                FROM channel_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = channels.stream_id
-            ),
-            sync_fingerprint = (
-                SELECT stage.sync_fingerprint
-                FROM channel_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = channels.stream_id
+        SET (name, logo_url, group_title, category_id, category_name, stream_url, epg_channel_id, number, catch_up_supported, catch_up_days, catchUpSource, logical_group_id, error_count, is_adult, sync_fingerprint)
+          = (
+              SELECT stage.name, stage.logo_url, stage.group_title, stage.category_id, stage.category_name, stage.stream_url, stage.epg_channel_id, stage.number, stage.catch_up_supported, stage.catch_up_days, stage.catchUpSource, stage.logical_group_id, stage.error_count, stage.is_adult, stage.sync_fingerprint
+              FROM channel_import_stage AS stage
+              WHERE stage.session_id = :sessionId
+                AND stage.provider_id = :providerId
+                AND stage.stream_id = channels.stream_id
             )
         WHERE provider_id = :providerId
           AND EXISTS (
@@ -391,145 +271,13 @@ interface CatalogSyncDao {
     @Query(
         """
         UPDATE movies
-        SET name = (
-                SELECT stage.name
-                FROM movie_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = movies.stream_id
-            ),
-            poster_url = (
-                SELECT stage.poster_url
-                FROM movie_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = movies.stream_id
-            ),
-            backdrop_url = (
-                SELECT stage.backdrop_url
-                FROM movie_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = movies.stream_id
-            ),
-            category_id = (
-                SELECT stage.category_id
-                FROM movie_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = movies.stream_id
-            ),
-            category_name = (
-                SELECT stage.category_name
-                FROM movie_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = movies.stream_id
-            ),
-            stream_url = (
-                SELECT stage.stream_url
-                FROM movie_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = movies.stream_id
-            ),
-            container_extension = (
-                SELECT stage.container_extension
-                FROM movie_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = movies.stream_id
-            ),
-            plot = (
-                SELECT stage.plot
-                FROM movie_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = movies.stream_id
-            ),
-            cast = (
-                SELECT stage.cast
-                FROM movie_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = movies.stream_id
-            ),
-            director = (
-                SELECT stage.director
-                FROM movie_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = movies.stream_id
-            ),
-            genre = (
-                SELECT stage.genre
-                FROM movie_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = movies.stream_id
-            ),
-            release_date = (
-                SELECT stage.release_date
-                FROM movie_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = movies.stream_id
-            ),
-            duration = (
-                SELECT stage.duration
-                FROM movie_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = movies.stream_id
-            ),
-            duration_seconds = (
-                SELECT stage.duration_seconds
-                FROM movie_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = movies.stream_id
-            ),
-            rating = (
-                SELECT stage.rating
-                FROM movie_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = movies.stream_id
-            ),
-            year = (
-                SELECT stage.year
-                FROM movie_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = movies.stream_id
-            ),
-            tmdb_id = (
-                SELECT stage.tmdb_id
-                FROM movie_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = movies.stream_id
-            ),
-            youtube_trailer = (
-                SELECT stage.youtube_trailer
-                FROM movie_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = movies.stream_id
-            ),
-            is_adult = (
-                SELECT stage.is_adult
-                FROM movie_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = movies.stream_id
-            ),
-            sync_fingerprint = (
-                SELECT stage.sync_fingerprint
-                FROM movie_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.stream_id = movies.stream_id
+        SET (name, poster_url, backdrop_url, category_id, category_name, stream_url, container_extension, plot, cast, director, genre, release_date, duration, duration_seconds, rating, year, tmdb_id, youtube_trailer, is_adult, sync_fingerprint)
+          = (
+              SELECT stage.name, stage.poster_url, stage.backdrop_url, stage.category_id, stage.category_name, stage.stream_url, stage.container_extension, stage.plot, stage.cast, stage.director, stage.genre, stage.release_date, stage.duration, stage.duration_seconds, stage.rating, stage.year, stage.tmdb_id, stage.youtube_trailer, stage.is_adult, stage.sync_fingerprint
+              FROM movie_import_stage AS stage
+              WHERE stage.session_id = :sessionId
+                AND stage.provider_id = :providerId
+                AND stage.stream_id = movies.stream_id
             )
         WHERE provider_id = :providerId
           AND EXISTS (
@@ -634,131 +382,13 @@ interface CatalogSyncDao {
     @Query(
         """
         UPDATE series
-        SET name = (
-                SELECT stage.name
-                FROM series_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.provider_series_key = COALESCE(NULLIF(series.provider_series_id, ''), CAST(series.series_id AS TEXT))
-            ),
-            poster_url = (
-                SELECT stage.poster_url
-                FROM series_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.provider_series_key = COALESCE(NULLIF(series.provider_series_id, ''), CAST(series.series_id AS TEXT))
-            ),
-            backdrop_url = (
-                SELECT stage.backdrop_url
-                FROM series_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.provider_series_key = COALESCE(NULLIF(series.provider_series_id, ''), CAST(series.series_id AS TEXT))
-            ),
-            category_id = (
-                SELECT stage.category_id
-                FROM series_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.provider_series_key = COALESCE(NULLIF(series.provider_series_id, ''), CAST(series.series_id AS TEXT))
-            ),
-            category_name = (
-                SELECT stage.category_name
-                FROM series_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.provider_series_key = COALESCE(NULLIF(series.provider_series_id, ''), CAST(series.series_id AS TEXT))
-            ),
-            plot = (
-                SELECT stage.plot
-                FROM series_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.provider_series_key = COALESCE(NULLIF(series.provider_series_id, ''), CAST(series.series_id AS TEXT))
-            ),
-            cast = (
-                SELECT stage.cast
-                FROM series_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.provider_series_key = COALESCE(NULLIF(series.provider_series_id, ''), CAST(series.series_id AS TEXT))
-            ),
-            director = (
-                SELECT stage.director
-                FROM series_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.provider_series_key = COALESCE(NULLIF(series.provider_series_id, ''), CAST(series.series_id AS TEXT))
-            ),
-            genre = (
-                SELECT stage.genre
-                FROM series_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.provider_series_key = COALESCE(NULLIF(series.provider_series_id, ''), CAST(series.series_id AS TEXT))
-            ),
-            release_date = (
-                SELECT stage.release_date
-                FROM series_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.provider_series_key = COALESCE(NULLIF(series.provider_series_id, ''), CAST(series.series_id AS TEXT))
-            ),
-            rating = (
-                SELECT stage.rating
-                FROM series_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.provider_series_key = COALESCE(NULLIF(series.provider_series_id, ''), CAST(series.series_id AS TEXT))
-            ),
-            tmdb_id = (
-                SELECT stage.tmdb_id
-                FROM series_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.provider_series_key = COALESCE(NULLIF(series.provider_series_id, ''), CAST(series.series_id AS TEXT))
-            ),
-            youtube_trailer = (
-                SELECT stage.youtube_trailer
-                FROM series_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.provider_series_key = COALESCE(NULLIF(series.provider_series_id, ''), CAST(series.series_id AS TEXT))
-            ),
-            episode_run_time = (
-                SELECT stage.episode_run_time
-                FROM series_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.provider_series_key = COALESCE(NULLIF(series.provider_series_id, ''), CAST(series.series_id AS TEXT))
-            ),
-            last_modified = (
-                SELECT stage.last_modified
-                FROM series_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.provider_series_key = COALESCE(NULLIF(series.provider_series_id, ''), CAST(series.series_id AS TEXT))
-            ),
-            provider_series_id = (
-                SELECT stage.provider_series_id
-                FROM series_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.provider_series_key = COALESCE(NULLIF(series.provider_series_id, ''), CAST(series.series_id AS TEXT))
-            ),
-            is_adult = (
-                SELECT stage.is_adult
-                FROM series_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.provider_series_key = COALESCE(NULLIF(series.provider_series_id, ''), CAST(series.series_id AS TEXT))
-            ),
-            sync_fingerprint = (
-                SELECT stage.sync_fingerprint
-                FROM series_import_stage AS stage
-                WHERE stage.session_id = :sessionId
-                  AND stage.provider_id = :providerId
-                  AND stage.provider_series_key = COALESCE(NULLIF(series.provider_series_id, ''), CAST(series.series_id AS TEXT))
+        SET (name, poster_url, backdrop_url, category_id, category_name, plot, cast, director, genre, release_date, rating, tmdb_id, youtube_trailer, episode_run_time, last_modified, provider_series_id, is_adult, sync_fingerprint)
+          = (
+              SELECT stage.name, stage.poster_url, stage.backdrop_url, stage.category_id, stage.category_name, stage.plot, stage.cast, stage.director, stage.genre, stage.release_date, stage.rating, stage.tmdb_id, stage.youtube_trailer, stage.episode_run_time, stage.last_modified, stage.provider_series_id, stage.is_adult, stage.sync_fingerprint
+              FROM series_import_stage AS stage
+              WHERE stage.session_id = :sessionId
+                AND stage.provider_id = :providerId
+                AND stage.provider_series_key = COALESCE(NULLIF(series.provider_series_id, ''), CAST(series.series_id AS TEXT))
             )
         WHERE provider_id = :providerId
           AND EXISTS (
