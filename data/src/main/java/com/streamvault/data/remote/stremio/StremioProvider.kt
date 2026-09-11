@@ -2,6 +2,7 @@ package com.streamvault.data.remote.stremio
 
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.streamvault.data.remote.http.awaitResponse
 import com.streamvault.domain.model.Result
 import com.streamvault.domain.stremio.*
 import okhttp3.OkHttpClient
@@ -135,12 +136,15 @@ class StremioProvider @Inject constructor(
         }
     }
 
-    private fun executeRequest(request: Request, errorContext: String): String {
+    private suspend fun executeRequest(request: Request, errorContext: String): String {
         val client = okHttpClient.newBuilder()
             .connectTimeout(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .readTimeout(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .build()
-        client.newCall(request).execute().use { response ->
+        // awaitResponse() rather than execute(): a blocking call ignores OkHttp's Dispatcher caps
+        // (they govern enqueue() only) and cannot be cancelled when the coroutine is cancelled, so
+        // a dribbling server holds a Dispatchers.IO thread until the read timeout elapses.
+        client.newCall(request).awaitResponse().use { response ->
             if (!response.isSuccessful) {
                 throw IllegalStateException("$errorContext: HTTP ${response.code}")
             }

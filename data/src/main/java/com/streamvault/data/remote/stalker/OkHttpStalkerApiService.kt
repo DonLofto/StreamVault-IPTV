@@ -14,6 +14,7 @@ import com.streamvault.domain.model.StalkerMagPreset
 import com.streamvault.domain.model.StalkerPlaybackBackendHint
 import com.streamvault.domain.model.StalkerPortalFingerprint
 import com.streamvault.domain.model.StalkerPortalProfile
+import com.streamvault.data.remote.http.awaitResponse
 import com.streamvault.domain.util.StreamEntryUrlPolicy
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -972,8 +973,8 @@ class OkHttpStalkerApiService @Inject constructor(
         }.getOrElse { throw it }
     }
 
-    private fun executeJsonRequest(request: Request, action: String?, profile: StalkerDeviceProfile): JsonElement {
-        return stalkerHttpClientFor(profile).newCall(request).execute().use { response ->
+    private suspend fun executeJsonRequest(request: Request, action: String?, profile: StalkerDeviceProfile): JsonElement {
+        return stalkerHttpClientFor(profile).newCall(request).awaitResponse().use { response ->
             captureResponseCookies(response)
             if (!response.isSuccessful) {
                 response.body?.close()
@@ -1080,7 +1081,7 @@ class OkHttpStalkerApiService @Inject constructor(
         profile: StalkerDeviceProfile,
         onItem: suspend (StalkerItemRecord) -> Unit
     ): Int {
-        return stalkerHttpClientFor(profile).newCall(request).execute().use { response ->
+        return stalkerHttpClientFor(profile).newCall(request).awaitResponse().use { response ->
             captureResponseCookies(response)
             if (!response.isSuccessful) {
                 throw IOException("Portal request failed with HTTP ${response.code}.")
@@ -1219,7 +1220,7 @@ class OkHttpStalkerApiService @Inject constructor(
         channelIdOverride: String?,
         onProgram: suspend (StalkerProgramRecord) -> Unit
     ): Int {
-        return stalkerHttpClientFor(profile).newCall(request).execute().use { response ->
+        return stalkerHttpClientFor(profile).newCall(request).awaitResponse().use { response ->
             captureResponseCookies(response)
             if (!response.isSuccessful) {
                 throw IOException("Portal request failed with HTTP ${response.code}.")
