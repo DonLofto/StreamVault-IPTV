@@ -211,7 +211,16 @@ fun PlayerScreen(
     val liveTranslationDetectedLanguage by viewModel.liveTranslationDetectedLanguage.collectAsStateWithLifecycle()
     val aspectRatio by viewModel.aspectRatio.collectAsStateWithLifecycle()
     val showDiagnostics by viewModel.showDiagnostics.collectAsStateWithLifecycle()
-    val playerDiagnostics by viewModel.playerDiagnostics.collectAsStateWithLifecycle()
+    // Diagnostics are only RENDERED under showDiagnostics, but this flow was collected
+    // unconditionally. The engine republishes lastVideoFrameAgoMs every second and it is derived as
+    // (now - lastFrameAt), so it differs on every tick and the StateFlow always emits - re-executing
+    // this whole ~1370-line composable once per second for the entire playback session. Collect only
+    // while the overlay can actually display it. A16.
+    val playerDiagnostics by if (showDiagnostics) {
+        viewModel.playerDiagnostics.collectAsStateWithLifecycle()
+    } else {
+        remember { mutableStateOf(PlayerDiagnosticsUiState()) }
+    }
     val playerNotice by viewModel.playerNotice.collectAsStateWithLifecycle()
     val currentChannelRecording by viewModel.currentChannelRecording.collectAsStateWithLifecycle()
     val isMuted by viewModel.isMuted.collectAsStateWithLifecycle()
