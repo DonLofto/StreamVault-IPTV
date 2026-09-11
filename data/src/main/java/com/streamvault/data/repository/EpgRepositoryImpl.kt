@@ -13,6 +13,7 @@ import com.streamvault.data.parser.XmltvParser
 import com.streamvault.data.parser.EpgInputLimitException
 import com.streamvault.data.parser.MaxBytesInputStream
 import com.streamvault.data.remote.http.HttpRequestProfile
+import com.streamvault.data.remote.http.newIsolatedClient
 import com.streamvault.data.remote.http.safeRequestIdentitySummary
 import com.streamvault.data.remote.http.toGenericRequestProfile
 import com.streamvault.data.remote.http.withRequestProfile
@@ -85,7 +86,11 @@ class EpgRepositoryImpl @Inject constructor(
     private val providerRefreshMutexes = ConcurrentHashMap<Long, Mutex>()
 
     private val epgHttpClient: OkHttpClient by lazy {
-        okHttpClient.newBuilder()
+        // A20 - newBuilder() alone would share the main client's Dispatcher and ConnectionPool by
+        // reference, so a 200 MB EPG download would occupy the same connection slots as playback.
+        // newIsolatedClient replaces both while inheriting the cache, interceptors and timeouts.
+        okHttpClient.newIsolatedClient(maxRequests = 4, maxRequestsPerHost = 2)
+            .newBuilder()
             .readTimeout(NetworkTimeoutConfig.EPG_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .build()
     }

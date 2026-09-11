@@ -22,6 +22,8 @@ import com.streamvault.player.PlayerEngine
 import com.streamvault.player.PlaybackSupportSnapshotStore
 import com.streamvault.player.cache.AppCacheQuota
 import com.streamvault.data.di.BackgroundSyncClient
+import com.streamvault.data.di.StalkerClient
+import com.streamvault.data.remote.http.newIsolatedClient
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -110,10 +112,17 @@ object NetworkModule {
         )
 
     /**
-     * H6: background sync traffic class. Bounded dispatcher and per-host concurrency so
-     * catalog/EPG work never starves the playback client's slots on shared Wi-Fi or host
-     * connections. Authentication, TLS, cache, and timeouts stay consistent with the main
-     * client; only concurrency capacity differs.
+     * H6: background sync traffic class. Bounded dispatcher and per-host concurrency so catalog work
+     * never starves the playback client's slots on shared Wi-Fi or host connections. Built from a
+     * fresh [OkHttpClient.Builder], so it owns its Dispatcher and ConnectionPool outright;
+     * authentication, TLS, cache and timeouts stay consistent with the main client and only
+     * concurrency capacity differs.
+     *
+     * A20: this class was real only for M3U/Xtream sync. Stalker ran on the main client and EPG on a
+     * client derived with [OkHttpClient.newBuilder], which copies the Dispatcher and ConnectionPool
+     * **by reference** - so those two were never isolated at all. Both now use
+     * [com.streamvault.data.remote.http.newIsolatedClient]; see [provideStalkerClient] and
+     * EpgRepositoryImpl's epgHttpClient.
      */
     @Provides
     @Singleton
@@ -156,10 +165,25 @@ object NetworkModule {
             .build()
     }
 
+    /**
+     * A20 - Stalker gets its own traffic class.
+     *
+     * It used to run on the main client, sharing its Dispatcher and ConnectionPool by reference with
+     * playback, so a slow or hung portal competed for the same connection slots. Eager, unlike the
+     * EPG client, because Stalker sync can start immediately after launch.
+     */
     @Provides
     @Singleton
-    fun provideStalkerApiService(okHttpClient: OkHttpClient, xtreamJson: Json): StalkerApiService =
-        OkHttpStalkerApiService(okHttpClient, xtreamJson)
+    @StalkerClient
+    fun provideStalkerClient(okHttpClient: OkHttpClient): OkHttpClient =
+        okHttpClient.newIsolatedClient(maxRequests = 4, maxRequestsPerHost = 2)
+
+    @Provides
+    @Singleton
+    fun provideStalkerApiService(
+        @StalkerClient okHttpClient: OkHttpClient,
+        xtreamJson: Json
+    ): StalkerApiService = OkHttpStalkerApiService(okHttpClient, xtreamJson)
 
     @Provides
     @Singleton
