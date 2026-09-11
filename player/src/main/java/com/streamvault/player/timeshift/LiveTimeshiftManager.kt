@@ -1077,6 +1077,18 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             prune()
         }
 
+        /**
+         * A35 - insert at the oldest end, for filling the window backwards from the live edge.
+         *
+         * This keeps the deque chronological (oldest at the front), so [prune] still removes the
+         * genuinely oldest segment rather than the one just added.
+         */
+        fun addMediaFirst(segment: HlsSegmentSnapshot) {
+            media.addFirst(segment)
+            mediaDurationMs += segment.durationMs
+            prune()
+        }
+
         fun initSegment(): HlsSegmentSnapshot? = init
 
         fun mediaSegments(): List<HlsSegmentSnapshot> = media.toList()
@@ -1167,13 +1179,24 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                         }
                     }
 
-                    parsed.mediaSegments.forEach { remote ->
+                    // A35 - the first poll used to download the whole retention window oldest first, so
+                    // the live edge - the part a viewer can actually reach - arrived only after every
+                    // older segment, one serial request each. It now fills from the live edge backwards:
+                    // newest first, inserted at the oldest end so the window stays chronological, and
+                    // stopping once the retention depth is covered. Segments beyond that are marked as
+                    // considered rather than downloaded only to be pruned straight back out.
+                    val backfilling = window.mediaSize() == 0
+                    val pollSegments = if (backfilling) parsed.mediaSegments.asReversed() else parsed.mediaSegments
+                    var backfilledMs = 0L
+                    pollSegments.forEach { remote ->
                         currentCoroutineContext().ensureActive()
                         if (!seenSegments.add(remote.uri)) return@forEach
+                        if (backfilling && backfilledMs >= effectiveDepthMs) return@forEach
                         awaitPlaybackNotStressed()
                         val retained = retainSegment(remote, isInit = false)
+                        backfilledMs += retained.durationMs
                         val windowDuration = segmentMutex.withLock {
-                            window.addMedia(retained)
+                            if (backfilling) window.addMediaFirst(retained) else window.addMedia(retained)
                             while (backend == LiveTimeshiftBackend.DISK && !diskManager.isWithinBudget() && window.mediaSize() > 1) {
                                 window.evictOldestMedia()
                             }
