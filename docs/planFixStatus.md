@@ -75,6 +75,37 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | **A17** | Moved to Done (`84833e08`, `a6c12378`). Both halves: the search passes run in `withContext(guideWorkDispatcher)`, and the two category-visibility filters run in SQL via `ChannelRepository.getGuideSearchScopeChannels` (which reuses `observeChannels`, so parental and hidden-channel visibility are unchanged). Covered by `ChannelGuideScopeDaoTest` against a real in-memory Room database for all three filter shapes. **Two premises in the plan card were wrong** - see the A17 analysis above: the metadata predicate cannot be pushed, and the base snapshot cannot stand in for the load because `allChannels` is capped at `MAX_CHANNELS` (60). |
 | **A27** | Moved to Done (see the Done table). The reflective-codec half was **withdrawn as wrong** — see below. |
 
+## A18 re-analysis (round 25) - the plan's prescribed fix does not fit the component
+
+The card says "replace the inner `Row` with a `LazyRow` (add `key` per programme)". That cannot be done
+as written, and the reason is structural rather than cosmetic:
+
+- The grid is **one shared horizontally scrolled strip**, not one scroller per row.
+  `EpgGridComponents.kt:496-500` is a single `Row` of `totalTimelineWidth` with
+  `horizontalScroll(scrollState)`, and the same `scrollState` is passed into every channel row so all
+  rows stay aligned. A `LazyRow` owns its scroll position through a `LazyListState`; it cannot be
+  driven from an externally shared `ScrollState`. Making the rows lazy means either giving up the
+  shared scroll or re-implementing scroll syncing across N lazy lists - a large, focus-sensitive
+  change on the one screen the previous audit (B7) already flagged for fragile D-pad traversal.
+- `ProgramItem` is not a list cell. It positions itself inside a full-width `Box` using
+  `padding(start = ...)` computed from the programme's start time (`:535-546`), so a lazy list has no
+  item widths to measure.
+
+**The viable route is the card's option 2, windowing**, and it is a much smaller change:
+
+1. Derive the visible time range from the already-shared `scrollState` plus `timelineViewportWidth`
+   and `totalTimelineWidth`, wrapped in `remember { derivedStateOf { ... } }` - the same pattern A40
+   used in this file to keep a per-pixel scroll read out of composition.
+2. Filter `programs` to those intersecting that range plus an overscan margin, before the
+   `programs.forEach`. Everything else - the `Box`, the padding-based positioning, the marker layer,
+   the focus callbacks - stays byte-identical, which is what keeps the D-pad behaviour safe.
+
+That drops per-row composition from ~2.3x the visible cells to ~1x (the window is 7 h, only 3 h is
+visible), which is the audit's actual complaint. The Compose test the card asks for - `ProgramItem`
+compositions bounded by visible cells rather than window size - applies unchanged to this route.
+
+Nothing here is implemented yet.
+
 ## Live-TV validation attempts (round 23) - FAILED, live playback freezes
 
 First successful run of the AGENTS.md protocol on the AFTSSS after the round-22 launch-command fix.
