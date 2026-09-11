@@ -10,6 +10,7 @@ import android.os.Environment
 import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
 import androidx.documentfile.provider.DocumentFile
+import com.streamvault.data.remote.http.awaitResponse
 import com.streamvault.data.local.dao.DownloadDao
 import com.streamvault.data.local.entity.DownloadEntity
 import com.streamvault.data.preferences.PreferencesRepository
@@ -286,7 +287,10 @@ class DownloadManagerImpl @Inject constructor(
             if (resumeFrom > 0L) requestBuilder.header("Range", "bytes=$resumeFrom-")
             val call = okHttpClient.newCall(requestBuilder.build())
             activeCalls[initial.id] = call
-            call.execute().use { response ->
+            // awaitResponse, not execute(): execute() ignores OkHttp's Dispatcher caps (they govern
+            // enqueue() only) and cannot be interrupted, so a stalled server pinned a Dispatchers.IO
+            // thread for the whole read timeout with no way to reclaim it.
+            call.awaitResponse().use { response ->
                 if (!response.isSuccessful) throw HttpDownloadException(response.code)
                 val body = response.body ?: error("Empty response body")
                 val rangeAccepted = resumeFrom > 0L && response.code == HttpURLConnection.HTTP_PARTIAL

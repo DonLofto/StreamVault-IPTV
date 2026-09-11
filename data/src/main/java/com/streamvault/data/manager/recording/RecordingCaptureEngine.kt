@@ -1,6 +1,7 @@
 package com.streamvault.data.manager.recording
 
 import android.content.ContentResolver
+import com.streamvault.data.remote.http.awaitResponse
 import com.streamvault.domain.model.RecordingFailureCategory
 import com.streamvault.domain.model.RecordingSourceType
 import java.io.ByteArrayOutputStream
@@ -77,7 +78,9 @@ class TsPassThroughCaptureEngine @Inject constructor(
                         source.userAgent?.takeIf { it.isNotBlank() }?.let { header("User-Agent", it) }
                         source.headers.forEach { (key, value) -> header(key, value) }
                     }.build()
-                    okHttpClient.newCall(request).execute().use { response ->
+                    // awaitResponse, not execute(): a blocking call cannot be cancelled, so an
+                    // interrupted recording kept a Dispatchers.IO thread pinned on the socket.
+                    okHttpClient.newCall(request).awaitResponse().use { response ->
                         if (!response.isSuccessful) throw IOException("Recording stream failed with HTTP ${response.code}")
                         val body = response.body ?: throw IOException("Recording stream returned an empty body")
                         body.byteStream().use { input ->
