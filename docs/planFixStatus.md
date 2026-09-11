@@ -79,6 +79,27 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | **A17** | Moved to Done (`84833e08`, `a6c12378`). Both halves: the search passes run in `withContext(guideWorkDispatcher)`, and the two category-visibility filters run in SQL via `ChannelRepository.getGuideSearchScopeChannels` (which reuses `observeChannels`, so parental and hidden-channel visibility are unchanged). Covered by `ChannelGuideScopeDaoTest` against a real in-memory Room database for all three filter shapes. **Two premises in the plan card were wrong** - see the A17 analysis above: the metadata predicate cannot be pushed, and the base snapshot cannot stand in for the load because `allChannels` is capped at `MAX_CHANNELS` (60). |
 | **A27** | Moved to Done (see the Done table). The reflective-codec half was **withdrawn as wrong** — see below. |
 
+### Round 34: validation still did not run, and two operational causes were found
+
+${BT}always_finish_activities${BT} is confirmed **0** now, so the round-33 hypothesis that it caused the
+freeze is still untested - the protocol has not completed a run since it was disabled.
+
+Two separate problems consumed the round:
+
+1. **${BT}:app:connectedDebugAndroidTest${BT} uninstalls the app when it finishes.** The round-33 A18 run left
+   ${BT}com.streamvault.app.debug${BT} removed from the device, which is why every ${BT}am start${BT} returned
+   ${BT}Activity class ... does not exist${BT} and focus stayed on the Fire TV launcher. Reinstalled from a fresh
+   ${BT}:app:assembleDebug${BT}. Anyone running instrumentation tests here must reinstall before manual device work.
+2. **The app currently exposes no D-pad focus.** With the app installed, launched and in the foreground with
+   the full Home UI rendered, ${BT}uiautomator dump${BT} reports ${BT}focused_nodes=0${BT} after Down, Up x3 and Right -
+   nothing is focusable, so scripted navigation cannot reach Live TV. In round 31 the same build reported
+   exactly one focused node. The difference between the two states is a fresh install (first-run library
+   sync not yet complete) plus the ${BT}always_finish_activities${BT} flip, so the most likely cause is the app
+   still being in first-run state rather than anything in the findings.
+
+**Nothing about A20 or A34 changed**: both remain implemented and unit-tested, still awaiting a completed
+live-TV run. The device work this round was setup, not evidence.
+
 ## The :app instrumentation source set does not compile either (discovered round 32)
 
 Round 18 found the app **unit** test source set had never compiled. The same is true of the app
