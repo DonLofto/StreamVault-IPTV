@@ -48,6 +48,14 @@ import javax.inject.Singleton
 
 @Singleton
 @OptIn(ExperimentalCoroutinesApi::class)
+/**
+ * SQLite 3.22 (Android 9) has SQLITE_MAX_VARIABLE_NUMBER = 999; the 32766 default only arrives
+ * with SQLite 3.32 / Android 12. Room expands IN (:ids) to one bind parameter per element and does
+ * not chunk, so a longer list fails to prepare instead of returning rows. Every EPG call site already
+ * chunks at 500.
+ */
+private const val SQLITE_BIND_VARIABLE_CHUNK = 900
+
 class ChannelRepositoryImpl @Inject constructor(
     private val channelDao: ChannelDao,
     private val categoryDao: CategoryDao,
@@ -279,7 +287,15 @@ class ChannelRepositoryImpl @Inject constructor(
 
     override fun getChannelsByIds(ids: List<Long>): Flow<List<Channel>> {
         if (ids.isEmpty()) return flowOf(emptyList())
-        return channelDao.getByIds(ids).flatMapLatest { requestedEntities ->
+        val chunks = ids.chunked(SQLITE_BIND_VARIABLE_CHUNK)
+        val requestedEntitiesFlow = if (chunks.size == 1) {
+            channelDao.getByIds(chunks[0])
+        } else {
+            combine(chunks.map { chunk -> channelDao.getByIds(chunk) }) { perChunk ->
+                perChunk.flatMap { it }
+            }
+        }
+        return requestedEntitiesFlow.flatMapLatest { requestedEntities ->
             if (requestedEntities.isEmpty()) {
                 return@flatMapLatest flowOf(emptyList())
             }

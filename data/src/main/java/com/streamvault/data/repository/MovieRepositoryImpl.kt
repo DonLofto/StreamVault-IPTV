@@ -65,6 +65,7 @@ import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -77,6 +78,12 @@ import javax.inject.Singleton
 
 @Singleton
 @OptIn(ExperimentalCoroutinesApi::class)
+/**
+ * SQLite 3.22 (Android 9) has SQLITE_MAX_VARIABLE_NUMBER = 999; Room does not chunk IN (:ids).
+ * See finding A59.
+ */
+private const val SQLITE_BIND_VARIABLE_CHUNK = 900
+
 class MovieRepositoryImpl @Inject constructor(
     private val movieDao: MovieDao,
     private val categoryDao: CategoryDao,
@@ -351,8 +358,18 @@ class MovieRepositoryImpl @Inject constructor(
             )
         }
 
-    override fun getMoviesByIds(ids: List<Long>): Flow<List<Movie>> =
-        movieDao.getByIds(ids).map { entities -> entities.map { it.toDomain() } }
+    override fun getMoviesByIds(ids: List<Long>): Flow<List<Movie>> {
+        // Chunked for the SQLite 3.22 bind-variable ceiling on Android 9 - see A59.
+        val chunks = ids.chunked(SQLITE_BIND_VARIABLE_CHUNK)
+        val entitiesFlow = when (chunks.size) {
+            0 -> flowOf(emptyList())
+            1 -> movieDao.getByIds(chunks[0])
+            else -> combine(chunks.map { chunk -> movieDao.getByIds(chunk) }) { perChunk ->
+                perChunk.flatMap { it }
+            }
+        }
+        return entitiesFlow.map { entities -> entities.map { it.toDomain() } }
+    }
 
     override fun getCategories(providerId: Long): Flow<List<Category>> =
         combine(
