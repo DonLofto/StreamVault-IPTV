@@ -382,7 +382,9 @@ class MovieRepositoryImpl @Inject constructor(
             } else {
                 mapped
             }
-        }
+        // Without this the entity->domain map and filter ran on the collector's dispatcher, which is
+        // Main for every ViewModel in app/ui. ChannelRepositoryImpl already does this.
+        }.flowOn(Dispatchers.Default)
 
     override fun getCategoryItemCounts(providerId: Long): Flow<Map<Long, Int>> =
         movieDao.getCategoryCounts(providerId).map { counts ->
