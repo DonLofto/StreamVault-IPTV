@@ -20,6 +20,28 @@ data class TimeshiftConfig(
     }
 }
 
+/**
+ * A34 - hard ceiling on bytes the MEMORY backend may retain.
+ *
+ * The depth cap above is wall-clock only, so retained bytes scale with the stream bitrate:
+ * a 5-minute window on a 5-8 Mbit/s channel retains 190-300 MB, against a 192 MB heap class
+ * on the Fire TV Stick target. Rewind buffers that large either OOM or push the process into
+ * a permanent GC treadmill, so the window now also has a byte ceiling derived from the heap class.
+ */
+const val MAX_MEMORY_BACKEND_BYTES = 48L * 1024L * 1024L
+
+/** Floor so a small heap still buffers something usable instead of degenerating to no rewind. */
+const val MIN_MEMORY_BACKEND_BYTES = 8L * 1024L * 1024L
+
+/**
+ * Byte budget for MEMORY-backed timeshift on a heap of [maxHeapBytes].
+ *
+ * A quarter of the heap class, clamped into [MIN_MEMORY_BACKEND_BYTES]..[MAX_MEMORY_BACKEND_BYTES]:
+ * large enough that the buffer never competes with the player's own allocations for the heap.
+ */
+fun memoryBackendByteBudget(maxHeapBytes: Long): Long =
+    (maxHeapBytes / 4L).coerceIn(MIN_MEMORY_BACKEND_BYTES, MAX_MEMORY_BACKEND_BYTES)
+
 enum class LiveTimeshiftBackend {
     NONE,
     DISK,

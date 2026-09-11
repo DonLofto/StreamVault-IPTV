@@ -412,6 +412,12 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
         var activeSnapshotDir: File? = null
         var fileLinker: (File, File) -> Unit = { source, destination -> linkOrCopySegmentFile(source, destination) }
         val effectiveDepthMs: Long = config.effectiveDepthMs(backend)
+        /**
+         * A34 - byte ceiling for MEMORY-backed retention, resolved from the heap class once per
+         * session. The disk backend retains no payloads, so this is never consulted for it.
+         */
+        protected val memoryByteBudget: Long =
+            memoryBackendByteBudget(Runtime.getRuntime().maxMemory())
         protected val sequence = AtomicLong(0L)
         protected val stateStartMs = System.currentTimeMillis()
         @Volatile private var activeCall: okhttp3.Call? = null
@@ -603,6 +609,8 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
         private val chunks = ArrayDeque<ProgressiveChunk>()
         private val chunkMutex = Mutex()
         private var runningChunkDurationMs = 0L
+        // A34: retained payload bytes, non-zero only for the MEMORY backend.
+        private var runningChunkBytes = 0L
 
         override suspend fun capture() {
             var retryDelay = 1_000L
@@ -731,6 +739,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             )
             val windowDuration = chunkMutex.withLock {
                 runningChunkDurationMs += chunk.durationMs
+                runningChunkBytes += chunk.payload?.size?.toLong() ?: 0L
                 chunks += chunk
                 pruneProgressiveChunksLocked()
                 while (backend == LiveTimeshiftBackend.DISK && !diskManager.isWithinBudget() && chunks.size > 1) {
@@ -762,10 +771,17 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
         }
 
         private fun pruneProgressiveChunksLocked() {
-            while (runningChunkDurationMs > effectiveDepthMs && chunks.isNotEmpty()) {
+            // A34: evict on whichever ceiling is hit first - the wall-clock depth or the
+            // MEMORY byte budget. The byte ceiling keeps the last chunk so rewind never
+            // degenerates to an empty window on a high-bitrate channel.
+            while (chunks.isNotEmpty() &&
+                (runningChunkDurationMs > effectiveDepthMs || runningChunkBytes > memoryByteBudget)
+            ) {
+                if (runningChunkBytes > memoryByteBudget && chunks.size <= 1) break
                 val removed = chunks.removeFirst()
                 removed.file?.delete()
                 runningChunkDurationMs -= removed.durationMs
+                runningChunkBytes -= removed.payload?.size?.toLong() ?: 0L
                 diskManager.recordFileMutation()
             }
         }
@@ -781,6 +797,8 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
         private val segments = ArrayDeque<HlsSegmentSnapshot>()
         private val segmentMutex = Mutex()
         private var runningSegmentDurationMs = 0L
+        // A34: retained payload bytes, non-zero only for the MEMORY backend.
+        private var runningSegmentBytes = 0L
         // Track the highest media sequence number we have processed so far.
         // Segments with sequence <= lastProcessedSequence are skipped (already captured or expired).
         private var lastProcessedSequence = -1L
@@ -815,6 +833,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                                 val retained = retainHlsSegment(remoteSegment)
                                 val windowDuration = segmentMutex.withLock {
                                     runningSegmentDurationMs += retained.durationMs
+                                    runningSegmentBytes += retained.payload?.size?.toLong() ?: 0L
                                     segments += retained
                                     pruneHlsSegmentsLocked()
                                     while (backend == LiveTimeshiftBackend.DISK && !diskManager.isWithinBudget() && segments.size > 1) {
@@ -907,10 +926,16 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
         }
 
         private fun pruneHlsSegmentsLocked() {
-            while (runningSegmentDurationMs > effectiveDepthMs && segments.isNotEmpty()) {
+            // A34: same two-ceiling policy as the progressive path — wall-clock depth or the
+            // MEMORY byte budget, whichever binds first, always keeping the newest segment.
+            while (segments.isNotEmpty() &&
+                (runningSegmentDurationMs > effectiveDepthMs || runningSegmentBytes > memoryByteBudget)
+            ) {
+                if (runningSegmentBytes > memoryByteBudget && segments.size <= 1) break
                 val removed = segments.removeFirst()
                 removed.file?.delete()
                 runningSegmentDurationMs -= removed.durationMs
+                runningSegmentBytes -= removed.payload?.size?.toLong() ?: 0L
                 diskManager.recordFileMutation()
             }
         }
