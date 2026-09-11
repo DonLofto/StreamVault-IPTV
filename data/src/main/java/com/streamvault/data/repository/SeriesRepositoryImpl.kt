@@ -1104,8 +1104,11 @@ class SeriesRepositoryImpl @Inject constructor(
 
         val canUseCursorWindow = presentationSettings.duplicateHandlingMode == VodDuplicateHandlingMode.SHOW_ALL &&
             supportsCursorBrowse(query)
-        val items = if (canUseCursorWindow) {
-            fetchSeriesCursorWindow(query, favoriteIds)
+        // Built once. This pipeline used to run a SECOND time purely to read .size for totalCount,
+        // re-subscribing the browse source and re-reading the provider's whole playback history
+        // (which has no LIMIT). The two branches were identical apart from drop/take versus size.
+        val presentedSeries: List<Series>? = if (canUseCursorWindow) {
+            null
         } else {
             val series = seriesBrowseSource(query).first()
             val history = playbackHistoryDao.getByProvider(query.providerId).first()
@@ -1132,45 +1135,6 @@ class SeriesRepositoryImpl @Inject constructor(
                 .groupBy { it.seriesId ?: it.contentId }
                 .mapValues { (_, entries) -> entries.maxOf { it.watchCount } }
 
-            applySeriesBrowseQuery(
-                series = series,
-                query = query,
-                favoriteIds = favoriteIds,
-                inProgressIds = inProgressIds,
-                completedSeriesIds = completedSeriesIds,
-                watchCounts = watchCounts
-            ).let { results -> buildPresentedSeries(results, presentationSettings) }
-                .drop(query.offset)
-                .take(query.limit)
-        }
-
-        val totalCount = if (presentationSettings.duplicateHandlingMode == VodDuplicateHandlingMode.SHOW_ALL) {
-            rawTotalCount
-        } else {
-            val series = seriesBrowseSource(query).first()
-            val history = playbackHistoryDao.getByProvider(query.providerId).first()
-            val inProgressIds = history
-                .asSequence()
-                .filter { it.contentType == ContentType.SERIES || it.contentType == ContentType.SERIES_EPISODE }
-                .filter {
-                    it.resumePositionMs > 0L && (
-                        it.totalDurationMs <= 0L ||
-                            it.resumePositionMs < (it.totalDurationMs * 0.95f).toLong()
-                        )
-                }
-                .mapNotNull { it.seriesId ?: it.contentId }
-                .toSet()
-            val completedSeriesIds = history
-                .asSequence()
-                .filter { it.contentType == ContentType.SERIES_EPISODE }
-                .filter { it.totalDurationMs > 0L && it.resumePositionMs >= (it.totalDurationMs * 0.95f).toLong() }
-                .mapNotNull { it.seriesId }
-                .toSet()
-            val watchCounts = history
-                .asSequence()
-                .filter { it.contentType == ContentType.SERIES || it.contentType == ContentType.SERIES_EPISODE }
-                .groupBy { it.seriesId ?: it.contentId }
-                .mapValues { (_, entries) -> entries.maxOf { it.watchCount } }
             buildPresentedSeries(
                 applySeriesBrowseQuery(
                     series = series,
@@ -1181,7 +1145,16 @@ class SeriesRepositoryImpl @Inject constructor(
                     watchCounts = watchCounts
                 ),
                 presentationSettings
-            ).size
+            )
+        }
+
+        val items = presentedSeries?.drop(query.offset)?.take(query.limit)
+            ?: fetchSeriesCursorWindow(query, favoriteIds)
+
+        val totalCount = if (presentationSettings.duplicateHandlingMode == VodDuplicateHandlingMode.SHOW_ALL) {
+            rawTotalCount
+        } else {
+            presentedSeries?.size ?: 0
         }
 
         val hasMoreRemote = query.categoryId?.let { categoryId ->

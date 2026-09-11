@@ -1105,8 +1105,12 @@ class MovieRepositoryImpl @Inject constructor(
             .toSet()
 
         val canUseCursorWindow = presentationSettings.duplicateHandlingMode == VodDuplicateHandlingMode.SHOW_ALL && supportsCursorBrowse(query)
-        val items = if (canUseCursorWindow) {
-            fetchMovieCursorWindow(query, favoriteIds)
+        // Built once. This pipeline used to run a SECOND time purely to read .size for totalCount,
+        // re-subscribing the browse source and re-reading the provider's whole playback history
+        // (which has no LIMIT). The two branches were character-for-character identical apart from
+        // the final drop/take versus size.
+        val presentedMovies: List<Movie>? = if (canUseCursorWindow) {
+            null
         } else {
             val movies = movieBrowseSource(query).first()
             val history = playbackHistoryDao.getByProvider(query.providerId).first()
@@ -1121,32 +1125,6 @@ class MovieRepositoryImpl @Inject constructor(
                 .filter { it.contentType == ContentType.MOVIE }
                 .associate { it.contentId to it.watchCount }
 
-            applyMovieBrowseQuery(
-                movies = movies,
-                query = query,
-                favoriteIds = favoriteIds,
-                inProgressIds = inProgressIds,
-                watchCounts = watchCounts
-            ).let { results -> buildPresentedMovies(results, presentationSettings) }
-                .drop(query.offset)
-                .take(query.limit)
-        }
-
-        val totalCount = if (presentationSettings.duplicateHandlingMode == VodDuplicateHandlingMode.SHOW_ALL) {
-            rawTotalCount
-        } else {
-            val movies = movieBrowseSource(query).first()
-            val history = playbackHistoryDao.getByProvider(query.providerId).first()
-            val inProgressIds = history
-                .asSequence()
-                .filter { it.contentType == ContentType.MOVIE }
-                .filter { it.resumePositionMs > 0L && (it.totalDurationMs <= 0L || !moviePlaybackComplete(it.resumePositionMs, it.totalDurationMs)) }
-                .map { it.contentId }
-                .toSet()
-            val watchCounts = history
-                .asSequence()
-                .filter { it.contentType == ContentType.MOVIE }
-                .associate { it.contentId to it.watchCount }
             buildPresentedMovies(
                 applyMovieBrowseQuery(
                     movies = movies,
@@ -1156,7 +1134,16 @@ class MovieRepositoryImpl @Inject constructor(
                     watchCounts = watchCounts
                 ),
                 presentationSettings
-            ).size
+            )
+        }
+
+        val items = presentedMovies?.drop(query.offset)?.take(query.limit)
+            ?: fetchMovieCursorWindow(query, favoriteIds)
+
+        val totalCount = if (presentationSettings.duplicateHandlingMode == VodDuplicateHandlingMode.SHOW_ALL) {
+            rawTotalCount
+        } else {
+            presentedMovies?.size ?: 0
         }
 
         val hasMoreRemote = query.categoryId?.let { categoryId ->
