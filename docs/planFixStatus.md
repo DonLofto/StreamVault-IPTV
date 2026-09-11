@@ -74,6 +74,24 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | **A17** | Partial. The guide-search passes (`buildSearchGuideSnapshot`: the lookup map, the metadata match, the matched-key build and the `mapNotNull`/`associateWith` over the result) now run in `withContext(Dispatchers.Default)` instead of `Dispatchers.Main.immediate`, so the UI thread is no longer doing several full passes over every channel of the provider on a path debounced at only 150 ms. **Still open:** `loadGuideSearchScopeChannels` still calls `channelRepository.getChannels(providerId).first()` with **no LIMIT**, so the whole provider channel table is still loaded into memory per search. Pushing the predicate into SQL is feasible — `matchesGuideMetadataSearch` matches `name` OR `categoryName`, both channel columns — but it needs a new DAO query plus the hidden-category and `accessibleCategoryIds` logic moved with it, and it risks changing search completeness. |
 | **A27** | Moved to Done (see the Done table). The reflective-codec half was **withdrawn as wrong** — see below. |
 
+## A38 path decision (2026-09-11, recorded before implementing)
+
+Decision 3 was to move `awaitResponse` into `:domain` so the two `LiveTimeshiftManager` sites
+could use it. That is the wrong trade: `:domain` is a pure JVM module
+(`javax.inject` + `coroutines-core`, no more) and `remote/http/CancellableHttp.kt` is an OkHttp
+adapter, so the move would make the domain layer network-aware for a 16-line helper. `:player` already
+depends on `libs.okhttp` directly, so the cheaper answer is a local copy of the helper in the player
+timeshift package, keeping `:domain` clean. Recorded here so the next round does not repeat the analysis.
+
+The remaining work on A38 is then two independent halves:
+1. Convert the 10 remaining `execute()` sites that live in `:data`/`:app` (GoogleDriveBackupSyncManager 3,
+   RecordingSourceResolver 2, RecordingCaptureEngine 2, JellyfinProvider, EmbyProvider,
+   InternetSpeedTestRunner) to the existing `:data` helper - several are in non-suspend functions, so each
+   needs its own suspend cascade.
+2. Add the local player helper and convert `LiveTimeshiftManager`'s 2 sites - `fetchText` is non-suspend, so
+   that cascades into the HLS/DASH poll path.
+Plus the `callTimeout` decision (per-client, background-sync client only).
+
 ## Superseded
 
 | ID | State |
