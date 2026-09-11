@@ -45,11 +45,29 @@ object NetworkModule {
         @ApplicationContext context: Context
     ): AppCacheQuota = AppCacheQuota(context)
 
+    /**
+     * One cache for both clients.
+     *
+     * Previously each client built its own Cache over the SAME directory, so two DiskLruCache
+     * instances maintained one journal - interleaved writers, orphaned entries, and a full
+     * directory rescan from rebuildJournal() after an unclean kill. A single instance also means
+     * one LRU enforcing one budget instead of two LRUs sharing it.
+     */
+    @Provides
+    @Singleton
+    fun provideHttpCache(
+        @ApplicationContext context: Context,
+        appCacheQuota: AppCacheQuota
+    ): Cache = Cache(
+        directory = File(context.cacheDir, "streamvault_http_cache"),
+        maxSize = appCacheQuota.budgets.httpCacheBytes
+    )
+
     @Provides
     @Singleton
     fun provideOkHttpClient(
         @ApplicationContext context: Context,
-        appCacheQuota: AppCacheQuota
+        httpCache: Cache
     ): OkHttpClient {
         val appUserAgent = buildAppUserAgent(BuildConfig.VERSION_NAME)
         val isDebuggable = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
@@ -66,12 +84,7 @@ object NetworkModule {
         }
 
         return OkHttpClient.Builder()
-            .cache(
-                Cache(
-                    directory = File(context.cacheDir, "streamvault_http_cache"),
-                    maxSize = appCacheQuota.budgets.httpCacheBytes
-                )
-            )
+            .cache(httpCache)
             .connectTimeout(NetworkTimeoutConfig.CONNECT_TIMEOUT_SECONDS, SECONDS)
             .readTimeout(NetworkTimeoutConfig.READ_TIMEOUT_SECONDS, SECONDS)
             .writeTimeout(NetworkTimeoutConfig.WRITE_TIMEOUT_SECONDS, SECONDS)
@@ -107,7 +120,7 @@ object NetworkModule {
     @BackgroundSyncClient
     fun provideBackgroundSyncClient(
         @ApplicationContext context: Context,
-        appCacheQuota: AppCacheQuota
+        httpCache: Cache
     ): OkHttpClient {
         val appUserAgent = buildAppUserAgent(BuildConfig.VERSION_NAME)
         val isDebuggable = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
@@ -122,12 +135,7 @@ object NetworkModule {
             level = loggingLevel
         }
         return OkHttpClient.Builder()
-            .cache(
-                Cache(
-                    directory = File(context.cacheDir, "streamvault_http_cache"),
-                    maxSize = appCacheQuota.budgets.httpCacheBytes
-                )
-            )
+            .cache(httpCache)
             .connectTimeout(NetworkTimeoutConfig.CONNECT_TIMEOUT_SECONDS, SECONDS)
             .readTimeout(NetworkTimeoutConfig.READ_TIMEOUT_SECONDS, SECONDS)
             .writeTimeout(NetworkTimeoutConfig.WRITE_TIMEOUT_SECONDS, SECONDS)
