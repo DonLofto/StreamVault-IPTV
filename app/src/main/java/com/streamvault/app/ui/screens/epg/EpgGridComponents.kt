@@ -73,6 +73,49 @@ import java.time.ZoneId
 import kotlinx.coroutines.delay
 import kotlin.math.max
 
+/**
+ * A18 - how far beyond the visible time range a guide row still composes, so a short scroll does not
+ * immediately reveal an uncomposed gap. The row window is 7 h against roughly 3 h on screen.
+ */
+private const val GUIDE_ROW_OVERSCAN_MS = 30L * 60L * 1000L
+
+/**
+ * A18 - the time range a guide row should compose, given the shared scroll position.
+ *
+ * [totalWidth] and [viewportWidth] are both in Dp and share a density, so only their ratio matters;
+ * the scroll values are in pixels. When the whole window fits on screen every programme is composed.
+ */
+internal fun guideRowVisibleRangeMs(
+    windowStart: Long,
+    durationMs: Long,
+    totalWidth: Float,
+    viewportWidth: Float,
+    scrollValue: Int,
+    scrollMaxValue: Int,
+    overscanMs: Long = GUIDE_ROW_OVERSCAN_MS
+): LongRange {
+    val viewportFraction = if (totalWidth > 0f) {
+        (viewportWidth / totalWidth).coerceIn(0.001f, 1f)
+    } else {
+        1f
+    }
+    if (viewportFraction >= 1f) {
+        return windowStart until (windowStart + durationMs)
+    }
+    // scrollMaxValue is the scrollable range in pixels, i.e. total minus viewport. Dividing by
+    // (1 - viewport fraction) recovers the total timeline width in pixels without the density.
+    val totalPx = scrollMaxValue / (1f - viewportFraction)
+    val msPerPx = durationMs.toFloat() / totalPx
+    val startMs = windowStart + (scrollValue * msPerPx).toLong() - overscanMs
+    val endMs = windowStart +
+        ((scrollValue + totalPx * viewportFraction) * msPerPx).toLong() + overscanMs
+    return startMs until endMs
+}
+
+/** A18 - the programmes a row must compose for [range]; everything else is off screen. */
+internal fun List<Program>.withinGuideRange(range: LongRange): List<Program> =
+    filter { program -> program.endTime > range.first && program.startTime < range.last }
+
 @Composable
 internal fun GuideMessageState(
     modifier: Modifier = Modifier,
@@ -523,6 +566,32 @@ fun EpgRow(
                             .background(Color.White.copy(alpha = 0.08f))
                     )
                 }
+                // A18 - compose only the programmes that intersect the visible time range, plus a
+                // 30 minute margin on each side. The window spans 7 h while at most 3 h is on screen,
+                // so this row was composing roughly 2.3x the visible cells for every visible channel
+                // row. The scroll position is read through derivedStateOf, so a per-pixel scroll does
+                // not recompose the row; the item layout, the marker layer and the focus callbacks are
+                // untouched, which is what keeps D-pad traversal identical.
+                val visiblePrograms by remember(
+                    programs,
+                    windowStart,
+                    windowEnd,
+                    totalTimelineWidth,
+                    timelineViewportWidth
+                ) {
+                    derivedStateOf {
+                        programs.withinGuideRange(
+                            guideRowVisibleRangeMs(
+                                windowStart = windowStart,
+                                durationMs = totalDuration,
+                                totalWidth = totalTimelineWidth.value,
+                                viewportWidth = timelineViewportWidth.value,
+                                scrollValue = scrollState.value,
+                                scrollMaxValue = scrollState.maxValue
+                            )
+                        )
+                    }
+                }
                 if (programs.isEmpty()) {
                     EmptyScheduleItem(
                         totalTimelineWidth = totalTimelineWidth,
@@ -532,7 +601,7 @@ fun EpgRow(
                         onFocused = { onChannelFocused(null) }
                     )
                 } else {
-                    programs.forEach { program ->
+                    visiblePrograms.forEach { program ->
                         ProgramItem(
                             program = program,
                             density = density,
