@@ -30,19 +30,25 @@ internal class LiveAudioTapAudioSink(
         encodedAccessUnitCount: Int
     ): Boolean {
         val startPosition = buffer.position()
-        val copySource = buffer.asReadOnlyBuffer()
+        // Read the tap before handleBuffer advances the buffer, and only build the read-only view
+        // when a tap will actually consume it. asReadOnlyBuffer() allocated a wrapper on every
+        // audio buffer (~50/s) even with no tap attached, which is the common case.
+        val tap = tapProvider()
+        val copySource = if (tap != null) buffer.asReadOnlyBuffer() else null
         val handled = delegate.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
-        copyConsumedForTap(copySource, startPosition, buffer.position(), presentationTimeUs)
+        if (tap != null && copySource != null) {
+            copyConsumedForTap(tap, copySource, startPosition, buffer.position(), presentationTimeUs)
+        }
         return handled
     }
 
     private fun copyConsumedForTap(
+        tap: LiveAudioTap,
         buffer: ByteBuffer,
         startPosition: Int,
         endPosition: Int,
         presentationTimeUs: Long
     ) {
-        val tap = tapProvider() ?: return
         if (encoding != C.ENCODING_PCM_16BIT || sampleRate <= 0 || channelCount <= 0 || endPosition <= startPosition) {
             return
         }
