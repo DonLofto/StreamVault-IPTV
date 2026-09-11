@@ -78,6 +78,33 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | **A17** | Moved to Done (`84833e08`, `a6c12378`). Both halves: the search passes run in `withContext(guideWorkDispatcher)`, and the two category-visibility filters run in SQL via `ChannelRepository.getGuideSearchScopeChannels` (which reuses `observeChannels`, so parental and hidden-channel visibility are unchanged). Covered by `ChannelGuideScopeDaoTest` against a real in-memory Room database for all three filter shapes. **Two premises in the plan card were wrong** - see the A17 analysis above: the metadata predicate cannot be pushed, and the base snapshot cannot stand in for the load because `allChannels` is capped at `MAX_CHANNELS` (60). |
 | **A27** | Moved to Done (see the Done table). The reflective-codec half was **withdrawn as wrong** — see below. |
 
+## A35 re-analysis (round 28) - "start from the live edge" is not a reorder
+
+The card's fix is "start from the live edge on first poll; cache resolved URIs". The second clause is
+done (`716dc317`, the per-representation substitutions are hoisted out of the per-segment loop). The
+first clause is **not** the small change it reads as, and the reason is worth recording before someone
+tries it:
+
+- `DashSession`'s poll loop (`LiveTimeshiftManager.kt:1170-1187`) walks `parsed.mediaSegments`
+  oldest to newest and calls `window.addMedia(retained)` for each; the fixed-duration branch of
+  `parseMpd` builds that list as `firstNumber..totalSegments`, i.e. chronological.
+- The obvious fix - iterate `asReversed()` so the live edge is retained first - is **wrong**.
+  `DashWindow` is an insertion-ordered `ArrayDeque` (`:1067`) and `mediaSegments()` returns
+  insertion order (`:1082`), so appending newest-first would reverse the snapshot playlist.
+- Doing it properly needs `addFirst` for backfilled segments, **and that alone still does not
+  work**: `prune()` evicts from the front, which is the oldest end. While backfilling, every segment
+  being added is older than what is already there, so the window would add an old segment and
+  immediately evict it. A correct implementation needs an eviction policy keyed on segment time, not
+  on deque position, plus duration accounting for out-of-order insertion.
+
+So the honest options are (a) leave the first poll as it is - it is bounded by `effectiveDepthMs`, 30
+minutes on disk and five on memory - or (b) rework `DashWindow` to be time-ordered and re-verify DASH
+timeshift on a device. (b) is a timeshift change and needs the live-TV protocol, which this build does
+not currently pass.
+
+This is the third plan prescription that did not survive contact with the code (A18's LazyRow, A17's
+metadata predicate, and now this).
+
 ## A18 re-analysis (round 25) - the plan's prescribed fix does not fit the component
 
 The card says "replace the inner `Row` with a `LazyRow` (add `key` per programme)". That cannot be done
