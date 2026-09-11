@@ -3,7 +3,7 @@
 Tracks implementation of the 59 findings in `docs/performance-audit.md`.
 Plan: `docs/planFix.md`. Baseline commit: `740bd55f`.
 
-**51 done · 5 partial · 1 superseded · 2 open.** Commits marked DONE are on `master`; the working
+**52 done · 4 partial · 1 superseded · 2 open.** Commits marked DONE are on `master`; the working
 tree is clean. Verification for every DONE item was a module compile plus the relevant test suite;
 Room-validated SQL and byte-identical golden output are called out where they apply.
 
@@ -67,7 +67,7 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 
 | ID | State |
 |---|---|
-| **A5** | Parse-time half DONE (`3b8cb2c5`: fallback `Regex` and `DateTimeFormatter` hoisted). **The exception-driven format probing itself is still open** — `parseDate` still constructs and throws up to 11 `DateTimeParseException`s per date, twice per programme. **ATTEMPTED AND REVERTED 2026-09-11 — read this before retrying.** **SECOND ATTEMPT ALSO REVERTED, round 29 - see the A5 section below.** The key premise is now disproved by a stack trace: `DateTimeFormatter.parse(CharSequence, ParsePosition)` **does throw** `DateTimeParseException` on this JDK, so it cannot serve as a non-throwing pre-filter either. The remaining route is to reshape the probe to classify the string syntactically and attempt one or two formats rather than fourteen. Swapping the three helpers to `DateTimeFormatter.parse(CharSequence, ParsePosition)` with a `position.index == text.length` full-consumption check **changed behaviour**: 5 `XmltvParserTest` cases failed, all of them offset-less timestamps (`20250101140000` with pattern `yyyyMMddHHmmss`) that previously parsed and now returned null, plus a `DateTimeParseException` escaping for genuinely malformed input (so the ParsePosition overload can still throw). The naive swap is **not** behaviour-preserving. Retry only by first writing failing tests that pin the offset-less case, then establishing empirically what the ParsePosition overload does to `position.index` and to field resolution for these patterns. The single-`DateTimeFormatterBuilder`-with-`optionalOffset()` route may be the better shape. |
+| **A5** | Moved to Done (`35e0364c`). Each date-format candidate now carries a **necessary** condition on the input, so shapes that provably cannot match are skipped instead of being discovered by a thrown and caught `DateTimeParseException`. The throwing parse stays authoritative and the priority order is unchanged, so a format that matched before still runs. Worst cases eliminated: ISO timestamps (five guaranteed throws) and short dates (ten). Offset-less compact timestamps still cost four, because the offset formats must precede the local ones. **Both earlier attempts are recorded below and must not be retried**: the `ParsePosition` route is closed by a stack trace. |
 | **A58** | Part 1 done (`1fb250fc`): staged channel rows are built as a `Sequence` and written in 500-row chunks, so the second whole-provider list is gone; the `List`-returning builder stays for the two fresh-session callers. Pinned by a 100k-channel test asserting chunk size, total count and ordinal contiguity. **Open:** the larger half - streaming the Xtream/M3U ingest chain itself, which is upstream of the staging boundary - is untouched. **Note:** this is explicitly *not* the fix for the live-TV freeze; round 24 measured that at a 22 MB Java heap against 89 MB of graphics and a fully consumed device swap. |
 | **A20** | Implemented (`7d2eeb27`): Stalker gets a dedicated `@StalkerClient` and the EPG client is genuinely isolated, both via `newIsolatedClient` (a plain `newBuilder()` shares Dispatcher and ConnectionPool by reference). Unit tests pin both the defect and the fix, plus configuration inheritance. **Open:** the card rates this high risk because it changes network admission, so it needs the full live-TV protocol - blocked on the same memory-pressure freeze as A34. |
 | **A18** | Implemented (`737f5e1d`): guide rows compose only the programmes intersecting the visible time range plus a 30 minute overscan, read through `derivedStateOf`, so a per-pixel scroll does not recompose the row. Item layout, marker layer and focus callbacks are untouched. Range arithmetic extracted and unit-tested (4 cases). **Open:** the composition-count Compose test the card asks for, and an explicit D-pad traversal check on a TV - the card flags grid focus as delicate (prior audit B7). **The card's LazyRow prescription does not fit this component** - see the A18 re-analysis above. |
@@ -339,7 +339,7 @@ static reading and was wrong about an API.
 
 ## Open (2)
 
-A35, A54. A34, A18, A20 and A58 moved to Partial - all four are implemented and unit-tested; A34 and
+A35, A54. A5 is now Done. A34, A18, A20 and A58 moved to Partial - all four are implemented and unit-tested; A34 and
 A20 await the AGENTS.md live-TV protocol (which this build currently fails for memory-pressure reasons
 unrelated to either change), A18 awaits the composition-count Compose test plus a D-pad check on a TV,
 and A58 has had only its staging-boundary half done.
