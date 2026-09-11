@@ -4288,11 +4288,18 @@ class SyncManager @Inject constructor(
         val hiddenLiveCategoryIds = preferencesRepository.getHiddenCategoryIds(provider.id, ContentType.LIVE).first()
         val guidePolicy = provider.guideSourcePolicy
 
+        // Whether provider-native guide data was actually downloaded in this pass. The resolution
+        // step below rewrites channel_epg_mappings wholesale, so it only needs to run when something
+        // changed - the engine additionally refuses to skip when no mappings exist yet. Set before
+        // the download so a FAILED refresh still resolves.
+        var providerGuideRefreshed = false
+
         when (provider.type) {
             ProviderType.XTREAM_CODES -> {
                 if (shouldUseProviderGuide(guidePolicy) &&
                     (force || ContentCachePolicy.shouldRefresh(updatedMetadata.lastEpgSuccess, ContentCachePolicy.EPG_TTL_MILLIS, now))
                 ) {
+                    providerGuideRefreshed = true
                     try {
                         progress(provider.id, onProgress, "Downloading EPG...")
                         val base = provider.serverUrl.trimEnd('/')
@@ -4401,7 +4408,15 @@ class SyncManager @Inject constructor(
             epgSourceRepository.resolveForProvider(provider.id, hiddenLiveCategoryIds)
         } else {
             progress(provider.id, onProgress, "Resolving provider EPG mappings...")
-            epgSourceRepository.resolveForProvider(provider.id, hiddenLiveCategoryIds)
+            // A13: when the TTL gate above skipped the download, control previously fell through and
+            // still ran the full resolution pass - loading every channel and rewriting
+            // channel_epg_mappings (transactional DELETE-all + INSERT-all) to reproduce rows that
+            // were already correct. The engine still refuses to skip when no mappings exist.
+            epgSourceRepository.resolveForProvider(
+                provider.id,
+                hiddenLiveCategoryIds,
+                skipWhenMappingsExist = !providerGuideRefreshed
+            )
         }
 
         return EpgSyncResult(warnings = warnings, hasRetryableFailure = hasRetryableFailure)

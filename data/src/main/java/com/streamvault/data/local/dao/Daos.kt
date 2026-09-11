@@ -3701,6 +3701,10 @@ abstract class ChannelEpgMappingDao {
     @Query("SELECT * FROM channel_epg_mappings WHERE provider_id = :providerId")
     abstract suspend fun getForProvider(providerId: Long): List<ChannelEpgMappingEntity>
 
+    /** Cheap existence check used to decide whether a full re-resolution is worth running. */
+    @Query("SELECT COUNT(*) FROM channel_epg_mappings WHERE provider_id = :providerId")
+    abstract suspend fun countForProvider(providerId: Long): Int
+
     @Query("SELECT * FROM channel_epg_mappings WHERE provider_id = :providerId AND provider_channel_id = :channelId LIMIT 1")
     abstract suspend fun getForChannel(providerId: Long, channelId: Long): ChannelEpgMappingEntity?
 

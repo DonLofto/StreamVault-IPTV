@@ -53,7 +53,11 @@ interface EpgSourceRepository {
 
     // ── Resolution ─────────────────────────────────────────────────
 
-    suspend fun resolveForProvider(providerId: Long, hiddenLiveCategoryIds: Set<Long> = emptySet()): EpgResolutionSummary
+    suspend fun resolveForProvider(
+        providerId: Long,
+        hiddenLiveCategoryIds: Set<Long> = emptySet(),
+        skipWhenMappingsExist: Boolean = false
+    ): EpgResolutionSummary
 
     suspend fun getResolutionSummary(providerId: Long): EpgResolutionSummary
 

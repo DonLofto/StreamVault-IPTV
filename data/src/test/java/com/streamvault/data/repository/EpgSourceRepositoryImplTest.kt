@@ -123,7 +123,7 @@ class EpgSourceRepositoryImplTest {
 
         assertThat(result is Result.Success).isTrue()
         verify(providerEpgSourceDao).insert(any())
-        verify(resolutionEngine).resolveForProvider(7L, emptySet())
+        verify(resolutionEngine).resolveForProvider(7L, emptySet(), false)
     }
 
     @Test
@@ -135,8 +135,8 @@ class EpgSourceRepositoryImplTest {
         repository.setSourceEnabled(10L, enabled = false)
 
         verify(epgSourceDao).setEnabled(eq(10L), eq(false), any())
-        verify(resolutionEngine).resolveForProvider(7L, setOf(101L))
-        verify(resolutionEngine).resolveForProvider(8L, setOf(202L))
+        verify(resolutionEngine).resolveForProvider(7L, setOf(101L), false)
+        verify(resolutionEngine).resolveForProvider(8L, setOf(202L), false)
         verifyNoMoreInteractions(resolutionEngine)
     }
 
@@ -151,8 +151,8 @@ class EpgSourceRepositoryImplTest {
         verify(epgProgrammeDao).deleteBySource(10L)
         verify(epgChannelDao).deleteBySource(10L)
         verify(epgSourceDao).delete(10L)
-        verify(resolutionEngine).resolveForProvider(4L, setOf(401L))
-        verify(resolutionEngine).resolveForProvider(5L, setOf(501L))
+        verify(resolutionEngine).resolveForProvider(4L, setOf(401L), false)
+        verify(resolutionEngine).resolveForProvider(5L, setOf(501L), false)
     }
 
     @Test
@@ -208,7 +208,7 @@ class EpgSourceRepositoryImplTest {
         val result = repository.clearManualOverride(providerId = 7L, channelId = 101L)
 
         assertThat(result is Result.Success).isTrue()
-        verify(resolutionEngine).resolveForProvider(7L, emptySet())
+        verify(resolutionEngine).resolveForProvider(7L, emptySet(), false)
     }
 
     @Test
@@ -413,8 +413,8 @@ class EpgSourceRepositoryImplTest {
 
         assertThat(result is Result.Success).isTrue()
         verify(epgSourceDao).updateRefreshSuccess(eq(10L), any())
-        verify(resolutionEngine).resolveForProvider(7L, emptySet())
-        verify(resolutionEngine).resolveForProvider(8L, emptySet())
+        verify(resolutionEngine).resolveForProvider(7L, emptySet(), false)
+        verify(resolutionEngine).resolveForProvider(8L, emptySet(), false)
     }
 
     @Test

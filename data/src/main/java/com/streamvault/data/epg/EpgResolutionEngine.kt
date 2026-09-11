@@ -60,8 +60,18 @@ class EpgResolutionEngine @Inject constructor(
      */
     suspend fun resolveForProvider(
         providerId: Long,
-        hiddenLiveCategoryIds: Set<Long> = emptySet()
+        hiddenLiveCategoryIds: Set<Long> = emptySet(),
+        skipWhenMappingsExist: Boolean = false
     ): EpgResolutionSummary = withContext(Dispatchers.Default) {
+        // A13: a resolution pass rebuilds channel_epg_mappings wholesale - replaceForProvider is a
+        // transactional DELETE-all followed by INSERT-all. When the caller knows the guide data did
+        // NOT change this sync and mappings have been built at least once, that rewrite reproduces
+        // the existing rows at the cost of a full table rewrite per provider. Opt-in, and guarded on
+        // a real count so a provider whose mappings were cleared still gets resolved.
+        if (skipWhenMappingsExist && channelEpgMappingDao.countForProvider(providerId) > 0) {
+            Log.d(TAG, "Resolution for provider $providerId skipped: guide data unchanged, mappings present")
+            return@withContext EpgResolutionSummary()
+        }
         val channels = channelDao.getByProviderSync(providerId)
             .filterNot { channel -> channel.categoryId != null && channel.categoryId in hiddenLiveCategoryIds }
         val guideSourcePolicy = providerDao.getById(providerId)?.guideSourcePolicy ?: GuideSourcePolicy.AUTO

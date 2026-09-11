@@ -478,9 +478,10 @@ class EpgSourceRepositoryImpl @Inject constructor(
 
     override suspend fun resolveForProvider(
         providerId: Long,
-        hiddenLiveCategoryIds: Set<Long>
+        hiddenLiveCategoryIds: Set<Long>,
+        skipWhenMappingsExist: Boolean
     ): EpgResolutionSummary =
-        resolutionEngine.resolveForProvider(providerId, hiddenLiveCategoryIds)
+        resolutionEngine.resolveForProvider(providerId, hiddenLiveCategoryIds, skipWhenMappingsExist)
 
     override suspend fun getResolutionSummary(providerId: Long): EpgResolutionSummary =
         resolutionEngine.getResolutionSummary(providerId)

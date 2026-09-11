@@ -329,7 +329,7 @@ class SyncManagerTest {
                 stalkerApiService.streamEpg(any(), any(), any(), any(), any())
             ).thenReturn(Result.success(0))
             org.mockito.kotlin.whenever(epgSourceRepo.refreshAllForProvider(any())).thenReturn(Result.success(Unit))
-            org.mockito.kotlin.whenever(epgSourceRepo.resolveForProvider(any(), any()))
+            org.mockito.kotlin.whenever(epgSourceRepo.resolveForProvider(any(), any(), any()))
                 .thenReturn(com.streamvault.domain.model.EpgResolutionSummary())
         }
     }
@@ -654,7 +654,7 @@ class SyncManagerTest {
         val mgr = buildManager(providerType = ProviderType.XTREAM_CODES)
         org.mockito.kotlin.whenever(epgRepo.refreshEpg(eq(1L), any())).thenReturn(Result.success(Unit))
         org.mockito.kotlin.whenever(epgSourceRepo.refreshAllForProvider(1L)).thenReturn(Result.success(Unit))
-        org.mockito.kotlin.whenever(epgSourceRepo.resolveForProvider(eq(1L), any()))
+        org.mockito.kotlin.whenever(epgSourceRepo.resolveForProvider(eq(1L), any(), any()))
             .thenReturn(com.streamvault.domain.model.EpgResolutionSummary())
         org.mockito.kotlin.whenever(programDao.countByProvider(1L)).thenReturn(7)
 
@@ -676,7 +676,7 @@ class SyncManagerTest {
         org.mockito.kotlin.whenever(epgRepo.refreshEpg(eq(1L), any()))
             .thenReturn(Result.error("network down", java.io.IOException("network down")))
         org.mockito.kotlin.whenever(epgSourceRepo.refreshAllForProvider(1L)).thenReturn(Result.success(Unit))
-        org.mockito.kotlin.whenever(epgSourceRepo.resolveForProvider(eq(1L), any()))
+        org.mockito.kotlin.whenever(epgSourceRepo.resolveForProvider(eq(1L), any(), any()))
             .thenReturn(com.streamvault.domain.model.EpgResolutionSummary())
         org.mockito.kotlin.whenever(programDao.countByProvider(1L)).thenReturn(0)
 
