@@ -1,9 +1,6 @@
 package com.streamvault.data.remote.xtream
 
 import android.util.Log
-import com.google.gson.JsonParser
-import com.google.gson.stream.JsonReader
-import com.google.gson.stream.JsonToken
 import com.streamvault.data.remote.dto.XtreamAuthResponse
 import com.streamvault.data.remote.dto.XtreamCategory
 import com.streamvault.data.remote.dto.XtreamEpgResponse
@@ -18,7 +15,6 @@ import com.streamvault.data.remote.http.safeRequestIdentitySummary
 import com.streamvault.data.remote.http.withRequestProfile
 import java.io.IOException
 import java.io.InputStream
-import java.io.InputStreamReader
 import java.io.PushbackInputStream
 import java.io.ByteArrayInputStream
 import java.io.SequenceInputStream
@@ -29,6 +25,7 @@ import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.decodeFromStream
+import kotlinx.serialization.json.decodeToSequence
 import kotlinx.serialization.SerializationException
 import okhttp3.Call
 import okhttp3.Callback
@@ -581,43 +578,38 @@ class OkHttpXtreamApiService(
         descriptor: EndpointDescriptor,
         onRow: suspend (XtreamLiveStreamRow) -> Unit
     ): Int {
-        val reader = JsonReader(InputStreamReader(input, charset))
-        reader.isLenient = true
-        return when (reader.peek()) {
-            JsonToken.BEGIN_ARRAY -> {
-                var emittedCount = 0
-                reader.beginArray()
-                while (reader.hasNext()) {
-                    val element = try {
-                        JsonParser.parseReader(reader)
-                    } catch (e: RuntimeException) {
-                        throw XtreamParsingException(
-                            "Malformed JSON from ${descriptor.hint}${sanitizedPreview(preview)?.let { " (preview=$it)" } ?: ""}",
-                            e
-                        )
-                    }
-                    val row = try {
-                        json.decodeFromString(XtreamLiveStreamRow.serializer(), element.toString())
-                    } catch (e: SerializationException) {
-                        throw XtreamParsingException(
-                            "Malformed JSON from ${descriptor.hint}${sanitizedPreview(preview)?.let { " (preview=$it)" } ?: ""}",
-                            e
-                        )
-                    }
-                    onRow(row)
-                    emittedCount++
-                }
-                reader.endArray()
-                emittedCount
-            }
-            JsonToken.NULL -> {
-                reader.nextNull()
-                0
-            }
-            else -> throw XtreamParsingException(
+        // A4: each element used to be parsed into a Gson tree, re-serialised with element.toString()
+        // and re-parsed by kotlinx - three traversals plus a transient JSON String per channel, so
+        // roughly 7 MB of throwaway strings per 15k-channel sync. decodeToSequence streams element by
+        // element (peak memory is unchanged, unlike decodeFromStream<List<...>>, which would
+        // materialise the whole catalog) and decodes with kotlinx directly: no Gson tree, no String.
+        //
+        // The shape check reads the already-materialised preview string rather than peeking a Gson
+        // reader. The `null` body the old code tolerated is unreachable from here: the call site runs
+        // inspectResponseShape(), which rejects anything not starting with '{' or '['.
+        //
+        // Note: like the sibling decodeFromStream path in this class, this decodes as UTF-8. The
+        // declared charset is still used for `preview`; a non-UTF-8 Content-Type would now differ
+        // from the old reader-based path.
+        if (!preview.trimStart().startsWith("[")) {
+            throw XtreamParsingException(
                 "Expected JSON array from ${descriptor.hint}${sanitizedPreview(preview)?.let { " (preview=$it)" } ?: ""}"
             )
         }
+        var emittedCount = 0
+        try {
+            val iterator = json.decodeToSequence<XtreamLiveStreamRow>(input).iterator()
+            while (iterator.hasNext()) {
+                onRow(iterator.next())
+                emittedCount++
+            }
+        } catch (e: SerializationException) {
+            throw XtreamParsingException(
+                "Malformed JSON from ${descriptor.hint}${sanitizedPreview(preview)?.let { " (preview=$it)" } ?: ""}",
+                e
+            )
+        }
+        return emittedCount
     }
 
     private fun decodeLegacyLiveStreams(
@@ -769,43 +761,29 @@ class OkHttpXtreamApiService(
             )?.let { throw it }
             stream.unread(previewBytes)
 
-            val reader = JsonReader(InputStreamReader(stream, charset))
-            reader.isLenient = true
-            return when (reader.peek()) {
-                JsonToken.BEGIN_ARRAY -> {
-                    var emittedCount = 0
-                    reader.beginArray()
-                    while (reader.hasNext()) {
-                        val element = try {
-                            JsonParser.parseReader(reader)
-                        } catch (e: RuntimeException) {
-                            throw XtreamParsingException(
-                                "Malformed JSON from ${descriptor.hint}${sanitizedPreview(preview)?.let { " (preview=$it)" } ?: ""}",
-                                e
-                            )
-                        }
-                        val item = try {
-                            json.decodeFromString(deserializer, element.toString())
-                        } catch (e: SerializationException) {
-                            throw XtreamParsingException(
-                                "Malformed JSON from ${descriptor.hint}${sanitizedPreview(preview)?.let { " (preview=$it)" } ?: ""}",
-                                e
-                            )
-                        }
-                        onItem(item)
-                        emittedCount++
-                    }
-                    reader.endArray()
-                    emittedCount
-                }
-                JsonToken.NULL -> {
-                    reader.nextNull()
-                    0
-                }
-                else -> throw XtreamParsingException(
+            // A4: same treatment as decodeThinLiveRows - stream the array with kotlinx instead of
+            // building a Gson tree per element, re-serialising it with toString() and re-parsing.
+            // The shape check uses the preview string; inspectResponseShape above has already
+            // rejected anything not starting with '{' or '['.
+            if (!preview.trimStart().startsWith("[")) {
+                throw XtreamParsingException(
                     "Expected JSON array from ${descriptor.hint}${sanitizedPreview(preview)?.let { " (preview=$it)" } ?: ""}"
                 )
             }
+            var emittedCount = 0
+            try {
+                val iterator = json.decodeToSequence(stream, deserializer).iterator()
+                while (iterator.hasNext()) {
+                    onItem(iterator.next())
+                    emittedCount++
+                }
+            } catch (e: SerializationException) {
+                throw XtreamParsingException(
+                    "Malformed JSON from ${descriptor.hint}${sanitizedPreview(preview)?.let { " (preview=$it)" } ?: ""}",
+                    e
+                )
+            }
+            return emittedCount
         }
     }
 
