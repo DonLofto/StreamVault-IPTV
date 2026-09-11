@@ -3,7 +3,7 @@
 Tracks implementation of the 59 findings in `docs/performance-audit.md`.
 Plan: `docs/planFix.md`. Baseline commit: `740bd55f`.
 
-**31 done · 4 partial · 1 superseded · 23 open.** Commits marked DONE are on `master`; the working
+**34 done · 4 partial · 1 superseded · 20 open.** Commits marked DONE are on `master`; the working
 tree is clean. Verification for every DONE item was a module compile plus the relevant test suite;
 Room-validated SQL and byte-identical golden output are called out where they apply.
 
@@ -44,6 +44,9 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | A51 | `3b8cb2c5`, `8aad07e7` | See A26 (same code path) |
 | A53 | `62322342` | XMLTV staging inserts wrapped in a transaction |
 | A59 | `964f2926` | `getByIds` chunked at 900 for the SQLite 999 bind-variable ceiling |
+| A16 | `cb13e949` | Player diagnostics collected only while the overlay is visible |
+| A40 | `3b6b9ee9` | Guide clock exposed as State; grid row/cell defer through `derivedStateOf` |
+| A56 | `d67ebee3` | VOD browse page built once per fetch instead of twice |
 
 ## Partial
 
@@ -81,10 +84,10 @@ static reading and was wrong about an API.
   measured baseline. Worse, "fixing" it by calling the `Charset` overload directly would compile
   against `compileSdk = 36` and throw `NoSuchMethodError` on API 25–32, i.e. on the target device.
 
-## Open (23)
+## Open (20)
 
-A4, A6, A8, A9, A11, A12, A13, A14, A16, A17, A18, A19, A20, A24, A34, A35, A38, A40, A54, A55,
-A56, A57, A58.
+A4, A6, A8, A9, A11, A12, A13, A14, A17, A18, A19, A20, A24, A34, A35, A38, A54, A55, A57,
+A58.
 
 Grouped by why they are still open:
 
