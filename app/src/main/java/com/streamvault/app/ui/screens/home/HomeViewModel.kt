@@ -52,6 +52,8 @@ import com.streamvault.player.PlayerEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.streamvault.app.R
 import java.util.concurrent.CancellationException
+import com.streamvault.app.di.DefaultDispatcher
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -86,7 +88,8 @@ class HomeViewModel @Inject constructor(
     private val livePreviewHandoffManager: LivePreviewHandoffManager,
     private val pluginManager: StreamVaultPluginManager,
     @param:AuxiliaryPlayerEngine
-    private val playerEngineProvider: InjectProvider<PlayerEngine>
+    private val playerEngineProvider: InjectProvider<PlayerEngine>,
+    @param:DefaultDispatcher private val categoryWorkDispatcher: CoroutineDispatcher
 ) : ViewModel() {
     private companion object {
         const val MIN_CHANNEL_SEARCH_QUERY_LENGTH = 2
@@ -511,7 +514,12 @@ class HomeViewModel @Inject constructor(
                         pinnedCategoryIds = pinnedCategoryIds,
                         hiddenLiveCategories = hiddenLiveCategoriesList
                     )
-                }.combine(preferencesRepository.showFavoritesCategory) { ctx, showFavorites ->
+                }
+                    // A25 - the category filter/sort above is O(n log n) over every category of the
+                    // provider and ran on whichever dispatcher the preference flows emitted on.
+                    // Everything downstream stays on the collector's context.
+                    .flowOn(categoryWorkDispatcher)
+                    .combine(preferencesRepository.showFavoritesCategory) { ctx, showFavorites ->
                     if (!showFavorites) ctx.copy(categories = ctx.categories.filter { it.id != VirtualCategoryIds.FAVORITES }) else ctx
                 }.combine(preferencesRepository.showRecentChannelsCategory) { ctx, showRecent ->
                     if (!showRecent) ctx.copy(categories = ctx.categories.filter { it.id != VirtualCategoryIds.RECENT }) else ctx

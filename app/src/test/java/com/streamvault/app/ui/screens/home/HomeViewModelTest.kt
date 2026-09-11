@@ -145,7 +145,10 @@ class HomeViewModelTest {
             multiViewManager = multiViewManager,
             livePreviewHandoffManager = livePreviewHandoffManager,
             pluginManager = pluginManager,
-            playerEngineProvider = playerEngineProvider
+            playerEngineProvider = playerEngineProvider,
+            // Drives the off-main category work with the test scheduler, so advanceUntilIdle
+            // actually waits for it. A hard-coded Dispatchers.Default runs off-scheduler.
+            categoryWorkDispatcher = testDispatcher
         ).also(createdViewModels::add)
 
     private fun clearViewModel(viewModel: HomeViewModel) {
