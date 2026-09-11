@@ -742,7 +742,10 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                 runningChunkDurationMs
             }
             if (backend == LiveTimeshiftBackend.DISK) {
-                diskManager.recordFileMutation()
+                // A8: record the exact bytes this chunk added instead of invalidating and forcing a
+                // full directory walk. Any eviction above already invalidated, in which case this is
+                // a no-op and the walk still sees the truth.
+                diskManager.recordBytesWritten(active.bytesWritten)
                 checkDiskAndBudget()
             }
             updateWindow(windowDuration)

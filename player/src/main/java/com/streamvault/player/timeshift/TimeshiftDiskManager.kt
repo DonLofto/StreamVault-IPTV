@@ -69,10 +69,36 @@ class TimeshiftDiskManager(
 
     /**
      * Notifies the manager that files were added, deleted, or mutated.
+     *
+     * Invalidates the cache, so the next usage read re-walks the directory. Used by every path that
+     * DELETES files, where the delta is easier to get wrong than to measure.
      */
     fun recordFileMutation() {
         synchronized(accountingLock) {
             invalidateUsageCacheLocked()
+        }
+    }
+
+    /**
+     * Records that [bytes] were written to a NEW file, without invalidating the cache.
+     *
+     * A8: the progressive capture finalises a chunk every 2 seconds and then immediately checks the
+     * budget, so the invalidate-then-re-walk cycle ran a full recursive directory walk - two stat
+     * syscalls per file plus a boxed key per file - every 2 seconds for the whole session, over a
+     * directory that reaches ~900 chunk files at the default 30-minute depth.
+     *
+     * The increment is exact because each chunk is a new file. It is deliberately skipped when the
+     * cache is already invalid, so a stale cache cannot be resurrected with a partial total - the
+     * pending walk still sees the bytes, because they are on disk by the time this is called. Deletes
+     * continue to invalidate, which keeps the cached total from ever drifting BELOW reality, the
+     * direction that would let timeshift overrun its budget.
+     */
+    fun recordBytesWritten(bytes: Long) {
+        if (bytes <= 0L) return
+        synchronized(accountingLock) {
+            if (cachedUsageBytes >= 0L) {
+                cachedUsageBytes += bytes
+            }
         }
     }
 
