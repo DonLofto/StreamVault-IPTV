@@ -59,6 +59,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
@@ -1149,7 +1150,12 @@ class EpgViewModel @Inject constructor(
                     windowStart = selection.anchorTime - LOOKBACK_MS,
                     windowEnd = selection.anchorTime + LOOKAHEAD_MS
                 )
-            }.collectLatest { request ->
+            }
+                // A25 - the category filter/sort and the guide category list build above are O(n log n)
+                // over every category of the provider and ran on the collector's context, i.e. Main.
+                // The collectLatest body below stays there, because it writes _uiState.
+                .flowOn(guideWorkDispatcher)
+                .collectLatest { request ->
                 val categories = request.categories
                 val hasVisibleGuide = _uiState.value.channels.isNotEmpty() || _uiState.value.programsByChannel.isNotEmpty()
                 val providerSourceLabel = buildProviderSourceLabel(provider)
