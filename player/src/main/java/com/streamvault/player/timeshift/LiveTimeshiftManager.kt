@@ -1406,14 +1406,19 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                 ?.replace("\$Bandwidth\$", rep.bandwidth.toString())
                 ?.let { resolveRelativeUrl(baseUrl, it) }
 
+            // A35 - the per-representation substitutions are constant for the whole manifest. Hoisting
+            // them out of the per-segment loop removes two thirds of the string work from every poll:
+            // the retention window can hold hundreds of segments and only $Number$ / $Time$ vary.
+            val segmentTemplateBase = rep.mediaTemplate
+                .replace("\$RepresentationID\$", rep.id)
+                .replace("\$Bandwidth\$", rep.bandwidth.toString())
+
             val ts = rep.timescale.takeIf { it > 0L } ?: 1L
             val mediaSegments: List<RemoteHlsSegment> = if (timelineSegments.isNotEmpty()) {
                 // SegmentTimeline mode: each (t, d) pair is one segment.
                 timelineSegments.mapIndexed { index, (t, d) ->
                     val number = rep.startNumber + index
-                    val uri = rep.mediaTemplate
-                        .replace("\$RepresentationID\$", rep.id)
-                        .replace("\$Bandwidth\$", rep.bandwidth.toString())
+                    val uri = segmentTemplateBase
                         .replace("\$Number\$", number.toString())
                         .replace("\$Time\$", t.toString())
                         .let { resolveRelativeUrl(baseUrl, it) }
@@ -1427,9 +1432,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                 val windowSegments = (effectiveDepthMs / 1000L * ts / rep.segmentDuration + 2L).toInt()
                 val firstNumber = (totalSegments - windowSegments).coerceAtLeast(rep.startNumber)
                 (firstNumber..totalSegments).map { number ->
-                    val uri = rep.mediaTemplate
-                        .replace("\$RepresentationID\$", rep.id)
-                        .replace("\$Bandwidth\$", rep.bandwidth.toString())
+                    val uri = segmentTemplateBase
                         .replace("\$Number\$", number.toString())
                         .let { resolveRelativeUrl(baseUrl, it) }
                     RemoteHlsSegment(uri = uri, durationMs = rep.segmentDuration * 1000L / ts)
