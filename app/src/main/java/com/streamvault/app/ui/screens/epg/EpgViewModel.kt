@@ -39,6 +39,7 @@ import com.streamvault.data.preferences.PreferencesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -290,6 +291,9 @@ class EpgViewModel @Inject constructor(
         const val DAY_SHIFT_MS = 24 * 60 * 60 * 1000L
         const val PRIME_TIME_HOUR = 20
         const val NO_ACTIVE_PROVIDER = "NO_ACTIVE_PROVIDER"
+
+        /** Debounce for the EPG-match search dialog; each search is a full LIKE scan per source. */
+        private const val EPG_OVERRIDE_SEARCH_DEBOUNCE_MS = 275L
     }
 
     private val _uiState = MutableStateFlow(EpgUiState())
@@ -575,9 +579,14 @@ class EpgViewModel @Inject constructor(
         if (loadMoreJob?.isActive == true) return
         val deferred = prefetchJob
         if (deferred == null) {
-            val nextChannels = snapshot.allChannels
-                .drop(snapshot.visibleChannels.size)
-                .take(MAX_CHANNELS)
+            // drop(n) copied the entire remaining channel list just to take pageSize items.
+            val fromIndex = snapshot.visibleChannels.size
+            val toIndex = (fromIndex + MAX_CHANNELS).coerceAtMost(snapshot.allChannels.size)
+            val nextChannels = if (fromIndex >= toIndex) {
+                emptyList()
+            } else {
+                snapshot.allChannels.subList(fromIndex, toIndex).toList()
+            }
             if (nextChannels.isEmpty()) {
                 baseGuideSnapshot.update { it?.copy(hasMoreChannels = false) }
                 return
@@ -862,6 +871,8 @@ class EpgViewModel @Inject constructor(
         _uiState.update { it.copy(pendingRecordingConflict = null) }
     }
 
+    private var epgOverrideSearchJob: Job? = null
+
     fun clearRecordingMessage() {
         _uiState.update { it.copy(recordingMessage = null) }
     }
@@ -875,7 +886,15 @@ class EpgViewModel @Inject constructor(
                 error = null
             )
         }
-        loadEpgOverrideCandidates(channel = channel, query = query, refreshMapping = false)
+        // Debounced: each keystroke previously issued one searchBySource per assigned source, and
+        // that query is three LOWER(col) LIKE LOWER('%...%') predicates over the whole epg_channels
+        // table - unindexable by construction because a function is applied to the column and the
+        // pattern is leading-wildcard. The guide search already debounces; this dialog did not.
+        epgOverrideSearchJob?.cancel()
+        epgOverrideSearchJob = viewModelScope.launch {
+            delay(EPG_OVERRIDE_SEARCH_DEBOUNCE_MS)
+            loadEpgOverrideCandidates(channel = channel, query = query, refreshMapping = false)
+        }
     }
 
     fun applyEpgOverride(candidate: EpgOverrideCandidate) {
