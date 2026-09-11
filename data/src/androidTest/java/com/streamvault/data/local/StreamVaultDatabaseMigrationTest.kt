@@ -1405,6 +1405,76 @@ class StreamVaultDatabaseMigrationTest {
         }
     }
 
+    /**
+     * A55: the duplicate-resolution indices added in 64 -> 65.
+     *
+     * runMigrationsAndValidate already compares the migrated schema against the generated 65 schema,
+     * so this additionally asserts each index exists by name and that VOD rows survive the migration.
+     */
+    @Test
+    fun migration_64_to_65() {
+        migrationTestHelper.createDatabase("streamvault-64-65-test", 64).apply {
+            // Every NOT NULL column without a default must be supplied, or the INSERT itself fails
+            // before the migration is ever exercised.
+            execSQL(
+                """
+                INSERT INTO movies (
+                    stream_id, name, stream_url, duration_seconds, rating, provider_id,
+                    watch_progress, watch_count, last_watched_at, is_adult, is_user_protected,
+                    sync_fingerprint, added_at, cache_state, detail_hydrated_at, remote_stale_at,
+                    year, tmdb_id, release_date
+                ) VALUES ('m1', 'A Movie', 'http://test/m1.mp4', 0, 0, 1, 0, 0, 0, 0, 0,
+                          '', 0, '', 0, 0, '2025', 4242, '2025-01-01')
+                """.trimIndent()
+            )
+            execSQL(
+                """
+                INSERT INTO series (
+                    series_id, name, rating, last_modified, provider_id, is_adult,
+                    is_user_protected, sync_fingerprint, cache_state, detail_hydrated_at,
+                    remote_stale_at, tmdb_id, release_date
+                ) VALUES ('s1', 'A Series', 0, 0, 1, 0, 0, '', '', 0, 0, 9999, '2024-02-02')
+                """.trimIndent()
+            )
+            close()
+        }
+
+        val migratedDb = migrationTestHelper.runMigrationsAndValidate(
+            "streamvault-64-65-test",
+            65,
+            true,
+            StreamVaultDatabase.MIGRATION_64_65
+        )
+
+        listOf(
+            "index_movies_provider_id_tmdb_id" to "movies",
+            "index_movies_provider_id_year" to "movies",
+            "index_movies_provider_id_release_date" to "movies",
+            "index_series_provider_id_tmdb_id" to "series",
+            "index_series_provider_id_release_date" to "series"
+        ).forEach { (indexName, table) ->
+            assertEquals(
+                "missing index $indexName on $table",
+                1,
+                countRows(
+                    migratedDb,
+                    "SELECT COUNT(*) FROM pragma_index_list('$table') WHERE name = '$indexName'"
+                )
+            )
+        }
+
+        // Rows must survive: CREATE INDEX only, but a wrong migration could still drop data.
+        assertEquals(
+            1,
+            countRows(migratedDb, "SELECT COUNT(*) FROM movies WHERE stream_id = 'm1' AND tmdb_id = 4242")
+        )
+        assertEquals(
+            1,
+            countRows(migratedDb, "SELECT COUNT(*) FROM series WHERE series_id = 's1' AND tmdb_id = 9999")
+        )
+        migratedDb.close()
+    }
+
     private fun exists(db: androidx.sqlite.db.SupportSQLiteDatabase, sql: String): Boolean {
         db.query(sql).use { cursor ->
             return cursor.moveToFirst()

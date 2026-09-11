@@ -228,7 +228,12 @@ data class PlaybackCompatibilityRecordEntity(
         Index(name = "index_movies_provider_id_name_id", value = ["provider_id", "name", "id"]),
         Index(name = "index_movies_provider_id_category_id_name_id", value = ["provider_id", "category_id", "name", "id"]),
         Index(name = "index_movies_provider_id_rating_name_id", value = ["provider_id", "rating", "name", "id"]),
-        Index(name = "index_movies_provider_id_added_at_release_date_name_id", value = ["provider_id", "added_at", "release_date", "name", "id"])
+        Index(name = "index_movies_provider_id_added_at_release_date_name_id", value = ["provider_id", "added_at", "release_date", "name", "id"]),
+        // A55: duplicate resolution filters on these per provider and had only provider_id indexed,
+        // so SQLite scanned every movie row of the provider and materialised full rows for each.
+        Index(name = "index_movies_provider_id_tmdb_id", value = ["provider_id", "tmdb_id"]),
+        Index(name = "index_movies_provider_id_year", value = ["provider_id", "year"]),
+        Index(name = "index_movies_provider_id_release_date", value = ["provider_id", "release_date"])
     ]
 )
 data class MovieEntity(
@@ -303,7 +308,10 @@ data class MovieBrowseEntity(
         Index(name = "index_series_provider_id_name_id", value = ["provider_id", "name", "id"]),
         Index(name = "index_series_provider_id_category_id_name_id", value = ["provider_id", "category_id", "name", "id"]),
         Index(name = "index_series_provider_id_rating_name_id", value = ["provider_id", "rating", "name", "id"]),
-        Index(name = "index_series_provider_id_last_modified_name_id", value = ["provider_id", "last_modified", "name", "id"])
+        Index(name = "index_series_provider_id_last_modified_name_id", value = ["provider_id", "last_modified", "name", "id"]),
+        // A55: same duplicate-resolution lookups as movies.
+        Index(name = "index_series_provider_id_tmdb_id", value = ["provider_id", "tmdb_id"]),
+        Index(name = "index_series_provider_id_release_date", value = ["provider_id", "release_date"])
     ]
 )
 data class SeriesEntity(

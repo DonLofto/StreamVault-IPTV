@@ -50,7 +50,7 @@ import com.streamvault.data.local.entity.*
         XtreamLiveOnboardingStateEntity::class,
         DownloadEntity::class
     ],
-    version = 64,
+    version = 65,
     exportSchema = true   // ← was false; schema JSON now tracked in version control
 )
 @TypeConverters(RoomEnumConverters::class)
@@ -2726,6 +2726,35 @@ abstract class StreamVaultDatabase : RoomDatabase() {
                 )
                 database.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_favorites_provider_id_content_type_position` ON `favorites` (`provider_id`, `content_type`, `position`)"
+                )
+            }
+        }
+
+        /**
+         * A55: indices for the VOD duplicate-resolution lookups.
+         *
+         * getByProviderAndTmdbIdSync / getByProviderAndYearSync /
+         * getByProviderAndReleaseYearPrefixSync filter on these columns per provider, but only
+         * provider_id was indexed - so SQLite scanned every movie/series row of the provider,
+         * materialising full rows (plot, cast, director) for each, on every detail-screen open.
+         * Non-destructive: index creation only.
+         */
+        val MIGRATION_64_65 = object : Migration(64, 65) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_movies_provider_id_tmdb_id` ON `movies` (`provider_id`, `tmdb_id`)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_movies_provider_id_year` ON `movies` (`provider_id`, `year`)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_movies_provider_id_release_date` ON `movies` (`provider_id`, `release_date`)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_series_provider_id_tmdb_id` ON `series` (`provider_id`, `tmdb_id`)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_series_provider_id_release_date` ON `series` (`provider_id`, `release_date`)"
                 )
             }
         }
