@@ -189,6 +189,22 @@ before staging, so a `Sequence` at the staging boundary is already too late. The
 chain — Xtream/M3U provider → entities → `buildChannelStages` → stage — has to stream, which is a
 multi-file refactor against `SyncCatalogStoreMemoryTest`'s existing peak-heap assertions.
 
+## Decisions taken 2026-09-11 (all recommendations accepted)
+
+Recorded so these are not re-litigated. Each unblocks work that was previously gated.
+
+| # | Finding | Decision |
+|---|---|---|
+| 1 | **A52** watermark (also unblocks **A54**) | **Explicit monotonic column on the stage tables.** Rejected the implicit `rowid` watermark because a row upserted with REPLACE gets a new rowid, so a watermark could skip a genuinely-changed row — silent catalog data loss. |
+| 2 | **A12** unchanged-feed skip | **Content hash of the feed, stored per provider.** Deterministic, and catches identical content served from different URLs or with reordered attributes. |
+| 3 | **A38** remaining 12 sites | **Move `awaitResponse` into `:domain`, convert all 12.** One helper, no duplication across `data` and `player`. |
+| 4 | **A38** callTimeout | **Cap the background-sync client only.** The main client keeps its uncapped EPG path deliberately — a 200 MB feed on a slow link can legitimately outlast any reasonable total-call budget. |
+| 5 | **A34** MEMORY timeshift | **Cap the MEMORY window to a fixed byte budget (~48 MB)** against the 192 MB heap class, rather than removing the backend. |
+| 6 | **A18** guide layout | **Implement the LazyRow conversion; the user reviews the guide visually on the TV.** |
+| 7 | Live-TV validation | **Run the full AGENTS.md protocol (61 screenshots, ~2 min, two channels) per affected finding** — A20, A35, and anything else touching playback or timeshift. |
+| 8 | **A5** date parsing | **Retry `ParsePosition`, tests-first** — pin the offset-less and malformed cases as failing tests, then establish empirically what `ParsePosition` does to `position.index` and field resolution for these patterns. |
+| 9 | Priority | **A4 next**, ahead of A58. |
+
 ## Environment notes
 
 - `CancellableHttpTest` is **flaky and pre-existing**: different test cases fail on different runs when
