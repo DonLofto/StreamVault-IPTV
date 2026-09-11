@@ -1,7 +1,13 @@
 # Context — StreamVault Playback / Buffering Work
 
 Project overview and orientation for an agent starting a new session on the buffering fix work.
-Companion plan: `docs/planFix.md`. Findings that motivate this work: `docs/buffering-investigation.md`.
+
+> **Status note (2026-09-11):** this document's companion files were removed as stale —
+> `docs/buffering-investigation.md` (findings) and the original `docs/planFix.md` (buffering plan).
+> Both are recoverable from git history. **`docs/planFix.md` now holds the unrelated performance
+> audit remediation plan**, not the buffering plan; do not follow it for buffering work.
+> The buffering findings referenced below are no longer maintained here.
+
 
 ## Repo / project
 - Android TV IPTV app. Kotlin, Jetpack Compose, Media3 (ExoPlayer), Hilt, Room, OkHttp, Coroutines.

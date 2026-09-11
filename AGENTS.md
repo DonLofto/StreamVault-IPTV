@@ -218,9 +218,16 @@ Entry points:
 
 ## Performance Audit
 
-- Findings: `docs/performance-audit.md`.
-- Remediation order, files, regression tests, and validation: `docs/planFixAudit.md`.
-- Start with timeshift safety, then catalog/Room and EPG. Do not start broad performance work before B1/B2 are fixed.
+- Findings: `docs/performance-audit.md` (measured on a Fire TV Stick AFTSSS; every finding carries device evidence or exact `file:line`).
+- Remediation plan — per-finding change steps, files, regression tests, ordering, and validation: `docs/planFix.md`.
+- Start with Phase 1 (the per-call object-construction defect class): it is the mechanism confirmed
+  on-device at 135-320% sustained idle CPU. Do not start broad performance work before it lands, and
+  re-baseline the acceptance thresholds after it, not before.
+- The timeshift bugs B1/B2 from the previous audit are **fixed**; do not re-open them. See
+  "Prior remediation status" in the audit before redoing anything.
+- Findings are remediated in the PR order given in `docs/planFix.md` §1.2.
+- Measuring on device: `kill -3` does not work here (the ART dump lands in `/data/anr/trace_00`,
+  unreadable without root). Use JDWP + `jdb` - see `docs/planFix.md` §2.2.
 - Player, decoder, renderer, timeshift, or network-admission changes require full live-TV validation above on at least two channels.
 
 ## Do NOT

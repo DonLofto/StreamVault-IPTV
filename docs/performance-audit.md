@@ -1,392 +1,503 @@
-# Android Performance Audit
+# StreamVault Performance Audit
 
-Static source audit of StreamVault on `buffering-fixes`. No production code changed.
-
-Scope followed module order: `player/`, `data/`, `app/`, then Gradle/package and test review.
-`docs/buffering-investigation.md` findings were excluded, including its documented player
-reprepare paths, duplicate live capture, token renewal, retry loop, and per-second support
-snapshot write. `graphify-out/` was not present in this checkout.
-
-Refs use `file:line`. Runtime-cost statements are source-proven paths unless marked for
-profiling. Device tiers:
-
-- **Tier A:** 1-1.5 GB RAM TV dongles, older Fire TV / Android TV, slow eMMC.
-- **Tier B:** current mid-range Android TV boxes and televisions.
-- **Tier C:** phones and tablets.
-
-Render-path check: `PlayerRenderView` defaults to `AUTO` (`app/src/main/java/com/streamvault/app/ui/components/PlayerRenderView.kt:13-33`), and engine state starts as `SURFACE_VIEW` (`player/src/main/java/com/streamvault/player/Media3PlayerEngine.kt:269-270`). AUTO selects `SurfaceView` except Android <= 25 and a narrowly targeted older Amazon MediaTek path; live HLS on that Amazon path is forced back to `SurfaceView` (`Media3PlayerEngine.kt:1659-1693`). No finding says `TextureView` is the general default.
+**Date:** 2026-09-11 · **Commit:** `740bd55f` (master, 3 commits ahead of `origin/master`)
+**Supersedes** (all deleted in this change): `performance-audit.md`, `planFixAudit.md`, `performance-audit-results.md`, `planFix.md`, `buffering-investigation.md`.
+**Companion:** `docs/planFix.md` (per-finding remediation cards, ordering, tests, validation).
 
 ---
 
-## Performance findings
+## 1. Method
 
-### HIGH - startup, memory, storage, and network contention
+This audit is **measurement-first**. Runs of the real app on the real target device produced the
+primary evidence; static reading then explained each mechanism and located it precisely. Every
+finding below carries either a device measurement or an exact `file:line`, and most carry both.
 
-### H1. External backup import copies arbitrary input on main thread before first Compose frame
+Findings that could not be confirmed by measurement or by reading are marked **UNVERIFIED** rather
+than asserted. A `Verified clean` section records what was checked and found sound, so the next
+audit does not repeat that work.
 
-`app/src/main/java/com/streamvault/app/MainActivity.kt:116-141, 342-357, 399-407`
-`app/src/main/java/com/streamvault/app/backup/BackupFileBridge.kt:45-54`
+### 1.1 Device under test — the performance bar
 
-- **Current behavior:** `onCreate()` handles an external import intent before `setContent`. The import path prunes cache files, opens the provider URI, and copies all bytes with `input.copyTo(output)` on the caller thread.
-- **Cost and tier:** A slow `content://` provider or large backup blocks first draw and can trigger an ANR. Tier A and B high; Tier C medium. Cache consumption is unbounded by this path.
-- **Proposed fix:** Show initial UI, then copy on `Dispatchers.IO` with progress and cancellation. This is behavior-preserving. A maximum import size is a behavior change.
-- **Verification:** Trace `MainActivity.onCreate` and main-thread blocked time with a large document-provider backup on Tier A hardware.
+| Property | Value |
+|---|---|
+| Model | Amazon Fire TV Stick **AFTSSS**, codename `sheldonp` |
+| OS | Fire OS 9 (Android 9 / API 28) |
+| CPU | 4 cores |
+| RAM | 922 MB total; **192 MB** per-app heap class |
+| ABI | `armeabi-v7a` — **32-bit** |
+| Root | none |
 
-### H2. Bulk catalog writes maintain FTS twice: per-row content-sync triggers plus full rebuild
+This is a weak target, deliberately. Code that is acceptable on a flagship phone can be
+pathological here, and the app's own diagnostics confirm the device self-identifies as
+low-memory (`isLowMemoryPlaybackDevice`, `Media3PlayerEngine.kt:236-241`).
 
-`data/src/main/java/com/streamvault/data/local/entity/Entities.kt:354-369`
-`data/src/main/java/com/streamvault/data/local/dao/CatalogSyncDao.kt:851-860`
-`data/src/main/java/com/streamvault/data/sync/SyncCatalogStore.kt:87-115, 130-138`
-`data/src/main/java/com/streamvault/data/local/StreamVaultDatabase.kt:1867-1872`
+### 1.2 Techniques used
 
-- **Current behavior:** Each FTS table declares `@Fts4(contentEntity = ...)`, which creates Room-managed content synchronization. Bulk catalog replacement also executes `INSERT INTO <fts>(<fts>) VALUES('rebuild')` for channels, movies, and series.
-- **Cost and tier:** A large sync mutates FTS for every changed row, then rebuilds the whole index. Tier A high due to CPU, WAL, and flash I/O; Tier B high on large providers; Tier C medium.
-- **Proposed fix:** Pick one maintenance model. Retain Room content-sync and remove explicit rebuilds, or remove the content-entity strategy and run exactly one explicit rebuild inside the same atomic catalog transaction (or add interruption-safe recovery). The latter matches the migration comment's stated intent. **Fix class:** behavior-preserving if validation covers insert, update, delete, and interrupted sync.
-- **Verification:** Benchmark 10k and 50k catalog fixtures with SQLite statement tracing, transaction duration, WAL growth, and post-sync FTS result parity.
+| Technique | Command |
+|---|---|
+| Cold start | `adb shell am start -W -n com.streamvault.app/.MainActivity` |
+| Time to first frame | `logcat` → `ActivityManager: Displayed` |
+| Process CPU | delta of `/proc/<pid>/stat` fields 14+15 over a fixed window |
+| Per-thread CPU | `adb shell top -n 1 -b -H -p <pid>` |
+| **Java thread dumps** | `adb forward tcp:8700 jdwp:<pid>` then `jdb -attach localhost:8700`, `suspend` + `where all` |
+| Allocation churn | ART GC lines in `logcat` |
+| Heap trend | `run-as com.streamvault.app cat files/diagnostics/runtime-memory.log` |
+| Footprint | `dumpsys meminfo` |
 
-### H3. Catalog staging holds every remote key in heap despite catalog limits
-
-`data/src/main/java/com/streamvault/data/sync/CatalogSizeLimits.kt:3-7`
-`data/src/main/java/com/streamvault/data/sync/SyncCatalogStore.kt:701-753`
-
-- **Current behavior:** `stageDistinctRows()` puts every distinct remote key in `HashSet`, while retaining best candidates in a bounded `PriorityQueue`. The priority queue is capped, but `seenKeys` grows with all distinct source rows.
-- **Cost and tier:** A provider with hundreds of thousands of VOD/series rows creates a long-lived `O(total distinct rows)` set plus retained entities during import. Tier A high OOM/GC risk; Tier B medium; Tier C low to medium.
-- **Proposed fix:** Use database-backed dedupe/staging or bounded spill storage, then rank in SQL. Preserving current "best rows across entire source" semantics requires this; stopping at the limit is a behavior change.
-- **Verification:** Measure peak Java heap, GC pause time, and SQLite/WAL size against oversized Xtream fixtures.
-
-### H4. EPG query and mapping paths materialize unbounded guide windows
-
-`data/src/main/java/com/streamvault/data/local/dao/Daos.kt:2896-2958`
-`data/src/main/java/com/streamvault/data/repository/EpgRepositoryImpl.kt:107-162`
-`data/src/main/java/com/streamvault/data/epg/EpgResolutionEngine.kt:64-119, 262-360`
-
-- **Current behavior:** Program DAO queries have no result limit. Repository code maps all returned entities and groups them in memory; resolved EPG processing flattens all chunk results before grouping.
-- **Cost and tier:** A wide time range, many channels, or multi-source XMLTV produces large temporary lists and maps. Tier A high; Tier B medium; Tier C medium for large tablet guide views.
-- **Proposed fix:** Fetch and merge only visible channel/page windows, streaming chunks into keyed output rather than flattening all rows. This is behavior-preserving when the UI still requests the same visible window. A hard result/time cap changes behavior and needs explicit UX handling.
-- **Verification:** Profile result count, retained heap, GC, and frame time for a 60-channel, 7-hour guide with dense XMLTV data.
-
-### H5. XMLTV accepts a 200 MiB compressed body without a decompressed-size or programme cap
-
-`data/src/main/java/com/streamvault/data/remote/NetworkTimeoutConfig.kt:8-9`
-`data/src/main/java/com/streamvault/data/repository/EpgRepositoryImpl.kt:304-339`
-`data/src/main/java/com/streamvault/data/repository/EpgSourceRepositoryImpl.kt:316-372`
-`data/src/main/java/com/streamvault/data/parser/XmltvParser.kt:539-547`
-
-- **Current behavior:** The input cap is applied before `GZIPInputStream`. Decompression and programme staging have no decompressed-byte, programme-count, or free-space limit. Provider sync can take the EPG path outside `BackgroundEpgSyncWorker`'s low-memory gate.
-- **Cost and tier:** A highly compressible or simply very large XMLTV feed can consume heap, CPU, database space, and flash while playback competes for resources. Tier A high; Tier B medium; Tier C low to medium.
-- **Proposed fix:** Add decompressed-byte and programme-count limits, require storage-not-low/free-space admission, and route every stale EPG path through one low-memory policy. Limits are a behavior change for oversized feeds; shared admission is behavior-preserving.
-- **Verification:** Test realistic compressed feeds with controlled expansion ratios and profile heap, peak cache/DB space, and playback coexistence.
-
-### H6. Playback, catalog sync, EPG, and images share one high-concurrency OkHttp dispatcher
-
-`app/src/main/java/com/streamvault/app/di/NetworkModule.kt:64-83`
-`data/src/main/java/com/streamvault/data/sync/ProviderSyncWorker.kt:183-246`
-`data/src/main/java/com/streamvault/data/sync/BackgroundEpgSyncWorker.kt:123-142`
-`data/src/main/java/com/streamvault/data/repository/EpgRepositoryImpl.kt:76-80`
-`player/src/main/java/com/streamvault/player/playback/PlayerDataSourceFactoryProvider.kt:69-98`
-`app/src/main/java/com/streamvault/app/StreamVaultApp.kt:55-59`
-
-- **Current behavior:** A singleton client has a 64-request dispatcher and 10-per-host limit. `newBuilder()` clients share its dispatcher and connection pool. Connected-network workers can run catalog/EPG work while player and Coil requests use the same transport.
-- **Cost and tier:** On weak Wi-Fi, limited provider connections, or multiview, background calls can occupy host slots, radio time, CPU, and disk while playback needs segments. Tier A and B high under contention; Tier C medium on cellular or weak Wi-Fi.
-- **Proposed fix:** Add a low-priority/admission governor for background sync, reserve player capacity, and defer large work during active playback. **Fix class:** results-preserving, but a behavior change in request timing/freshness. **Playback stability validation required** for any change here.
-- **Verification:** Capture dispatcher queue/running counts, per-host active calls, bytes, worker state, and player dropped/rebuffer metrics on constrained Wi-Fi.
-
-### H7. TV Input Framework sync loads and mutates a full catalog row by row
-
-`app/src/main/java/com/streamvault/app/tvinput/TvInputChannelSyncManager.kt:43-80, 83-206, 293-296`
-`app/src/main/java/com/streamvault/app/MainActivity.kt:134-139`
-
-- **Current behavior:** Television startup schedules a TIF refresh. The manager loads all channels and matching EPG snapshots, reads existing platform channels without an `input_id` selection, then performs existence/program checks and `ContentResolver` mutations per channel.
-- **Cost and tier:** Large provider catalogs create database, heap, binder, and provider I/O pressure after launch. Tier A high; Tier B high with many channels; Tier C not applicable unless using TIF.
-- **Proposed fix:** Filter existing channels by input ID, diff/fingerprint unchanged rows, batch mutations, and stream channel/program work. **Fix class:** behavior-preserving for the resulting TIF catalog. Deferring or adding a refresh TTL changes freshness behavior.
-- **Verification:** Instrument channel count, resolver operation count, wall time, allocations, and first-screen responsiveness on 1k/5k-channel catalogs.
-
-### MEDIUM - Compose, player-adjacent work, cold-start contention, and package size
-
-### M1. EPG composes every programme cell in each visible row and invalidates all cells every 30 seconds
-
-`app/src/main/java/com/streamvault/app/ui/screens/epg/EpgViewModel.kt:282-286`
-`app/src/main/java/com/streamvault/app/ui/screens/epg/EpgControlComponents.kt:80-95`
-`app/src/main/java/com/streamvault/app/ui/screens/epg/EpgGridComponents.kt:327-535, 542-574`
-
-- **Current behavior:** A seven-hour guide window feeds `programs.forEach` inside each visible row. Each `ProgramItem` reads the shared guide clock, recalculates current state and time strings, and remains a focusable surface. Horizontal programme content is not virtualized.
-- **Cost and tier:** Dense schedules inflate composition/layout/focus-tree work. The 30-second tick can create a visible frame-time spike. Tier A high risk; Tier B medium; Tier C medium on large tablet layouts.
-- **Proposed fix:** First profile. Cache immutable programme geometry and labels, isolate only current-state invalidation, and consider horizontal virtualization/windowing. Caching is behavior-preserving. Virtualization can alter off-screen D-pad focus traversal and is a behavior change unless focus semantics are preserved.
-- **Verification:** Compose Layout Inspector and Perfetto tracing on a 60-channel page with dense schedule data and repeated D-pad navigation.
-
-### M2. Seek thumbnails allocate full-resolution frames and cancellation cannot interrupt a blocking retriever call
-
-`app/src/main/java/com/streamvault/app/ui/screens/player/SeekThumbnailProvider.kt:45-78, 85-88`
-`app/src/main/java/com/streamvault/app/ui/screens/player/PlayerPlaybackPreferenceActions.kt:314-358`
-
-- **Current behavior:** Each uncached scrub bucket calls `MediaMetadataRetriever.setDataSource()` and frame extraction on `Dispatchers.IO`; timeout cannot preempt non-suspending framework calls. Cache misses are not single-flight. Scaling allocates another bitmap while the decoded original is still live.
-- **Cost and tier:** Rapid VOD scrub can queue expensive frame extraction and cause allocation/GC pressure. Tier A and B high for remote/high-resolution files; Tier C medium.
-- **Proposed fix:** Limit thumbnail concurrency to one bounded worker, coalesce in-flight bucket requests, release intermediate bitmaps safely, and cap cache by bytes. Normal preview behavior is preserved; stricter extraction timeout/disablement on weak devices changes behavior. **Playback stability validation required** if player/source sharing changes.
-- **Verification:** Record heap, bitmap allocations, CPU, and seek responsiveness while scrubbing 4K local and remote VOD.
-
-### M3. Player read diagnostics do work on every instrumented stream read even when no diagnostic log is emitted
-
-`player/src/main/java/com/streamvault/player/playback/PlayerDataSourceFactoryProvider.kt:99-107, 170-208`
-`player/src/main/java/com/streamvault/player/playback/PlayerDataSourceReadStats.kt:19-25, 39-40, 49, 63-67`
-`player/src/main/java/com/streamvault/player/stats/PlayerStatsCollector.kt:110-179`
-
-- **Current behavior:** HLS/MPEG-TS data sources are wrapped for read statistics. The wrapper sanitizes/records targets and evaluates debug-log state on positive reads. Active statistics also create immutable state snapshots at fixed cadence before `StateFlow` can suppress equal emissions.
-- **Cost and tier:** Per-read bookkeeping is most visible for high-bitrate live streams and multiview on Tier A; Tier B medium; Tier C low.
-- **Proposed fix:** Construct the wrapper only for an explicit diagnostics session, or defer sanitization until an emitted sample. Compare scalar values before creating snapshot objects. Restricting always-on telemetry changes diagnostic coverage; scalar allocation reduction is behavior-preserving. **Playback stability validation required**.
-- **Verification:** Allocation sampling and CPU traces during HLS/MPEG-TS playback with diagnostics on and off.
-
-### M4. Cache budgets are independent and can overcommit constrained `cacheDir` storage
-
-`app/src/main/java/com/streamvault/app/di/NetworkModule.kt:64-70`
-`app/src/main/java/com/streamvault/app/StreamVaultApp.kt:135-159`
-`player/src/main/java/com/streamvault/player/timeshift/TimeshiftDiskManager.kt:15-19, 63-66`
-`player/src/main/java/com/streamvault/player/timeshift/LiveTimeshiftManager.kt:292-300`
-
-- **Current behavior:** HTTP cache allows 256 MiB, Coil allows 100 MiB plus up to 15% memory, and timeshift allows up to 2 GiB. These maxima are not preallocated but no common quota accounts for combined occupancy.
-- **Cost and tier:** Low-storage TV devices can fill cache space during timeshift plus image/catalog use, causing cleanup churn or failed writes. Tier A high; Tier B medium; Tier C low unless offline use is heavy.
-- **Proposed fix:** Derive a shared app cache budget from available/cache quota space and partition it among timeshift, HTTP, and images. This changes capacity/cache-hit behavior but preserves content behavior.
-- **Verification:** Track cache-directory occupancy, eviction rate, failed writes, and free space during timeshift and browse workloads.
-
-### M5. Cold start eagerly schedules work and constructs a broad singleton graph
-
-`app/src/main/java/com/streamvault/app/StreamVaultApp.kt:60-97`
-`app/src/main/java/com/streamvault/app/MainActivity.kt:61, 78-141`
-`app/src/main/java/com/streamvault/app/di/DatabaseModule.kt:25-109`
-`app/src/main/java/com/streamvault/app/di/NetworkModule.kt:95-119`
-
-- **Current behavior:** Application startup starts diagnostics, cleanup, app-update work, periodic workers, launch stale checks, and an immediate recording reconcile. Application/Activity injection reaches preferences, Room-related DAOs, protocol clients, Cast/plugin state, and image dependencies before first interaction.
-- **Cost and tier:** Work runs off main where shown, but database/storage/network contention overlaps cold start. Dependency creation increases CPU and allocation before user work. Tier A medium to high; Tier B medium; Tier C low to medium.
-- **Proposed fix:** Use `Lazy`/`Provider` for protocol- and feature-specific dependencies; coalesce/defer non-urgent launch work after first interaction. Dependency deferral is behavior-preserving if initializers have no required side effects. Deferring reconcile/sync changes recovery/freshness timing.
-- **Verification:** Baseline Profiles plus Macrobenchmark startup traces, Hilt/Room init slices, binder work, and storage I/O on Tier A.
-
-### M6. Historical migrations can rewrite large tables; no production-size migration benchmark protects update time
-
-`app/src/main/java/com/streamvault/app/di/DatabaseModule.kt:44-105`
-`data/src/main/java/com/streamvault/data/local/StreamVaultDatabase.kt:249-569, 665-929, 1417-1596, 2220-2522`
-`data/src/androidTest/java/com/streamvault/data/local/StreamVaultDatabaseMigrationTest.kt:90-137, 1195-1205`
-
-- **Current behavior:** Version 1 through 62 migrations are contiguous and non-destructive. Several historical migrations copy/remap whole tables, build FTS, loop through legacy rows, or backfill index tables. Tests titled "latest" stop at v42 or v61 and omit v62.
-- **Cost and tier:** Only old installs pay the full chain, but a large existing catalog on slow flash can make first open after update long. Tier A high for affected upgrades; Tier B medium; Tier C low.
-- **Proposed fix:** Extend migration coverage to 62 and add device/instrumented benchmark fixtures representing large legacy catalogs. Test coverage is behavior-preserving. Any destructive fast-path is a behavior change and risks data loss.
-- **Verification:** Measure open-to-ready time, DB/WAL temporary size, free space, and migration correctness from representative old schemas.
-
-### M7. Beta builds retain unshrunk code/resources; broad keep rules reduce release shrinking
-
-`app/build.gradle.kts:104-125`
-`app/proguard-rules.pro:12-13, 40-45, 53-55, 68-71`
-`player/build.gradle.kts:40-114`
-
-- **Current behavior:** Release enables R8 and resource shrinking. Beta explicitly disables both. Release rules keep all Hilt and Gson packages plus several broad model families. FFmpeg is bundled locally and the app restricts install ABIs to ARM (`app/build.gradle.kts:67-69`).
-- **Cost and tier:** Beta download/install/storage footprint is larger for every tester. Broad keeps can leave removable release code. ARM filtering prevents unused x86 native code from shipping in ARM installs, but intentionally excludes pure x86/x86_64 devices. Tier A/B storage impact medium; Tier C medium for beta users.
-- **Proposed fix:** Enable shrinking for beta distribution after stack-trace/debug needs are agreed. Narrow keep rules only after a minified-release regression suite. Both preserve app behavior but alter diagnostics/debuggability. Retaining ARM-only delivery is a product compatibility choice; adding x86 increases delivery footprint.
-- **Verification:** Compare APK/AAB size reports, R8 `usage.txt`, native ABI contents, startup, and reflection/serialization tests.
-
-### M8. Slow-query logging cannot identify slow cursor materialization or mapping
-
-`app/src/main/java/com/streamvault/app/di/DatabaseModule.kt:23, 34-42`
-`app/src/main/java/com/streamvault/app/di/SlowQueryLoggingOpenHelperFactory.kt:45-82, 94-128`
-
-- **Current behavior:** Debug-only logging warns at 100 ms around `query`, `execSQL`, and statement calls. `query()` timing ends when Room receives a `Cursor`, before generated code iterates rows and before domain mapping/grouping.
-- **Cost and tier:** Existing logs can expose slow SQL setup/DML but cannot falsify the unbounded EPG/list materialization findings. This is a diagnostic blind spot, not proof of a current slow query. Tier A/B impact is indirect.
-- **Proposed fix:** Add sampled end-to-end repository timing with row counts and query labels, or use Perfetto/SQLite tracing in performance builds. Behavior-preserving if telemetry is sampled/off by default.
-- **Verification:** Correlate Room query start, cursor iteration, mapping, and UI collection time for EPG and large catalog pages.
-
-### LOW - targeted UI and query improvements
-
-### L1. Channel browse ordering likely forces avoidable SQLite sorts on large channel lists
-
-`data/src/main/java/com/streamvault/data/local/dao/Daos.kt:96-110, 162-196`
-`data/src/main/java/com/streamvault/data/local/entity/Entities.kt:90-95`
-
-- **Current behavior:** Channel browse filters by provider/category and orders by channel number, while declared indexes omit the final `number` column.
-- **Cost and tier:** Large all-channel/category lists may scan and sort rather than satisfy ordering through an index. Tier A medium; Tier B low; Tier C low.
-- **Proposed fix:** Validate with target-device `EXPLAIN QUERY PLAN`, then add `(provider_id, number)` and `(provider_id, category_id, number)` only if plans and write cost justify them. Index addition is behavior-preserving.
-
-### L2. Debug runtime diagnostics append forever while app is foregrounded
-
-`app/src/main/java/com/streamvault/app/diagnostics/RuntimeDiagnosticsManager.kt:41-76, 88-126, 169-172`
-`app/src/main/java/com/streamvault/app/StreamVaultApp.kt:38-40, 63-64`
-
-- **Current behavior:** Debug builds append lifecycle/memory snapshots every 30 seconds with no byte cap or rotation. Release exits early, but the manager is still forced from a lazy property during Application startup.
-- **Cost and tier:** Long debug soak runs accumulate cache/disk writes and eventually a large diagnostics file. Tier A/B low; release impact is only small startup allocation.
-- **Proposed fix:** Use bounded rotation/ring retention and avoid constructing diagnostics until a debug session starts. Rotation is behavior-preserving for current diagnostic utility; retention horizon changes.
-
-### L3. Channel-logo fallback remounts the image request after success/failure state changes
-
-`app/src/main/java/com/streamvault/app/ui/components/ChannelLogo.kt:49-80`
-`app/src/main/java/com/streamvault/app/ui/screens/epg/EpgGridComponents.kt:419-426`
-
-- **Current behavior:** `ChannelLogo` selects different `AsyncImage` call sites when fallback visibility changes, unlike poster cards that retain one image node under a fallback layer.
-- **Cost and tier:** Cold-cache or failing logos can recreate painters in EPG/Home/dashboard rows. Tier A/B low to medium; Tier C low.
-- **Proposed fix:** Keep one `AsyncImage` mounted and layer initials/fallback behind it. Behavior-preserving. Profile Coil cache-hit rate and recomposition first.
+The **JDWP thread-dump technique is the key instrument** and is reusable. `kill -3` does *not*
+work on this device — ART writes the dump to `/data/anr/trace_00`, which is `640`
+`tombstoned:system` and unreadable by both `shell` and `run-as` on an unrooted Fire OS, and
+`debuggerd -b` requires root. `jdb` over a JDWP forward works because the debug build is
+debuggable. `suspend` **must** precede `where all`; without it every thread reports
+"Current thread isn't suspended".
 
 ---
 
-## Bugs found
+## 2. Headline measurement
 
-### B1. DASH timeshift init segment permanently blocks pruning
+The app **never idles.** With no activity in the foreground (`startedActivities=0`) it sustains
+roughly **135–320 % of one core**, forever, on a 4-core device.
 
-`player/src/main/java/com/streamvault/player/timeshift/LiveTimeshiftManager.kt:847-852, 934-942`
+| Scenario | Process CPU | GC events |
+|---|---|---|
+| Cold start, first 20 s | — | **24** |
+| Idle, backgrounded, no activity | 135 % → 294 % | ~1/sec |
+| Live TV browse | ~271 % | 45 |
+| EPG guide open | ~260 % | 33 |
 
-- **Reproduction:** Enable disk or memory timeshift on a live DASH fMP4 stream long enough to exceed configured rewind depth.
-- **Expected:** Old media segments are pruned, preserving the configured rolling depth.
-- **Actual:** The zero-duration init segment is first in `segments`; `pruneSegmentsLocked()` breaks on it and never removes later media segments. Memory/files/seen keys can grow for the session.
-- **Severity:** Crash/data-loss risk through OOM or storage exhaustion.
-- **Fix:** Store init separately or skip it while pruning; retain it for snapshot creation. Behavior-preserving.
+Corroborating evidence:
 
-### B2. Stopping or replacing timeshift can publish a stale FAILED state
+- **Time to first frame: `Displayed com.streamvault.app/.MainActivity: +3s082ms`**; `am start -W`
+  TotalTime over 3 cold runs: **3587 / 3043 / 2982 ms** (median ≈ 3.0 s).
+- **Allocation churn ≈ 5 MB/s.** ART logs a background GC roughly every second freeing 4–6 MB:
+  `Background concurrent copying GC freed 237261(6MB) AllocSpace objects ... paused 182us total 132.433ms`.
+- **It is not a leak.** `runtime-memory.log` holds `javaUsedMb` flat at **8–10 MB** across the
+  whole session with `lowMemory=false`. Steady heap + high GC rate = allocate-and-discard.
+- **19 `DefaultDispatcher` worker threads** exist on a 4-core device. `Dispatchers.Default`
+  parallelism is 4 here; this many live workers is the signature of *blocking* work occupying
+  Default threads, forcing the scheduler to spawn replacements.
+- **`ReferenceQueueDaemon` at 66–80 % CPU**, paired in the same stack with
+  `libcore.util.NativeAllocationRegistry$CleanerRunner.<init>` — the cleaner registration that
+  `java.util.regex.Pattern.compile` performs.
 
-`player/src/main/java/com/streamvault/player/timeshift/LiveTimeshiftManager.kt:208-220, 225-230, 261-265, 350-353`
+### 2.1 Where the time actually goes — 16 thread samples
 
-- **Reproduction:** Start live timeshift, then change channel, disable rewind, reset player, or release while capture is running.
-- **Expected:** Cancelled session remains disabled or new session state remains authoritative.
-- **Actual:** `Session.stop()` cancels its job, but outer `catch (Throwable)` turns `CancellationException` into `FAILED`; no active-session identity check prevents an old session overwriting newer state.
-- **Severity:** Incorrect behaviour.
-- **Fix:** Rethrow cancellation, check `activeSession === session` before state publication, and coordinate cancellation/deletion before allowing replacement session work. Behavior-preserving.
+16 thread dumps were taken while the app was foregrounded and working. In **4 of 16**, app code was
+actively executing (present within the top 8 frames). **All four were in the same pipeline:**
 
-### B3. Movie and series filtered paging returns empty pages at offset 200+
+```
+ChannelRepositoryImpl.observeChannels$2.invokeSuspend (ChannelRepositoryImpl.kt:351)
+  → buildPresentedChannels (ChannelRepositoryImpl.kt:457)
+    → toPresentedRawChannel (ChannelRepositoryImpl.kt:811)
+      → toVariant (ChannelRepositoryImpl.kt:784)
+        → ChannelNormalizer.classify (ChannelNormalizer.kt:156)
+          → buildCanonicalName (ChannelNormalizer.kt:196)
+          → containsStandalone (ChannelNormalizer.kt:289)
+          → resolveDeclaredHeight / resolveTransportLabel
+```
 
-`data/src/main/java/com/streamvault/data/repository/MovieRepositoryImpl.kt:101, 830-946, 1030-1031, 1085-1110`
-`data/src/main/java/com/streamvault/data/repository/SeriesRepositoryImpl.kt:722-724, 988-989, 1056-1095`
+Active app frames observed, by count: `classify` ×5, `buildCanonicalName` ×2,
+`resolveDeclaredHeight` ×2, `classify$default` ×2, `resolveTransportLabel` ×1,
+`containsStandalone` ×1, `getLogicalGroupId` ×1, plus the repository path above ×1 each.
 
-- **Reproduction:** Browse a provider with more than 200 favorite, unwatched, in-progress, or similarly filtered movies/series; request offset 200.
-- **Expected:** Page begins with item 201.
-- **Actual:** Source queries use `OFFSET 0`, fetch limit is capped at `SEARCH_RESULT_LIMIT = 200`, then the repository drops `query.offset`; result becomes empty while count can still report more rows.
-- **Severity:** Incorrect behaviour.
-- **Fix:** Pass the requested offset to filtered DAO page queries, or iteratively fetch source windows when post-query filtering requires overscan. Behavior-preserving intended paging semantics.
+The full captured stack for the top hit:
 
-### B4. EPG Flow silently stops observing updates for more than 500 channels
+```
+[1] java.util.regex.Matcher.setInputImpl (native method)
+[5] java.util.regex.Matcher.<init> (Matcher.java:187)
+[6] java.util.regex.Pattern.matcher (Pattern.java:1010)
+[7] kotlin.text.Regex.replace (Regex.kt:180)
+[8] ChannelNormalizer.buildCanonicalName (ChannelNormalizer.kt:196)
+[10] ChannelRepositoryImpl.toVariant (ChannelRepositoryImpl.kt:784)
+[12] ChannelRepositoryImpl.buildPresentedChannels (ChannelRepositoryImpl.kt:457)
+[14] ChannelRepositoryImpl$observeChannels$2.invokeSuspend$lambda$2 (ChannelRepositoryImpl.kt:351)
+[17] RepositoryTimingReporter.measure (RepositoryTimingReporter.kt:27)
+```
 
-`data/src/main/java/com/streamvault/data/repository/EpgRepositoryImpl.kt:106-124, 127-150`
+And for the compile itself:
 
-- **Reproduction:** Collect `getProgramsForChannels()` for 501+ IDs, then insert/replace an affected programme.
-- **Expected:** Room invalidation produces a new map, as it does for 500 or fewer IDs.
-- **Actual:** Multiple chunks take a one-shot `flow { emit(snapshot) }` path; collection completes and later updates never arrive.
-- **Severity:** Incorrect behaviour.
-- **Fix:** Combine chunked DAO flows then merge results, or expose a clearly named snapshot-only API. Restoring a reactive Flow changes current semantics but makes behavior consistent with the method contract.
-
-### B5. Query-string HLS/DASH URLs can be captured as progressive timeshift streams
-
-`player/src/main/java/com/streamvault/player/timeshift/LiveTimeshiftManager.kt:314-325`
-
-- **Reproduction:** Start timeshift with `StreamInfo.streamType == UNKNOWN` and URL `https://host/live.m3u8?token=...` or `.mpd?token=...`.
-- **Expected:** Type inference chooses HLS/DASH capture.
-- **Actual:** Raw `endsWith(".m3u8")`/`endsWith(".mpd")` fails after a query string, chooses progressive capture, and can store playlist text as a media segment.
-- **Severity:** Incorrect behaviour.
-- **Fix:** Infer from parsed URI path or container extension. Behavior-preserving.
-
-### B6. Latest TIF channel tune can lose to an older asynchronous tune
-
-`app/src/main/java/com/streamvault/app/tvinput/StreamVaultTvInputService.kt:69-75, 93-118`
-
-- **Reproduction:** Tune channel A, immediately tune B, and make A's database/stream resolution finish after B.
-- **Expected:** B remains selected.
-- **Actual:** Every `onTune` launches an untracked coroutine. A can finish last and call `player.setMediaSource()` after B.
-- **Severity:** Incorrect behaviour.
-- **Fix:** Cancel/replace previous tune `Job` or attach a monotonic tune generation and check it after each suspension. Behavior-preserving final-tune semantics.
-
-### B7. EPG pagination resets focus and scroll to first channel
-
-`app/src/main/java/com/streamvault/app/ui/screens/epg/EpgGridComponents.kt:115-157, 196-198`
-`app/src/main/java/com/streamvault/app/ui/screens/epg/EpgViewModel.kt:574-580, 597-605`
-
-- **Reproduction:** Open a category with more than one page, navigate near its tail, and allow next-page append.
-- **Expected:** Current focus and viewport remain near the channel being browsed.
-- **Actual:** Append changes `channels.size`; `LaunchedEffect(channels.size, ...)` scrolls near first row and requests initial focus after 140 ms.
-- **Severity:** Incorrect behaviour.
-- **Fix:** Key initialization to guide/session/category entry, not appended list size. Behavior-preserving.
-
-### B8. EPG route arguments race restored guide preferences after process death
-
-`app/src/main/java/com/streamvault/app/ui/screens/epg/EpgViewModel.kt:319-329, 1475-1495`
-`app/src/main/java/com/streamvault/app/ui/screens/epg/EpgScreen.kt:242-247`
-`app/src/main/java/com/streamvault/app/navigation/AppNavigation.kt:648-660`
-
-- **Reproduction:** Persist a category/favorite/anchor preference, kill process, then open an EPG deep link with explicit route state.
-- **Expected:** Defined route-versus-saved-state precedence.
-- **Actual:** Asynchronous `first()` reads can overwrite navigation state after screen arguments are applied; scheduler timing decides destination/filter/anchor.
-- **Severity:** Incorrect behaviour.
-- **Fix:** Define precedence, model absent versus explicit `favoritesOnly=false`, and serialize restoration with route application. This needs a product-state decision before implementation.
-
-### B9. Movies and Series leave old-provider continue-watching collectors active
-
-`app/src/main/java/com/streamvault/app/ui/screens/movies/MoviesViewModel.kt:376-397`
-`app/src/main/java/com/streamvault/app/ui/screens/series/SeriesViewModel.kt:380-401`
-
-- **Reproduction:** Open Movies or Series on provider A, switch to B, then cause A history to emit.
-- **Expected:** Only B history updates B's screen.
-- **Actual:** A child `launch` starts inside `collectLatest` but belongs to the outer `viewModelScope`; the action returns immediately, so provider change does not cancel the child collector. Old data can overwrite UI and collectors accumulate.
-- **Severity:** Incorrect behaviour.
-- **Fix:** Use `flatMapLatest` directly from active provider to `getContinueWatching`, or retain/cancel the child job. Behavior-preserving.
-
-### B10. Full transparent player guide has state/actions but no screen integration
-
-`app/src/main/java/com/streamvault/app/ui/screens/player/PlayerOverlayActions.kt:57-75`
-`app/src/main/java/com/streamvault/app/ui/screens/player/overlay/PlayerTransparentGuideOverlay.kt:55`
-`app/src/main/java/com/streamvault/app/ui/screens/player/PlayerScreen.kt:1212-1309`
-
-- **Reproduction:** From live player, invoke GUIDE/full-guide action.
-- **Expected:** Transparent guide is rendered and focused.
-- **Actual:** `openFullGuideOverlay()` only flips state. `PlayerScreen` does not collect/render `showFullGuideOverlay`; `EpgOverlay` is not passed its existing `onOpenFullGuide` callback.
-- **Severity:** Incorrect behaviour.
-- **Fix:** Wire state and callbacks into one exclusive overlay host. Behavior-preserving intended feature behavior.
-
-### B11. Live-player root preview handler zaps channels before controls receive DPAD Up/Down
-
-`app/src/main/java/com/streamvault/app/ui/screens/player/PlayerScreen.kt:569-622`
-`app/src/main/java/com/streamvault/app/ui/screens/player/overlay/PlayerControlsChrome.kt:1197-1213, 1851-1854`
-
-- **Reproduction:** Play live content, show controls, press DPAD Up or Down.
-- **Expected:** Focus moves through visible controls.
-- **Actual:** Root `onPreviewKeyEvent` sees live content with no listed overlay and invokes `playNext()`/`playPrevious()` before child control key handlers run.
-- **Severity:** Incorrect behaviour.
-- **Fix:** Exclude visible controls from zap interception or move zap handling after child focus navigation declines the event. Behavior-preserving intended remote behavior.
-
-### B12. Automatic decoder recovery records software preference but does not select a software MediaCodec
-
-`player/src/main/java/com/streamvault/player/playback/DecoderPreferencePolicy.kt:29-32`
-`player/src/main/java/com/streamvault/player/playback/CodecPreference.kt:17-20, 82-86`
-`player/src/main/java/com/streamvault/player/Media3PlayerEngine.kt:2259-2270, 2345-2365, 1216-1231`
-
-- **Reproduction:** Use AUTO decoding on a device/stream that triggers decoder-error recovery.
-- **Expected:** Recovery's `SOFTWARE_PREFERRED` policy changes renderer decoder ordering.
-- **Actual:** Selector eligibility uses original requested AUTO mode, disables managed selector, and builds renderers with `MediaCodecSelector.DEFAULT`; the failed hardware codec can be selected again.
-- **Severity:** Incorrect behaviour.
-- **Fix:** Enable managed selection when effective recovery policy is non-AUTO, preserving stock AUTO for ordinary playback. **Playback stability validation required** on affected hardware.
-
-### B13. VOD slider value resets during a drag when playback position updates
-
-`app/src/main/java/com/streamvault/app/ui/screens/player/overlay/PlayerControlsChrome.kt:1121-1133, 1292-1314`
-
-- **Reproduction:** Drag VOD seek control while player position Flow updates.
-- **Expected:** Thumb follows drag until release.
-- **Actual:** `remember` state is keyed by `currentPosition`; a new playback position resets slider state before the drag guard can preserve it.
-- **Severity:** Incorrect behaviour.
-- **Fix:** Keep drag state independent of playback-position key and synchronize only when not dragging. Behavior-preserving.
-
-### Test observations
-
-- No `@Ignore` or `@Disabled` tests were found in player/data/app unit-test source. Two launcher-provider instrumentation tests use `assumeTrue` on non-TV runs (`app/src/androidTest/java/com/streamvault/app/tv/LauncherProviderInstrumentationTest.kt:30-32, 83-85`), so non-TV runs provide no coverage for that feature.
-- `XmltvParserTest` accepts zero through two partial programmes after malformed input, allowing regression that drops all accumulated results (`data/src/test/java/com/streamvault/data/parser/XmltvParserTest.kt:250-271`; parser contract `XmltvParser.kt:219-227`). Assert exact retained programmes.
-- Migration tests named "latest" stop before schema 62 (see M6). Add v61-to-v62 coverage for guide/logo defaults.
-- EPG >500 reactive updates, offset-200 library pages, TIF tune ordering, guide focus after append, and stale provider collectors have no direct regression coverage.
+```
+[1] libcore.util.NativeAllocationRegistry$CleanerRunner.<init>
+[2] libcore.util.NativeAllocationRegistry.registerNativeAllocation
+[3] java.util.regex.Pattern.compile (Pattern.java:1345)
+[6] kotlin.text.Regex.<init> (Regex.kt:93)
+[7] ChannelNormalizer.containsStandalone (ChannelNormalizer.kt:289)
+[8] ChannelNormalizer.resolveTransportLabel (ChannelNormalizer.kt:232)
+```
 
 ---
 
-## Bottom line
+## 3. Cross-cutting defect classes
 
-Top five expected fleet-wide performance wins:
+Six recurring shapes account for nearly every finding. Fixing the *classes* is worth more than
+fixing instances.
 
-1. **H2:** Remove duplicate FTS maintenance during large catalog sync.
-2. **H3:** Bound catalog staging memory for oversized VOD/series providers.
-3. **H4/H5:** Bound and page EPG/XMLTV work before it can overwhelm low-RAM devices.
-4. **H6:** Reserve network/CPU capacity for playback over background sync and image work.
-5. **H1/H7:** Remove launch-critical import blocking and reduce TIF full-catalog work on TV.
+### C1. Per-call construction of expensive, immutable objects — **the dominant class**
 
-Fix before broad performance work:
+`java.util.regex.Pattern.compile`, `SimpleDateFormat`, `DateTimeFormatter.ofPattern` and
+`java.net.URI` are all built per invocation on hot paths. `Pattern.compile` parses the pattern,
+builds a node graph, emits a matcher program **and registers a native-allocation cleaner** — which
+is precisely the `ReferenceQueueDaemon` + `CleanerRunner` signature measured above.
 
-- **B1:** DASH timeshift can grow until memory/storage exhaustion.
-- **B2:** Timeshift cancellation can overwrite a valid replacement session with FAILED state.
-- No other bug is statically confirmed as direct persistent user-data loss or an immediate crash. H5 and B1 remain resource-exhaustion risks and should receive low-RAM/low-storage validation early.
+Known sites (this is the single highest-value cleanup in the codebase):
 
-Changes to H6, M2, M3, or B12 can affect playback pipeline behavior and require the existing long live-playback validation protocol after implementation.
+| Site | Note |
+|---|---|
+| `domain/.../ChannelNormalizer.kt:288` | **Confirmed on device.** Called per tag per channel |
+| `domain/.../ChannelNormalizer.kt:217` | **Inside a `forEach` over 22 `resolutionTags`** |
+| `domain/.../ChannelNormalizer.kt:181, :202, :203, :283, :315` | 5 further sites |
+| `data/.../epg/EpgNameNormalizer.kt:30` | Neighbouring regex *is* hoisted at `:16` — inconsistent |
+| `data/.../parser/XmltvParser.kt:601, :605` | `Regex` **and** `DateTimeFormatter` per fallback call |
+| `data/.../dto/LenientJsonSerializers.kt:243` | Once per array element in catalog decode |
+| `data/.../sync/SyncCatalogStore.kt:930` | `Regex("\\s+")`, ×3 per channel |
+| `data/.../sync/SyncManagerM3uImporter.kt:379` | ×2 per playlist entry |
+| `data/.../util/SearchRankingUtils.kt:10-11` | ×2 per search |
+| `app/.../time/AppTimeFormatters.kt:19-28` | `DateFormat`/`DateTimeFormatter` per call, from composition |
+| `app/.../player/PlayerMovieFallbackSupport.kt:80` | Inside a comparator key |
+| `player/.../PlayerErrorClassifier.kt:82` | Once **per cause-chain element** per error |
+| `player/.../PlayerTrackController.kt:226, :262`, `LiveTimeshiftManager.kt:919, :1414-1417` | Per track / per playlist poll |
+
+### C2. Exception-driven control flow
+
+`XmltvParser.parseDate` (`XmltvParser.kt:567-616`) probes formats with
+`runCatching { ... }.getOrNull()`. Every miss **constructs and throws a
+`DateTimeParseException`, capturing a stack trace**, even though a miss is the expected path. A feed
+without an offset burns 5 exceptions per date; a fully unmatched one burns 11. `parseDate` is called
+**twice per `<programme>`** (`:146/:147`, `:265/:266`, `:415/:416`), and
+`EPG_MAX_PROGRAMMES = 2_000_000` — so a large guide can produce millions of stack-trace fills.
+Exception construction costs 1–2 orders of magnitude more than a failed comparison.
+
+### C3. Redundant decode / serialize round-trips
+
+`OkHttpXtreamApiService.kt:780` + `:788` (and `:592` + `:600`) decode **every catalog item three
+times**: `JsonParser.parseReader` builds a full Gson tree, `element.toString()` re-serializes that
+tree into a fresh JSON String, then `json.decodeFromString(deserializer, element.toString())` parses
+that String again with kotlinx-serialization. The cheap alternative is already used elsewhere in the
+same repo (`json.decodeFromJsonElement(...)`, `LenientJsonSerializers.kt:257`).
+
+### C4. Full-catalog recomputation on every emission
+
+`ChannelRepositoryImpl.observeChannels` (`:330-353`) is a `combine` of **six** flows including
+user preferences, and each emission runs: visibility filter → hidden-id filter →
+`buildPresentedChannels` (which calls `ChannelNormalizer.classify` for **every** channel) → a
+per-channel `copy` map → `applyNumbering`. That is ~5 full passes over the catalog with the most
+expensive operation in the middle. A single preference toggle — parental level, grouping mode,
+hidden ids — reclassifies every channel. `observeChannels` has **no LIMIT**.
+
+### C5. Unconditional diagnostics work
+
+Work performed for diagnostics that is not gated on diagnostics being visible or enabled:
+
+- `Media3PlayerEngine.kt:397-402` writes a diagnostics file to flash **every second** during
+  playback — 3 600 create/truncate/close cycles per hour, plus a `PlaybackLogSanitizer.sanitizeUrl`
+  (URI parse + 2 regex passes) per tick. Not conflated, so launches queue under IO saturation.
+- `RepositoryTimingReporter.measure` wraps the channel-presentation path (`RepositoryTimingReporter.kt:27`).
+- `EpgResolutionEngine.kt:214-218` builds a 4-part interpolated log string eagerly for every
+  unresolved channel; `Log.v` level does not prevent the `StringBuilder` work.
+- `PlayerScreen.kt:213` **collects** diagnostics state unconditionally in the root of the ~1370-line
+  player composable, though it renders only under `showDiagnostics` (`:1246`).
+- `PlayerDataSourceFactoryProvider.kt:220-244` builds log strings with no `BuildConfig.DEBUG` guard.
+
+### C6. Comparator selectors recomputed per comparison
+
+`compareBy`/`thenBy`/`sortedBy` selectors run **per comparison**, not per element, so an O(n log n)
+sort performs O(n log n) selector invocations. Where the selector allocates (lowercase, regex
+compile, string concat) this multiplies allocation by n log n: `SearchRankingUtils.kt:16-27`,
+`CategoryDisplayPreferences.kt:14-21`, `PlayerMovieFallbackSupport.kt:56-63`.
+
+---
+
+## 4. Findings
+
+Impact tiers are judged **against the AFTSSS baseline**, not against a flagship.
+
+### CRITICAL
+
+#### A1. `ChannelNormalizer.containsStandalone` compiles a regex on every call
+- **Location:** `domain/src/main/java/com/streamvault/domain/util/ChannelNormalizer.kt:288-291`
+- **Evidence:** **Measured on device.** Thread dump captured at `Pattern.compile (Pattern.java:1345)`
+  ← `Regex.<init>` ← `containsStandalone (ChannelNormalizer.kt:289)`, inside the
+  `observeChannels` pipeline, during sustained 135–320 % CPU with ~1 GC/sec.
+- **Mechanism:** `val regex = Regex("""(?<![a-z0-9])${Regex.escape(token)}(?![a-z0-9])""", IGNORE_CASE)`
+  runs on every call, discarding the result. Called from `resolveCodecLabel` (`:226-228`),
+  `resolveTransportLabel` (`:231-235`), `resolveSourceHint` (`:239`) and `resolveLanguageHint`
+  (`:262`) — each inside a `firstOrNull` over a tag map (10 + 5 + 11 + 21 entries), twice per entry
+  (name and URL). Worst case ≈66 `Pattern.compile` calls per channel.
+- **Fix:** hoist per token, or replace with a manual boundary scan (no regex needed).
+
+#### A2. `ChannelNormalizer` compiles ~20–27 further regexes per channel
+- **Location:** `ChannelNormalizer.kt:217` (per-call inside a `forEach` over 22 `resolutionTags`),
+  plus `:181`, `:202`, `:203`, `:283`, `:315`
+- **Evidence:** `resolveDeclaredHeight` appears as an **actively executing frame** in the on-device
+  samples; `:217` verified by reading.
+- **Mechanism:** Same as A1. A name with no digits compiles ~15 patterns before matching `"hd"`; a
+  name with no resolution token compiles all 22. On top of A1 this is roughly
+  **300 000–400 000 extra `Pattern.compile` calls per 15 000-channel sync**.
+- **Note:** A1 and A2 share a call site but are *different* mechanisms from A3 — fixing only A1
+  leaves A2 and A3 burning CPU.
+
+#### A3. `buildCanonicalName` runs ~57 sequential full-string regex passes per channel
+- **Location:** `ChannelNormalizer.kt:190-209`, loop at `:195-197` over the 49 patterns built at `:101-109`
+- **Evidence:** Captured on device as the top actively-executing frame
+  (`Regex.replace (Regex.kt:180)` ← `buildCanonicalName (ChannelNormalizer.kt:196)`).
+- **Mechanism:** `removableCanonicalPhrases.forEach { cleaned = cleaned.replace(regex, " ") }` —
+  49 precompiled patterns (22 resolution + 10 codec + 5 transport + 11 source-hint + `"fps"`) — then
+  `heightRegex`, `frameRateRegex`, `separatorRegex`, `collapseWhitespaceRegex`, `bracketRegex`,
+  `leadingRegionRegex`. Each `replace` scans the whole remaining string and returns a new String,
+  whether or not it matches. ≈57 scans + ≈57 intermediate Strings per channel; ~855 000 of each per
+  15 000-channel sync. The patterns *are* correctly precompiled here — the cost is the scanning and
+  allocation, so this survives an A1/A2 fix.
+
+#### A4. Every catalog item is JSON-decoded three times
+- **Location:** `data/src/main/java/com/streamvault/data/remote/xtream/OkHttpXtreamApiService.kt:780` + `:788`; same shape at `:592` + `:600`
+- **Evidence:** Verified by reading; sits in the same Xtream sync pass as A1–A3, which the thread dump measured at 135–320 % CPU.
+- **Mechanism:** Gson tree parse → `element.toString()` (new `StringWriter` + `JsonWriter` + full re-emit) → kotlinx `decodeFromString` reparses that String. Three traversals plus a transient String per item. At ~500 bytes/item × 15 000 items that is ~7 MB of throwaway strings per sync plus a full object tree and ~375 000 `JsonPrimitive` wrappers.
+- **Fix:** `json.decodeFromJsonElement(deserializer, element)` — already used at `LenientJsonSerializers.kt:257`.
+
+#### A5. `XmltvParser.parseDate` throws up to 11 exceptions per call, twice per programme
+- **Location:** `data/src/main/java/com/streamvault/data/parser/XmltvParser.kt:567-616`; call sites `:146-147`, `:265-266`, `:415-416`
+- **Mechanism:** See **C2**.
+- **Fix:** `DateTimeFormatter.parse(CharSequence, ParsePosition)` — returns an error index and throws nothing; plus hoist the `:601`/`:605` fallback objects.
+
+#### A6. `observeChannels` reclassifies the entire catalog on every emission
+- **Location:** `data/src/main/java/com/streamvault/data/repository/ChannelRepositoryImpl.kt:330-353`, `:450-469`
+- **Evidence:** Measured — this pipeline is where **all 4** actively-executing samples were caught (see §2.1).
+- **Mechanism:** See **C4**. `buildPresentedChannels` maps every entity through `toPresentedRawChannel` → `toVariant` → `ChannelNormalizer.classify` (the full A1+A2+A3 cost), then a second `map` allocates a `copy` per channel, then `applyNumbering` makes another pass. Triggered by any of six combined flows.
+- **Fix:** classify once and cache per channel; move to `Dispatchers.Default` (the flow already uses `.flowOn(Dispatchers.Default)` at `:353`, but the classification itself is the cost).
+
+#### A7. `PlayerScreen` recomposes at frame rate for the whole duration of a recording
+- **Location:** `app/src/main/java/com/streamvault/app/ui/screens/player/PlayerScreen.kt:952-984`
+- **Mechanism:** `rememberInfiniteTransition` (`:953`) drives `animateFloat` (`:954-962`) whose value is read **in the composition phase** and again at `:975` as `Color(0xFFFF4D4F).copy(alpha = recordingAlpha)`. A composition-phase animated-State read invalidates the restart scope of the reading composable — which is the entire ~1370-line `PlayerScreen` body (`:113-1487`, 56 `collectAsStateWithLifecycle` calls, 36 `remember`/`LaunchedEffect` sites). `tween(750)` + `RepeatMode.Reverse` never stops while recording.
+- **Fix:** move the alpha into `Modifier.graphicsLayer { alpha = ... }` (draw-phase read) or hoist the indicator into its own leaf composable.
+- **Caveat:** the recomposition *rate* is certain from the code; the per-frame ms cost is **UNVERIFIED** on device (recording was not exercised).
+
+#### A8. Timeshift invalidates its disk-usage cache on every chunk, forcing a full directory stat-walk every 2 seconds
+- **Location:** `player/.../timeshift/LiveTimeshiftManager.kt:734-737` → `TimeshiftDiskManager.kt:73-77` → `:89-110` (walk) → `:97-107` (per-file `Os.stat` + `length()`); `LiveTimeshiftManager.kt:566-574`
+- **Mechanism:** Each finalized chunk calls `recordFileMutation()` (sets `cachedUsageBytes = -1`), then immediately `checkDiskAndBudget()` → `isWithinBudget()` → `currentUsageBytesLocked()`, which sees the invalidated cache and re-walks the whole `cacheDir/timeshift` tree. Per file: 2 stat syscalls + ~5–7 objects. `PROGRESSIVE_CHUNK_MS = 2_000L` (`:1435`), default 30-min depth ⇒ up to **900 `chunk-*.ts` files**. The walk holds `accountingLock` (`TimeshiftDiskManager.kt:74, :84, :154`), serializing budget checks.
+- **Caveat:** mechanism and file-count arithmetic are certain from the code; on-device rewind was not exercised at depth, so the wall-clock cost is **UNVERIFIED**.
+
+#### A51. Catalog fingerprinting compiles 4–10 regexes, parses 1–4 URIs and builds 32 `Formatter`s **per catalog row**
+- **Location:** `data/src/main/java/com/streamvault/data/sync/SyncCatalogStore.kt:930` (`Regex` per call), `:926` (`normalizeText`), `:923` (32× `String.format`), `:939` (`URI` per call), `:916` (`fingerprint`); callers `:591`, `:627`, `:663`, `:785`, `:817`
+- **Mechanism:** `normalizeText` is `value.orEmpty().trim().replace(Regex("\\s+"), " ").lowercase()` — the `Regex` literal is built **inside** the function, so every call compiles a fresh `Pattern`. `fingerprint()` renders SHA-256 with `joinToString("") { "%02x".format(it) }`, i.e. **32 `java.util.Formatter` instances plus 32 boxed `Byte`s and 32 `String`s per digest**. `normalizeUrl()` constructs a `java.net.URI` per URL field.
+- **Cost:** per item — `channelFingerprint` Xtream branch 4 compiles + 1 URI, generic branch 4 + 3, `movieFingerprint` 10 + 4, `seriesFingerprint` 8 + 3, plus 32 `Formatters`. A 50k-channel Xtream sync ≈ **200 000 `Pattern.compile` + ~150 000 URI parses + 1.6 M `String.format`**; a 100k-movie catalog ≈ 1 M compiles + 400k URIs + 3.2 M formats — all while the same worker writes to SQLite. `CatalogSizeLimits` allows 100k/200k/100k (`CatalogSizeLimits.kt:4-6`).
+- **Fix:** hoist the regex; replace `"%02x".format` with a hex lookup table; carry the parsed URL forward instead of re-parsing.
+
+#### A52. Stage-merge `UPDATE`s use 15–21 correlated subqueries per row and re-scan the whole catalog every 500 channels
+- **Location:** `data/src/main/java/com/streamvault/data/local/dao/CatalogSyncDao.kt:203-320` (channels: 15 column subqueries + 1 in `WHERE EXISTS`), `:391-545` (movies: 20 + 1), `:636-774` (series: 18 + 1)
+- **Mechanism:** Each statement is `UPDATE t SET col_a = (SELECT stage.col_a FROM stage WHERE session_id=? AND provider_id=? AND stream_id=t.stream_id), col_b = (SELECT … same predicate), …`. SQLite cannot share the stage lookup across scalar subqueries, so each changed row costs one index probe **per column** instead of one row read. Worse, `commitStagedLiveCatalogProgress` (`SyncCatalogStore.kt:208-214`) re-runs the statement with no watermark and a `WHERE` of only `provider_id`, so it re-scans every channel each time; the stage table is never cleared between passes.
+- **Cost:** `LIVE_PROGRESS_COMMIT_CHANNEL_INTERVAL = 500` (`SyncManagerXtreamLiveStrategy.kt:28`) ⇒ for a 30k-channel provider ~60 executions × 30k rows = **~1.8 M row visits**, plus ~15 extra probes per changed row, inside a single write transaction. Effectively **O(catalog²/500)**.
+- **Verification available today:** DEBUG builds already time statements via `SlowQueryLoggingOpenHelperFactory` (tag `RoomSlowQuery`, 100 ms threshold, `DatabaseModule.kt:24`) — count `UPDATE channels` entries during a sync. `ChannelBrowseQueryPlanTest.kt:63-74` is an existing `EXPLAIN QUERY PLAN` harness to extend.
+- **Fix:** SQLite row-value `UPDATE t SET (a,b,…) = (SELECT stage.a, stage.b, …)` (SQLite 3.15+, fine on Android 9), plus a monotonic watermark so only newly staged rows merge.
+
+### HIGH
+
+#### A9. `ChannelRepositoryImpl` classifies per row, and grouped mode classifies the whole pool per emission
+- **Location:** `ChannelRepositoryImpl.kt:781-806` (`classify` at `:784`), `buildGroupedChannels` `:471-483`, `observeChannels` `:95`, `:715-720`
+- **Mechanism:** `observeChannels` has no LIMIT, so a 15 000-channel category re-runs the full A1–A3 cost on every emission on the collector's dispatcher. This is the read-path twin of A6.
+
+#### A10. `createDateTimeFormat` builds a `DateFormat` per call, from composition
+- **Location:** `app/src/main/java/com/streamvault/app/ui/time/AppTimeFormatters.kt:19-23`
+- **Evidence:** **Measured.** Thread dump shows the full construction path —
+  `DateFormat.getDateTimeInstance` → `SimpleDateFormat.<init>` → `NumberFormat.getIntegerInstance` →
+  `DecimalFormat.<init>` → `DecimalFormatSymbols.getIcuDecimalFormatSymbols` — reached from
+  `rememberSettingsScreenLabels (SettingsScreenState.kt:83)` inside `SettingsScreen` composition.
+- **Mechanism:** `DateFormat.getDateTimeInstance(...)` / `SimpleDateFormat(...)` performs ICU symbol
+  loading and `NumberFormat` initialisation on every call. `createTimeFormatter` (`:25-29`) builds a
+  `DateTimeFormatter` per call with the same problem.
+
+#### A11. Whole XMLTV refresh is retried as a unit, with no size awareness
+- **Location:** `data/.../sync/SyncManager.kt:4305-4307`, `:4340-4342`, `:4384-4389`; policy `SyncManagerXtreamSupport.kt:114-140`
+- **Mechanism:** `retryTransient` (`maxAttempts = 3`, fixed 700 ms / 1.4 s, no jitter) wraps the entire `refreshEpg` — download, gunzip, XML parse and staging insert. A reset at 90 % of a 50–200 MB feed restarts from byte 0. The health-scaled `retryDelayFor` (`XtreamAdaptiveSyncPolicy.kt:159-174`) is not used here.
+
+#### A12. EPG refresh rewrites the whole `programs` table every cycle
+- **Location:** `data/.../repository/EpgRepositoryImpl.kt:364-371`
+- **Mechanism:** `deleteByProvider(providerId)` then `moveToProvider(staging → real)` = DELETE N + UPDATE N in one transaction, on a table with six indices including a UNIQUE one (`StreamVaultDatabase.kt:239-244`), so every row pays index delete+reinsert in all of them — repeated every 6 h TTL (`ContentCachePolicy.kt:6`) even for a byte-identical feed.
+
+#### A13. Full EPG re-resolution runs even when the download was skipped
+- **Location:** `data/.../epg/EpgResolutionEngine.kt:61-251`; invoked at `SyncManager.kt:4404` (and `:4391`, `:4401`, `:4419`, `:4439`, `:4443`, `:4469`, `:4508`, `:4511`)
+- **Mechanism:** On every sync, all channels are loaded, every `ChannelEpgMappingEntity` is rebuilt and `replaceForProvider` (`Daos.kt:3725`) does a transactional DELETE-all + INSERT-all. When the XTREAM TTL gate at `SyncManager.kt:4293-4295` is false, control falls through and `:4404` still runs the whole pass.
+- **Secondary, correctness:** `EpgResolutionEngine.kt:110-112` passes every `epgChannelId` in **one unchunked `IN (:channelIds)`** list, while every other EPG call site chunks at 500 (`EpgRepositoryImpl.kt:123`, `:214`; `EpgResolutionEngine.kt:275`). Android 9 ships SQLite 3.22 with `SQLITE_MAX_VARIABLE_NUMBER = 999`, so >999 populated ids should fail to prepare. **UNVERIFIED at runtime** — flagged as a latent crash, not only a perf issue.
+
+#### A14. Live playback re-queries a 30-hour EPG window every 30 seconds and sorts it on the main thread
+- **Location:** `app/.../ui/screens/player/PlayerEpgActions.kt:7` (30 s) and `:28-53`; `EpgRepositoryImpl.kt:432`, `:438-440`; `PlayerProgramTimelineSupport.kt:21-31`
+- **Mechanism:** An infinite `viewModelScope` loop requests `now-24h .. now+6h` every 30 s. After the `withContext(IO)` returns, `shiftAll().sortedBy{}` runs on the **caller's dispatcher (Main)**. `buildProgramTimeline` then sorts the same list **three times** and calls `isArchivePlayable` per programme, allocating an `ArchivePlaybackCapability` each time (`ArchivePlayback.kt:28-72`) — also on Main. 120 iterations per hour of viewing, on top of an active decoder.
+
+#### A15. Per-second diagnostics file write during playback
+- **Location:** `player/.../Media3PlayerEngine.kt:397-402`, gate `:2260-2263`, `PlaybackSupportSnapshotStore.kt:17-21`
+- **Mechanism:** See **C5**. 3 600 create/truncate/close cycles per hour into `filesDir/diagnostics/crash/latest-playback-support.txt` — a file observed on the device — sharing flash with the timeshift writer and Media3 `SimpleCache`.
+
+#### A16. `PlayerScreen` recomposes once per second during all playback
+- **Location:** `PlayerScreen.kt:213` (reader), `PlayerViewModel.kt:743-757` (feeder), `Media3PlayerEngine.kt:359-383` (1 Hz ticker)
+- **Mechanism:** `lastVideoFrameAgoMs` is recomputed as `now - lastFrameAt` (`VideoStallDetector.kt:41-44`), so it differs every tick, the `StateFlow` always emits, and the ~1370-line root body re-executes each second for the entire session regardless of whether diagnostics are shown.
+
+#### A17. EPG guide search loads the entire channel table and does three O(N) main-thread passes per keystroke
+- **Location:** `app/.../ui/screens/epg/EpgViewModel.kt:2007-2013`, `:1949-1996`, `:1437-1453`; DAO `data/.../local/dao/Daos.kt:96-110`
+- **Mechanism:** `getChannels(providerId).first()` hits `ChannelDao.getByProvider` which has **no LIMIT**. The continuation resumes on `Dispatchers.Main.immediate` (via `viewModelScope`), so `mapNotNull{}` → `toMap()`, `filter { contains(ignoreCase = true) }`, `toSet()` and a third `buildList` pass all run on the UI thread over every channel. Debounced only 150 ms.
+
+#### A18. EPG grid composes every programme in the window, non-lazily
+- **Location:** `app/.../ui/screens/epg/EpgGridComponents.kt:533-545`, markers `:514-523`, viewport `:170`
+- **Mechanism:** `programs.forEach { ProgramItem(...) }` inside a plain `Row`/`Box` of full timeline width — no `LazyRow`/viewport culling. Window is `now-1h .. now+6h` (`EpgViewModel.kt:284-285`) but only 3 h is visible, so ~2.3× the needed cells are composed per row (~14–28 programmes + ~15 markers), for every visible row.
+
+#### A19. EPG grid callbacks are keyed on the whole `EpgUiState`
+- **Location:** `app/.../ui/screens/epg/EpgScreen.kt:455-486`; `EpgGridComponents.kt:118-135`, `:196-229`, `:333-354`
+- **Mechanism:** The lambdas close over the entire `uiState`, so any field change — including ones the grid never displays (`isPreviewLoading`, `previewErrorMessage`, `isRefreshing`, `lastUpdatedAt`, `isGuideStale`) — recreates them and defeats skipping down the chain into every visible `EpgRow` and `ProgramItem`.
+
+#### A20. The H6 network isolation does not actually cover Stalker or EPG
+- **Location:** `app/.../di/NetworkModule.kt:82-86` (main client) vs `:138-142` (background client); `:99-104` (the comment claiming isolation)
+- **Mechanism:** Every "dedicated" client is built with `OkHttpClient.newBuilder()`, which **shares the same `Dispatcher` and `ConnectionPool` by reference** — playback (`PlayerDataSourceFactoryProvider.kt:86-91`), Coil (`StreamVaultApp.kt:55-59`), EPG (`EpgRepositoryImpl.kt:85-88`), Xtream (`OkHttpXtreamApiService.kt:104-118`), Stalker (`OkHttpStalkerApiService.kt:1456-1472`). `@BackgroundSyncClient` is referenced **only** by `SyncManager` for M3U/Xtream (`SyncManager.kt:216`, `:239-248`); Stalker sync uses the main client (`NetworkModule.kt:148` → `SyncManager.kt:5579-5581`) and all EPG downloads use the main-derived client (`EpgRepositoryImpl.kt:64`, `:85-88`). EPG carries a 200 MB / 120 s budget.
+
+#### A21. The playback admission gate is never consulted by the main sync path
+- **Location:** gate `data/.../sync/PlaybackNetworkAdmissionGate.kt:64-77`; call sites only `StalkerIndexWorker.kt:50`, `BackgroundEpgSyncWorker.kt:56`
+- **Mechanism:** `ProviderSyncWorker` (`:99-107`) declares no gate and syncs every provider; inside `SyncManager` the only playback check is Stalker-only (`:1971`, `:2321`). Xtream catalog and every EPG refresh run unthrottled during live playback on the same client and radio.
+
+#### A53. External XMLTV import inserts 500-row batches with **no enclosing transaction**
+- **Location:** `data/src/main/java/com/streamvault/data/repository/EpgSourceRepositoryImpl.kt:387-390`, `:397-402`; contrast the correct pattern at `EpgRepositoryImpl.kt:283-291`
+- **Mechanism:** The streaming parse callback calls `epgProgrammeDao.insertAll(...)` directly every 500 rows (`PROGRAMME_BATCH_SIZE = 500`, `:83`); only the staging→live swap at `:405-411` is transactional. Each unwrapped DAO insert is its own implicit SQLite transaction — in WAL mode a commit, a WAL frame write and an **fsync** (Android WAL sync mode is FULL). With `EPG_MAX_PROGRAMMES = 2_000_000` that is up to **4 000 commit+fsync cycles** per source refresh (a realistic 200k-programme source: ~400). The `.toList()` at `:388`/`:401` also copies a 500-element list per flush.
+- **Fix:** wrap both flushes in `transactionRunner.inTransaction { }` exactly as `EpgRepositoryImpl` already does.
+
+#### A54. Channel count/category-count Flows re-run `GROUP BY COUNT(DISTINCT CAST(...))` over the whole table on every sync write
+- **Location:** `data/src/main/java/com/streamvault/data/local/dao/Daos.kt:506`, `:509-519`, `:521-537`, `:539-556`, `:558-569`; consumers `ChannelRepositoryImpl.kt:355-372`, `:86-90`
+- **Mechanism:** These are Room `Flow` queries, so Room re-executes each one on **every `channels` table invalidation**. The grouped variants compute `COUNT(DISTINCT CASE WHEN logical_group_id IS NOT NULL AND logical_group_id != '' THEN logical_group_id ELSE CAST(id AS TEXT) END) … GROUP BY category_id` — SQLite builds an ephemeral B-tree keyed on a per-row **derived text value**, so every channel row allocates a string inside the aggregate. Since the sync writes channels roughly every 500 accepted (A52), the aggregate re-runs dozens of times per sync, competing for the same single SQLite writer and WAL.
+- **Fix:** maintain counts incrementally, or debounce/coalesce the aggregate flow.
+
+#### A55. VOD duplicate resolution scans every movie/series of a provider, unindexed, materialising full rows
+- **Location:** `data/src/main/java/com/streamvault/data/local/dao/Daos.kt:1569` (`tmdb_id`), `:1572` (`year`), `:1575` (`release_date LIKE`); series twins `:2574`, `:2577`; callers `MovieRepositoryImpl.kt:583-599`, `SeriesRepositoryImpl.kt:709-718`
+- **Mechanism:** `SELECT * FROM movies WHERE provider_id = ? AND tmdb_id = ?` (plus the year and release_date-prefix variants, up to three queries per call) has only `provider_id` indexed, so SQLite walks every movie row of the provider and materialises whole `MovieEntity` rows — including the large `plot`/`cast`/`director` TEXT columns — for each match. On a 200k-movie provider that is up to 200k scattered rowid lookups and tens of MB of transient allocation for one detail-screen open.
+- **Fix:** add `(provider_id, tmdb_id)` and `(provider_id, year)` indices; select identity columns only instead of `SELECT *`.
+
+#### A56. Movie/series browse loads the entire source list and the entire playback history **twice** per page fetch
+- **Location:** `SeriesRepositoryImpl.kt:1091-1092`, `:1131-1132` (and `:1029-1036` on search); `MovieRepositoryImpl.kt:1092-1093`, `:1119-1120`; unbounded history at `Daos.kt:3321`
+- **Mechanism:** After building the page, when `duplicateHandlingMode != SHOW_ALL` the code re-runs `seriesBrowseSource(query).first()` **and** `playbackHistoryDao.getByProvider(...).first()` purely to compute `totalCount` via `.size`. That history query is `SELECT * FROM playback_history WHERE provider_id = ? ORDER BY last_watched_at DESC` with **no LIMIT**. So the whole filter/group/sort pipeline and the provider-wide history are each materialised twice — a constant-factor doubling on the most frequent user-facing query path.
+- **Fix:** compute the filtered list once and reuse its `.size`.
+
+#### A57. Every 5 seconds of VOD playback: a Room write transaction plus up to 40 ContentResolver writes
+- **Location:** `app/src/main/java/com/streamvault/app/ui/screens/player/PlayerLifecycleActions.kt:17-24` (`while(true)` + `delay(5000)`), `:34`, `:36`, `:37`; `app/src/main/java/com/streamvault/app/tv/WatchNextManager.kt:35-46`, `:83-91`, `:63-76`; `PlaybackHistoryRepositoryImpl.kt:185-211`
+- **Mechanism:** Each 5-second tick opens a Room transaction (`insertOrUpdate` + an `UPDATE` on movies/episodes) and then **unconditionally** calls `WatchNextManager.refreshWatchNext()`, which has **no throttle**: it re-queries the active provider and recent history, queries `TvContract.WatchNextPrograms` with a **null selection** (unbounded read of every row the app ever published), then re-issues an insert or update for each of up to 40 entries — up to 40 binder IPC calls into the TV provider every 5 s even when nothing changed. (`refreshRecommendations` *is* throttled to 15 min and is not a problem.)
+- **Cost:** ~8 cross-process ContentResolver writes per second plus a WAL commit+fsync, on the same 4 weak cores decoding video. 12 times per minute, continuous during any VOD/series playback.
+- **Fix:** gate `refreshWatchNext` on an actual state change; bound the existing-entry query.
+
+### MEDIUM
+
+- **A22 — `EpgResolutionEngine` eager log strings.** `EpgResolutionEngine.kt:214-218` builds a 4-part interpolated string per unresolved channel plus two nested `enabledAssignments.any{}` scans; `Log.v` level does not prevent the work.
+- **A23 — `getProgramsForChannelsSnapshot` maps and groups on the caller's dispatcher.** `EpgRepositoryImpl.kt:156-160` has no `withContext`, so `entities.map { toDomain().shifted() }.groupBy{}` over ~840–1700 rows runs on Main (`EpgViewModel.kt:1717`). Contrast `EpgResolutionEngine.kt:267`, which wraps correctly.
+- **A24 — `buildGuideDisplaySnapshot` is O(channels × programmes) with a per-programme allocation, on Main.** `EpgViewModel.kt:1915-1930`; `ARCHIVE_READY` evaluates `isArchivePlayable` per programme, allocating an `ArchivePlaybackCapability` each time. Re-runs on every `combine` emission at `:1439-1445`, including UI-only toggles like `selectedDensity`.
+- **A25 — No ViewModel in `app/ui` ever switches dispatcher.** Zero `flowOn`/`withContext` in `app/.../ui/screens/**/*ViewModel*.kt`, so `combine` transforms building UI state run on `Dispatchers.Main.immediate`. `CategoryDisplayPreferences.kt:14-21` sorts with a `lowercase()` **per comparison**; `MovieRepositoryImpl.kt:357-368` has no `flowOn` (contrast `ChannelRepositoryImpl.kt:353`).
+- **A26 — `channelFingerprint` per channel: ~5 `Pattern.compile` + a `URI` + 32 `String.format` calls.** `SyncCatalogStore.kt:821-853`, `:916-932`, `:934-959`. The `"%02x".format` hex emission allocates a `Formatter` + `StringBuilder` and re-parses the format string 32× per channel (~480 000 throwaway Strings per sync).
+- **A27 — The same stream URL is parsed twice per channel, through reflective codecs.** `EntityMappers.kt:196` and `SyncCatalogStore.kt:822` both call `parseInternalStreamUrl`; `XtreamUrlFactory.kt:36-42`/`:27-34` reach `URLDecoder` via **reflective `Method.invoke`**. ~45 000 `URI` objects and ~75 000 reflective calls per sync.
+- **A28 — `SearchRankingUtils` recomputes selectors per comparison and compiles 2 regexes per call.** `SearchRankingUtils.kt:10-11`, `:16-27`; ~6 000 redundant `lowercase`+`trim` derivations for 200 results.
+- **A29 — `EpgNameNormalizer` compiles a regex per call.** `EpgNameNormalizer.kt:30`; the neighbouring `nonAlphanumericRegex` *is* hoisted at `:16`. Once per XMLTV `<channel>` (10k–100k per feed) and once per channel in resolution (`EpgResolutionEngine.kt:169`).
+- **A30 — M3U `stableId` compiles a regex twice per entry.** `SyncManagerM3uImporter.kt:379` via `:345-346`; plus a `URI` parse and a SHA-256 per entry (~30 000 compiles for a 15 000-entry playlist).
+- **A31 — `CatalogSyncDao.updateChangedChannelsFromStage` repeats the same lookup 18×.** `CatalogSyncDao.kt:201-320` — 17 correlated scalar subqueries plus an `EXISTS` probe. Indexes *do* cover it (`Entities.kt:470-481`, `:93`), so this is 18 index probes per changed row, not a scan.
+- **A32 — EPG override search is un-debounced and does a `%LIKE%` full scan per keystroke.** `EpgViewModel.kt:868-878` → `EpgSourceRepositoryImpl.kt:493-516` → `Daos.kt:3626-3635`: three `LOWER(col) LIKE LOWER('%…%')` predicates, unindexable by construction, per assigned source, per keystroke.
+- **A33 — `LiveAudioTapAudioSink` allocates per audio buffer even with no tap.** `LiveAudioTapAudioSink.kt:32-35` takes `asReadOnlyBuffer()` before the `tap ?: return` guard at `:45`; installed unconditionally at `Media3PlayerEngine.kt:1295-1298`. ~50 allocations/sec on the playback thread for nothing.
+- **A34 — MEMORY-backend rewind retains minutes of transport stream in byte arrays.** `LiveTimeshiftManager.kt:711`, `:722-733`, `:741-749`. A 5-minute window at 4–8 Mbps is 150–300 MB against a **192 MB** heap class. Reached when `cacheDir.usableSpace < 200 MB` (`:361-369`) — precisely the Fire TV Stick case. Peak **UNVERIFIED** without a live rewind session.
+- **A35 — DASH timeshift enumerates and serially downloads the whole retention window on first poll.** `LiveTimeshiftManager.kt:1376-1390`, `:1124-1141`. ~900 segments at default depth, most pruned immediately by `DashWindow.prune()`; every poll also rebuilds every URI (4 `String.replace` + a `java.net.URI` + `resolve()` per segment). **UNVERIFIED** against a real DASH panel.
+- **A36 — Jellyfin image interceptor decrypts via Keystore on every image request.** `JellyfinImageAuthInterceptor.kt:36` calls `credentialCrypto.decryptIfNeeded` per request (no token cache); `CredentialCrypto.kt:55-84` does `KeyStore.load(null)` + `getKey` + `Cipher.init/doFinal` — a hardware-backed op — for a value that cannot change. Plus a `toHttpUrlOrNull()` per candidate provider per request.
+- **A37 — Two `Cache` instances over the same directory.** `NetworkModule.kt:69-74` and `:125-130` both use `File(cacheDir, "streamvault_http_cache")`, so two `DiskLruCache` writers maintain one journal; a corrupted journal triggers `rebuildJournal()`, a full-directory scan. Little is bought: OkHttp never caches POST and Stalker posts every call.
+- **A38 — Blocking `execute()` sites bypass dispatcher caps, and the shared client sets no `callTimeout`.** `NetworkModule.kt:75-77` sets only connect/read/write. `maxRequests`/`maxRequestsPerHost` govern `enqueue()` only; the synchronous sites (`OkHttpStalkerApiService.kt:976`, `:1083`, `:1222`; `JellyfinProvider.kt:308`; `EmbyProvider.kt:296`; `StremioProvider.kt:143`; `RecordingCaptureEngine.kt:80`; `DownloadManagerImpl.kt:289`; `InternetSpeedTestRunner.kt:114`) are bounded only by `Dispatchers.IO`, which Coil's `limitedParallelism(6)` view also draws from. Only the derived Xtream clients set `callTimeout`.
+- **A39 — `runCatching` around suspend repository calls swallows `CancellationException`.** `EpgViewModel.kt:1704-1706`, `:1715-1718`. Inside a `collectLatest` (`:1157-1189`) whose purpose is to cancel the previous load, cancellation becomes "no data": the superseded load continues and publishes an **empty** `programsByChannel` with `baseGuideStale = true` before the new load lands. Wasted work plus a visible stale flash on rapid D-pad navigation.
+- **A40 — The 30-second guide clock invalidates every visible row and cell, via three independent tickers.** `EpgControlComponents.kt:83-105`; readers `EpgGridComponents.kt:356` (per row) and `:674` (per cell); providers at `EpgScreen.kt:411`, `:454`, `:647`, plus `PlayerTransparentGuideOverlay.kt:82`. The overlay reads `currentGuideNow()` at the **root** of its content lambda (`:82-83`), invalidating the entire overlay including the embedded grid — contradicting the file's own design intent, since `ProgramItem`/`ProgramItemCell` were written specifically to avoid this.
+- **Prior-remediation note (verified by reading, 2026-09-11):** a previous pass claimed to have "isolated current-time indicator updates to prevent grid recomposition". It is only **partial**: `EpgGridComponents.kt:357-359` does wrap the derived *program* in `derivedStateOf`, but the raw `val now = currentGuideNow()` read at `:356` (per row) and `:674` (per cell) remains, so the invalidation still happens. Fixing those two reads is the remaining work.
+- **A41 — `EpgViewModel.requestMoreChannels` copies growing collections on Main per page.** `EpgViewModel.kt:577-579` (`drop(...).take(60)` copies the whole remaining list), `:590`, `:594`, `:613`, `:618` (`Map.plus` copies every accumulated entry). O(N²) aggregate over a scroll.
+- **A42 — `ChannelLogoBadge` recomputes initials in composition.** `ChannelLogo.kt:52` calls `channelInitials` un-remembered; `:75-91` does `trim` + `split` + `filter` + `uppercase` — ~5 allocations per badge per recomposition, and a badge appears in every EPG row, list row and card. (The regex itself is correctly hoisted at `:73`.)
+- **A43 — `StalkerProvider.resolveCategory` linearly scans the category list per item.** `StalkerProvider.kt:1479-1483`, `:1333`. No id→index map: O(items × categories), ~7.5 M predicate evaluations for 500 categories × 15 000 items.
+- **A44 — `FallbackCategoryCollector.record` allocates a throwaway `CategoryEntity` per channel.** `SyncManagerSupport.kt:119-136` builds the candidate at `:119` *before* the cache lookup at `:127`, then allocates a second via `copy(...)` at `:131`. ~30 000 avoidable allocations per sync; the fix is reordering three lines.
+- **A45 — Network graph built on the Application main thread at cold start.** `StreamVaultApp.kt:43-53` field-injects `okHttpClient` and `appCacheQuota`, so Hilt constructs both in `Application.onCreate` — **before** the `startDeferredStartup()` checkpoint at `:72-74` that exists to keep this off the cold-start path. Two `Cache` journal reads plus a `StorageStatsManager.getFreeBytes` binder call; the rebuild branch scales with a 256 MB budget.
+- **Prior-remediation note (verified by reading, 2026-09-11):** a previous "Lazy Cold-Start Dependency Graph" pass converted several heavy managers to `Lazy`/`Provider`, but missed these two — `StreamVaultApp.kt:46` and `:52` are still direct `@Inject lateinit var`, while `imageOkHttpClient` immediately below (`:54`) correctly uses `by lazy`. The lazy pattern was applied inconsistently.
+- **A46 — `PlayerMovieFallbackSupport` compiles a regex inside a comparator key.** `PlayerMovieFallbackSupport.kt:80`, used by `sortedWith(compareByDescending { movieCodecFallbackPriority(it.name) })` at `:56-63` → O(n log n) compiles per call. (A hoisted regex already exists at `:10`.)
+
+- **A58 — Full-catalog channel staging materialises two whole entity lists (movies/series use a bounded `Sequence`).** `SyncCatalogStore.kt:75-99`, `:253-268`, `:565-594`, `:961-982`; inputs `SyncManager.kt:5333`, `:5363`, `:5388-5391`. Unlike `stageMovieSequence`/`stageSeriesSequence` (`:668-700`, `:710-744`), the live path holds the caller's `List<Channel>` **and** `buildChannelStages`' `List<ChannelImportStageEntity>` simultaneously, each entity string-heavy with a 64-char fingerprint. At 100k channels that is tens of MB of transient heap against a ~128 MB heap class (no `android:largeHeap`) while Room holds CursorWindows. `mergeHiddenChannelsIntoStaging` additionally re-fingerprints channels just staged from the same source. `SyncCatalogStoreMemoryTest.kt:60` is an existing template to extend.
+- **A59 — Unchunked `IN (:ids)` can exceed the SQLite bind-variable ceiling on Android 9.** `Daos.kt:469` (`WHERE c.id IN (:ids)`), reached from `ChannelRepositoryImpl.kt:280-282`, with user-proportional id lists from `EpgViewModel.kt:1678` and `PlayerPlaylistActions.kt:226`, `:235`. Room expands `IN (:ids)` to one bind parameter per element and does not chunk; Android 9 ships **SQLite 3.22 with `SQLITE_MAX_VARIABLE_NUMBER = 999`** (32766 only from SQLite 3.32 / Android 12), so a list above 999 raises *too many SQL variables* rather than returning rows. This independently corroborates the secondary note in **A13**. The EPG paths already chunk at 500 (`EpgRepositoryImpl.kt:123`, `:151`, `:214`, `:244`; `EpgResolutionEngine.kt:275`, `:285`, `:303`, `:337`) — the channel/movie/series `getByIds` paths do not. Reachability above 999 ids is **UNVERIFIED**; a hard failure, not a slowdown, and device-specific.
+### LOW
+
+- **A47 — `DashWindow` hands out full list copies.** `LiveTimeshiftManager.kt:1039` (`media.toList()`) called at `:1131` **inside a `while` condition** just to read `.size`; `:1043`, `:1159`.
+- **A48 — Per-call `setOf(...)` and unconditional log arguments on playback paths.** `Media3PlayerEngine.kt:2080-2085` (twice per second from the tick), `:1043`, `:1122`; `PlayerStatsCollector.kt:153-156`; `PlayerDataSourceFactoryProvider.kt:220-244` (7 header lookups + sanitize + concat per matching request, no `BuildConfig.DEBUG` guard). The interceptor also duplicates `withRequestProfile` (`RequestIdentity.kt:31-43`) applied at `OkHttpXtreamApiService.kt:362`.
+- **A49 — Live-dot blink recomposes the whole timeshift scrubber every 700 ms.** `PlayerControlsChrome.kt:1723-1729` toggles state read in the same composable that computes the entire scrubber (`:1710-1721`). Only a 1 dp dot changes.
+- **A50 — Per-call regex in `PlayerErrorClassifier` / `PlayerTrackController` / timeshift playlist parsers.** `PlayerErrorClassifier.kt:82` (once per cause-chain element, ×~5 call sites), `PlayerTrackController.kt:226`, `:262`, `LiveTimeshiftManager.kt:919`, `:1414-1417` (four regexes per poll).
+
+---
+
+## 5. Prior remediation status
+
+The audit documents that this one replaces were deleted, but their recorded outcomes still matter for
+sequencing. From the removed `performance-audit-results.md` (2026-09-07), the following were
+recorded as **COMPLETED** and should **not** be redone:
+
+- **Bugs B1–B13**, including the timeshift pair: *B1* (DASH timeshift isolates the init segment so
+  rolling-window pruning works) and *B2* (timeshift cancellation ignores `CancellationException`
+  and validates session identity). **B1/B2 are fixed** — any guidance to "start with timeshift
+  safety" is obsolete.
+- *Task 4* mutation-safe timeshift disk quota (synchronized physical file accounting in
+  `TimeshiftDiskManager`). **Note:** finding **A8** is the *cost* of that fix, not a re-report of it —
+  the accounting is correct, but it is invalidated on every chunk and re-walks the directory.
+- *M4* shared Media3 `SimpleCache`/`CacheDataSource` between engine and timeshift.
+- *M5* lazy cold-start dependency graph — **incomplete**, see A45.
+- *Task 10* live channel progress clock (per-card ticker churn removed).
+- *Task 11* EPG Compose invalidation & geometry caching — **incomplete**, see A40.
+
+Anything from the old list **not** re-derived here by measurement or reading should be treated as
+unknown rather than fixed; the old documents are recoverable from git history (`128b6249`) if a
+specific item needs checking.
+
+---
+
+## 6. Post-PR-1 measurement notes (2026-09-11)
+
+Recorded after implementing the Phase-1 / PR-1 object-construction fixes (A1, A2, A3, A10, A28, A29,
+A30, A46, A50, A51 and the parse-time half of A5).
+
+**Idle CPU after PR 1 — meets the targets, but not yet a controlled A/B.**
+The PR-1 build idles at **0 % of one core with 0 GC events in 20 s**, against the targets in
+`planFix.md` §2.3 (< 20 % CPU, < 5 GC / 30 s) and the original baseline of 135–320 % with ~1 GC/s.
+That reading was taken after a **180 s settle**, and no matched post-settle baseline was captured on
+the pre-change build — so it is *consistent with* PR 1 but **not proven to be caused by it**. A
+controlled A/B (same settle, same foreground state, both builds) is required before claiming it.
+
+**Cold start is ~17 s — pre-existing, and worse than anything this audit originally found.**
+A controlled experiment (changes stashed, rebuilt, reinstalled, measured identically) showed the cost
+is the same with and without PR 1:
+
+| Build | Time to first frame |
+|---|---|
+| Pre-change (stashed) | +18s849ms · +17s833ms · +17s328ms |
+| With PR 1 | +17s274ms · +17s431ms |
+
+The single +3s082ms reading in §2 came from a different device state and is **not reproducible**;
+treat ~17 s as current truth. Thread dumps during the slow window place the app inside
+`NetworkModule.provideOkHttpClient` and Hilt graph construction — making **A37** (two `Cache`
+instances over one directory) and **A45** (network graph built on the Application main thread) the
+prime suspects. Clearing the 22.9 MB HTTP cache did **not** help, ruling out a journal rebuild and
+pointing at construction cost and/or a startup-triggered provider sync blocking the first frame.
+**This needs its own investigation and is not yet a numbered finding.**
+
+**PR 1 verification status:** all modules compile; `:domain:test`, `:data:testDebugUnitTest` and
+`:player:testDebugUnitTest` pass; the 201-case `ChannelNormalizerGoldenTest` passes byte-identical,
+proving the normaliser refactor preserved output exactly.
+
+**Pre-existing blocker:** `:app:compileDebugUnitTestKotlin` fails at `StartupCoordinatorTest.kt:50`
+(`No parameter with name 'ioDispatcher'`). `StartupCoordinator` no longer takes it
+(`StartupCoordinator.kt:45` uses `Dispatchers.IO` directly), so **no `:app` unit test can compile or
+run**. This predates this work and blocks verification of every `app/`-module finding.
+
+---
+
+## 7. Verified clean — checked, no finding
+
+Recorded so a future audit does not repeat the work.
+
+- **No main-thread blocking in `data/` ingest.** `rg 'runBlocking|GlobalScope|Dispatchers\.Main|allowMainThreadQueries|blockingFirst|blockingGet'` over `data/.../{sync,remote,parser,repository,local}` returns **zero** matches; every ingest entry point is wrapped in `withContext(Dispatchers.IO)` (`SyncManager.kt:682`, `OkHttpXtreamApiService.kt:231/354/442`, `EpgSourceRepositoryImpl.kt:223`).
+- **No `runBlocking` or `GlobalScope` anywhere under `app/.../ui`** either.
+- **Xtream retry/backoff is adaptive and bounded** (`XtreamAdaptiveSyncPolicy.kt:44-101`, `:206-223`; `SyncManagerXtreamSupport.kt:53-68`) — not a retry storm. (EPG retry is the exception: A11.)
+- **Staging tables are correctly indexed** for every correlated subquery in `CatalogSyncDao` (`Entities.kt:470-481`, `:90-98`); the SQL is set-based, not N+1; batches are 500.
+- **`AdultContentClassifier` is not a regex-per-call offender** — patterns precompiled (`:10-11`), LRU cache of 4096 (`:70-76`).
+- **`M3uParser` attribute parsing is hand-rolled char scanning** with no per-line regex (`:317-400`).
+- **`XmltvParser.parseStreaming*` genuinely streams**, and `MaxBytesInputStream`/`EpgInputLimiter` bound the decompressed size.
+- **`replaceForProvider` and `swapPriorities` are `@Transaction`-wrapped**; the DB runs in WAL mode (`DatabaseModule.kt:34`).
+- **EPG body handling streams with hard byte ceilings** (`EpgRepositoryImpl.kt:323-354`) — no whole-file materialization.
+- **`epg_programmes` indices adequately cover `EpgProgrammeDao.getForChannels`** (`Daos.kt:3673`).
+- **`XtreamUrlFactory.sanitizeLogMessage` uses class-level precompiled regexes** (`:61-71`, `:327-349`).
+- **Stalker auth is session-cached** (`StalkerProvider.kt:770-810`); Stalker sync concurrency is semaphore-capped (`SyncManager.kt:363-372`).
+- **Coil image models are memoized** (`AsyncImageModels.kt:10-22`).
+- **FavoritesScreen derived state is properly remembered** (`:152-253`); **SearchScreen debounces 300 ms with `flatMapLatest`** (`:151-157`); **Home/Epg channel paging uses LIMIT/OFFSET** (200/300, `MAX_CHANNELS = 60`); **MultiView has a device-tier slot policy** (`MultiViewViewModel.kt:700-735`); **ProviderSetupScreen file import runs on `Dispatchers.IO`** (`:193-233`).
+- **Dead code found while reviewing** (not perf, but worth removing): `ProgramDao.getForCategory` has no production caller; `EpgRepositoryImpl.getProgramsForChannels`/`getNowPlayingForChannels` are unlimited Room Flows with **no production subscribers** — if a screen ever subscribes, each becomes a High finding; `buildLiveTsFallbackUrl`'s per-call regex is unreachable because its guard returns `false` unconditionally (`LiveTsFallbackUrl.kt:23-26`).
+- **Not reported as regressions:** `PolicyAwareLoadControl.PlayerIdFilteringAllocator` (`:298-344`) mirrors upstream `DefaultLoadControl`; `PlayerDataSourceReadStats` is off by default.
