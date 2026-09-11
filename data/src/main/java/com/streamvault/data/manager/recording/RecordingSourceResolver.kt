@@ -1,6 +1,7 @@
 package com.streamvault.data.manager.recording
 
 import com.streamvault.data.local.dao.ProviderDao
+import com.streamvault.data.remote.http.awaitResponse
 import com.streamvault.data.remote.xtream.ResolvedStreamUrl
 import com.streamvault.data.remote.xtream.XtreamStreamUrlResolver
 import com.streamvault.domain.model.ContentType
@@ -10,6 +11,7 @@ import java.io.IOException
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -66,7 +68,7 @@ class RecordingSourceResolver @Inject constructor(
         )
     }
 
-    private fun sniffSourceType(resolved: ResolvedStreamUrl): RecordingSourceType {
+    private suspend fun sniffSourceType(resolved: ResolvedStreamUrl): RecordingSourceType {
         // Prefer the container extension reported by the URL resolver (e.g. from the
         // Xtream internal token) — this avoids a network probe that many IPTV servers
         // reject with 404/416 when a Range header is present.
@@ -87,11 +89,13 @@ class RecordingSourceResolver @Inject constructor(
         }
     }
 
-    private fun probeAdaptiveType(resolved: ResolvedStreamUrl): RecordingSourceType {
+    private suspend fun probeAdaptiveType(resolved: ResolvedStreamUrl): RecordingSourceType {
         // Try HEAD first — lighter and avoids Range-header rejections.
-        val headResult = runCatching {
+        // A38/A39 - try/catch rather than runCatching: the body now suspends, and runCatching
+        // would also swallow the CancellationException that must propagate.
+        val headResult = try {
             val headRequest = buildRequest(resolved, isHead = true)
-            okHttpClient.newCall(headRequest).execute().use { response ->
+            okHttpClient.newCall(headRequest).awaitResponse().use { response ->
                 if (!response.isSuccessful) return@use null
                 val contentType = response.header("Content-Type").orEmpty().lowercase(Locale.ROOT)
                 when {
@@ -101,14 +105,18 @@ class RecordingSourceResolver @Inject constructor(
                     else -> null
                 }
             }
-        }.getOrNull()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
         if (headResult != null) return headResult
 
         // Fall back to a small GET to inspect the body prefix.
         val request = buildRequest(resolved, isHead = false)
 
-        val bodyPrefix = runCatching {
-            okHttpClient.newCall(request).execute().use { response ->
+        val bodyPrefix = try {
+            okHttpClient.newCall(request).awaitResponse().use { response ->
                 if (!response.isSuccessful) return@use ""
                 val contentType = response.header("Content-Type").orEmpty().lowercase(Locale.ROOT)
                 when {
@@ -117,7 +125,11 @@ class RecordingSourceResolver @Inject constructor(
                 }
                 response.body?.string().orEmpty().take(1024)
             }
-        }.getOrDefault("")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ""
+        }
 
         return when {
             bodyPrefix.contains("#EXTM3U", ignoreCase = true) -> RecordingSourceType.HLS

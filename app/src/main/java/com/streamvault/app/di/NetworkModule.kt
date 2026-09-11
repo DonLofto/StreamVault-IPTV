@@ -139,6 +139,11 @@ object NetworkModule {
             .connectTimeout(NetworkTimeoutConfig.CONNECT_TIMEOUT_SECONDS, SECONDS)
             .readTimeout(NetworkTimeoutConfig.READ_TIMEOUT_SECONDS, SECONDS)
             .writeTimeout(NetworkTimeoutConfig.WRITE_TIMEOUT_SECONDS, SECONDS)
+            // A38 - read/write timeouts bound socket operations, not the call, so a server that
+            // dribbles bytes just inside the read window could hold a sync slot indefinitely.
+            // This caps the whole call. Only this client gets it: the main client serves EPG under
+            // a 200 MB budget, where a blanket cap could abort a legitimate slow download.
+            .callTimeout(NetworkTimeoutConfig.BACKGROUND_SYNC_CALL_TIMEOUT_SECONDS, SECONDS)
             .addInterceptor(DefaultUserAgentInterceptor(appUserAgent))
             .addInterceptor(httpLogger)
             .followRedirects(true)

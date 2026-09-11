@@ -469,16 +469,19 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             }
         }
 
-        protected fun <T> executeRequest(request: Request, block: (Response) -> T): T {
+        protected suspend fun <T> executeRequest(request: Request, block: (Response) -> T): T {
             val call = trackCall(request)
             return try {
-                call.execute().use(block)
+                // A38 - awaitResponse rather than a blocking execute(): cancelling the coroutine
+                // cancels the call immediately instead of leaving a thread parked on the socket,
+                // and it is the precondition for bounding the call with a timeout.
+                call.awaitResponse().use(block)
             } finally {
                 clearTrackedCall(call)
             }
         }
 
-        protected fun streamSegmentToDisk(url: String, target: File) {
+        protected suspend fun streamSegmentToDisk(url: String, target: File) {
             val cacheManager = playbackCacheManager
             if (cacheManager != null) {
                 try {
@@ -516,7 +519,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             }
         }
 
-        protected fun fetchBytes(url: String): ByteArray {
+        protected suspend fun fetchBytes(url: String): ByteArray {
             val cacheManager = playbackCacheManager
             if (cacheManager != null) {
                 try {
@@ -621,7 +624,9 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                     val request = makeRequest(streamInfo.url)
                     val call = trackCall(request)
                     try {
-                        call.execute().use { response ->
+                        // A38 - awaitResponse rather than a blocking execute() (this path is already
+                        // a suspend function, so there is no cascade here).
+                        call.awaitResponse().use { response ->
                             if (!response.isSuccessful) throw IOException("Timeshift stream failed with HTTP ${response.code}")
                             val input = response.body?.byteStream() ?: throw IOException("Timeshift stream returned an empty body")
                             retryDelay = 1_000L
@@ -913,7 +918,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             }
         }
 
-        private fun retainHlsSegment(remote: RemoteHlsSegment): HlsSegmentSnapshot {
+        private suspend fun retainHlsSegment(remote: RemoteHlsSegment): HlsSegmentSnapshot {
             val id = sequence.incrementAndGet()
             return if (backend == LiveTimeshiftBackend.DISK) {
                 val target = File(sessionDir, "segment-$id.ts")
@@ -940,7 +945,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             }
         }
 
-        private fun fetchText(url: String): String {
+        private suspend fun fetchText(url: String): String {
             return executeRequest(makeRequest(url)) { response ->
                 if (!response.isSuccessful) throw IOException("Timeshift playlist failed with HTTP ${response.code}")
                 response.body?.string().orEmpty()
@@ -1245,7 +1250,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             }
         }
 
-        private fun retainSegment(remote: RemoteHlsSegment, isInit: Boolean): HlsSegmentSnapshot {
+        private suspend fun retainSegment(remote: RemoteHlsSegment, isInit: Boolean): HlsSegmentSnapshot {
             val id = sequence.incrementAndGet()
             val ext = if (isInit) "init-$id.mp4" else "segment-$id.mp4"
             return if (backend == LiveTimeshiftBackend.DISK) {
@@ -1258,7 +1263,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
             }
         }
 
-        private fun fetchText(url: String): String {
+        private suspend fun fetchText(url: String): String {
             return executeRequest(makeRequest(url)) { response ->
                 if (!response.isSuccessful) throw IOException("MPD fetch failed: HTTP ${response.code}")
                 response.body?.string().orEmpty()

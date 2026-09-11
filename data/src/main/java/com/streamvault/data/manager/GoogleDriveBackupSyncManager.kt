@@ -33,6 +33,7 @@ import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import com.streamvault.data.remote.http.awaitResponse
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -358,7 +359,7 @@ class GoogleDriveBackupSyncManager @Inject constructor(
         null
     }
 
-    private fun findRemoteFileId(authToken: String, fileName: String): String? {
+    private suspend fun findRemoteFileId(authToken: String, fileName: String): String? {
         val url = "https://www.googleapis.com/drive/v3/files" +
             "?spaces=appDataFolder" +
             "&q=" + uriEncode("name='$fileName'") +
@@ -368,7 +369,7 @@ class GoogleDriveBackupSyncManager @Inject constructor(
             .addHeader("Authorization", "Bearer $authToken")
             .get()
             .build()
-        httpClient.newCall(request).execute().use { response ->
+        httpClient.newCall(request).awaitResponse().use { response ->
             if (!response.isSuccessful) return null
             val body = response.body?.string().orEmpty()
             val files = JSONObject(body).optJSONArray("files") ?: return null
@@ -377,7 +378,7 @@ class GoogleDriveBackupSyncManager @Inject constructor(
         }
     }
 
-    private fun uploadAppDataFile(authToken: String, payload: File, fileName: String): Boolean {
+    private suspend fun uploadAppDataFile(authToken: String, payload: File, fileName: String): Boolean {
         val existingId = findRemoteFileId(authToken, fileName)
         val boundary = "streamvault-${System.nanoTime()}"
         val (httpMethod, endpoint) = if (existingId != null) {
@@ -400,18 +401,18 @@ class GoogleDriveBackupSyncManager @Inject constructor(
             .method(httpMethod, body)
             .build()
 
-        httpClient.newCall(request).execute().use { response ->
+        httpClient.newCall(request).awaitResponse().use { response ->
             return response.isSuccessful
         }
     }
 
-    private fun downloadAppDataFile(authToken: String, fileId: String, target: File): Boolean {
+    private suspend fun downloadAppDataFile(authToken: String, fileId: String, target: File): Boolean {
         val request = Request.Builder()
             .url("https://www.googleapis.com/drive/v3/files/$fileId?alt=media")
             .addHeader("Authorization", "Bearer $authToken")
             .get()
             .build()
-        httpClient.newCall(request).execute().use { response ->
+        httpClient.newCall(request).awaitResponse().use { response ->
             if (!response.isSuccessful) return false
             val source = response.body?.byteStream() ?: return false
             target.outputStream().use { sink -> source.copyTo(sink) }

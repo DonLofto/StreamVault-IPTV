@@ -8,6 +8,7 @@ import com.streamvault.data.local.entity.MovieEntity
 import com.streamvault.data.local.entity.SeriesEntity
 import com.streamvault.domain.model.Provider
 import com.streamvault.domain.model.Result
+import com.streamvault.data.remote.http.awaitResponse
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -118,7 +119,7 @@ class JellyfinProvider @Inject constructor(
         Result.error("Failed to load Jellyfin episodes: ${e.message}", e)
     }
 
-    private fun authenticateSession(serverUrl: String, username: String, password: String): JellyfinAuthenticatedSession {
+    private suspend fun authenticateSession(serverUrl: String, username: String, password: String): JellyfinAuthenticatedSession {
         val url = "${serverUrl.trimEnd('/')}/Users/AuthenticateByName"
         val payload = gson.toJson(JellyfinAuthenticateRequestDto(username = username, password = password))
         val request = Request.Builder()
@@ -138,7 +139,7 @@ class JellyfinProvider @Inject constructor(
         return JellyfinAuthenticatedSession(accessToken = token, userId = userId, userName = parsed.user?.name ?: username)
     }
 
-    private fun initiateQuickConnect(serverUrl: String): JellyfinQuickConnectInitiateResponseDto {
+    private suspend fun initiateQuickConnect(serverUrl: String): JellyfinQuickConnectInitiateResponseDto {
         val url = buildUrl(serverUrl, "/QuickConnect/Initiate", emptyMap())
         val request = Request.Builder()
             .url(url)
@@ -149,7 +150,7 @@ class JellyfinProvider @Inject constructor(
         return executeJsonRequest(request, object : TypeToken<JellyfinQuickConnectInitiateResponseDto>() {}.type, "Quick Connect initiation failed")
     }
 
-    private fun pollQuickConnectState(serverUrl: String, secret: String): JellyfinQuickConnectStatusResponseDto {
+    private suspend fun pollQuickConnectState(serverUrl: String, secret: String): JellyfinQuickConnectStatusResponseDto {
         val url = buildUrl(serverUrl, "/QuickConnect/Connect", mapOf("Secret" to secret))
         val request = Request.Builder()
             .url(url)
@@ -160,7 +161,7 @@ class JellyfinProvider @Inject constructor(
         return executeJsonRequest(request, object : TypeToken<JellyfinQuickConnectStatusResponseDto>() {}.type, "Quick Connect status failed")
     }
 
-    private fun authenticateWithQuickConnect(serverUrl: String, secret: String): Result<JellyfinQuickConnectAuthenticationResult> {
+    private suspend fun authenticateWithQuickConnect(serverUrl: String, secret: String): Result<JellyfinQuickConnectAuthenticationResult> {
         return try {
             val url = buildUrl(serverUrl, "/Users/AuthenticateWithQuickConnect", emptyMap())
             val request = Request.Builder()
@@ -183,7 +184,7 @@ class JellyfinProvider @Inject constructor(
         }
     }
 
-    private fun fetchItems(provider: Provider, path: String, query: Map<String, String>): List<JellyfinItemDto> {
+    private suspend fun fetchItems(provider: Provider, path: String, query: Map<String, String>): List<JellyfinItemDto> {
         val url = buildUrl(provider.serverUrl, path, query)
         val request = Request.Builder()
             .url(url)
@@ -197,7 +198,7 @@ class JellyfinProvider @Inject constructor(
         return parsed.items.orEmpty().filter { !it.id.isNullOrBlank() }
     }
 
-    private fun fetchSeriesEpisodes(provider: Provider, seriesRemoteId: String): List<JellyfinItemDto> {
+    private suspend fun fetchSeriesEpisodes(provider: Provider, seriesRemoteId: String): List<JellyfinItemDto> {
         try {
             val url = buildUrl(provider.serverUrl, "/Shows/$seriesRemoteId/Episodes", mapOf(
                 "Fields" to "Overview,ProviderIds,PremiereDate,RunTimeTicks,Genres,CommunityRating,ImageTags,MediaSources,ParentIndexNumber,IndexNumber",
@@ -294,18 +295,19 @@ class JellyfinProvider @Inject constructor(
         )
     }
 
-    private fun <T> executeJsonRequest(request: Request, responseType: java.lang.reflect.Type, errorPrefix: String): T {
+    private suspend fun <T> executeJsonRequest(request: Request, responseType: java.lang.reflect.Type, errorPrefix: String): T {
         val body = executeRequest(request, errorPrefix)
         @Suppress("UNCHECKED_CAST")
         return gson.fromJson<T>(body, responseType)
     }
 
-    private fun executeRequest(request: Request, errorPrefix: String): String {
+    private suspend fun executeRequest(request: Request, errorPrefix: String): String {
         okHttpClient.newBuilder()
             .callTimeout(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .build()
             .newCall(request)
-            .execute()
+            // A38 - cancellable rather than a blocking execute().
+            .awaitResponse()
             .use { response ->
                 if (!response.isSuccessful) {
                     throw IllegalStateException("$errorPrefix with HTTP ${response.code}")

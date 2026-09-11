@@ -7,6 +7,8 @@ import android.os.SystemClock
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.streamvault.data.remote.http.awaitResponse
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.CacheControl
@@ -52,7 +54,9 @@ class InternetSpeedTestRunner @Inject constructor(
         val transport = capabilities.toTransport()
         val measuredAtMs = System.currentTimeMillis()
 
-        runCatching {
+        // A38/A39 - try/catch rather than runCatching: the probe now suspends and runCatching
+        // would also swallow the CancellationException that must propagate.
+        try {
             val megabitsPerSecond = downloadSpeedProbe.measureMegabitsPerSecond()
             InternetSpeedTestResult.Success(
                 InternetSpeedTestSnapshot(
@@ -63,8 +67,10 @@ class InternetSpeedTestRunner @Inject constructor(
                     isEstimated = false
                 )
             )
-        }.getOrElse {
-            InternetSpeedTestResult.Error(it.message ?: "Speed test failed")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            InternetSpeedTestResult.Error(e.message ?: "Speed test failed")
         }
     }
 
@@ -105,13 +111,13 @@ class InternetDownloadSpeedProbe @Inject constructor(
         this.nanoTime = nanoTime
     }
 
-    fun measureMegabitsPerSecond(bytesToDownload: Long = DEFAULT_DOWNLOAD_BYTES): Double {
+    suspend fun measureMegabitsPerSecond(bytesToDownload: Long = DEFAULT_DOWNLOAD_BYTES): Double {
         val request = Request.Builder()
             .url(urlFactory(bytesToDownload))
             .cacheControl(CacheControl.Builder().noCache().noStore().build())
             .build()
         val startedAtNs = nanoTime()
-        okHttpClient.newCall(request).execute().use { response ->
+        okHttpClient.newCall(request).awaitResponse().use { response ->
             if (!response.isSuccessful) {
                 error("Speed test failed with HTTP ${response.code}")
             }

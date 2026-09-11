@@ -234,21 +234,21 @@ class HlsLiveCaptureEngine @Inject constructor(
         }
     }
 
-    private fun fetchText(url: String, headers: Map<String, String>): String {
+    private suspend fun fetchText(url: String, headers: Map<String, String>): String {
         val request = Request.Builder().url(url).apply {
             headers.forEach { (key, value) -> header(key, value) }
         }.build()
-        okHttpClient.newCall(request).execute().use { response ->
+        okHttpClient.newCall(request).awaitResponse().use { response ->
             if (!response.isSuccessful) throw IOException("Recording stream failed with HTTP ${response.code}")
             return response.body?.string().orEmpty()
         }
     }
 
-    private fun fetchBytes(url: String, headers: Map<String, String>): ByteArray {
+    private suspend fun fetchBytes(url: String, headers: Map<String, String>): ByteArray {
         val request = Request.Builder().url(url).apply {
             headers.forEach { (key, value) -> header(key, value) }
         }.build()
-        okHttpClient.newCall(request).execute().use { response ->
+        okHttpClient.newCall(request).awaitResponse().use { response ->
             if (!response.isSuccessful) throw IOException("Recording stream failed with HTTP ${response.code}")
             return response.body?.bytes() ?: ByteArray(0)
         }

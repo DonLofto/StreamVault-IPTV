@@ -5,12 +5,13 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Response
+import kotlinx.coroutines.test.runTest
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Test
 
 class InternetDownloadSpeedProbeTest {
     @Test
-    fun `measureMegabitsPerSecond measures bytes read over elapsed time`() {
+    fun `measureMegabitsPerSecond measures bytes read over elapsed time`() = runTest {
         var currentTimeNs = 0L
         var requestedUrl: String? = null
         val client = OkHttpClient.Builder()
@@ -42,7 +43,7 @@ class InternetDownloadSpeedProbeTest {
     }
 
     @Test
-    fun `measureMegabitsPerSecond fails instead of inventing a link speed estimate`() {
+    fun `measureMegabitsPerSecond fails instead of inventing a link speed estimate`() = runTest {
         val client = OkHttpClient.Builder()
             .addInterceptor { chain ->
                 Response.Builder()

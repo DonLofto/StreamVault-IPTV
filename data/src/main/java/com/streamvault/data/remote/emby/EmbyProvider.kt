@@ -9,6 +9,7 @@ import com.streamvault.data.local.entity.MovieEntity
 import com.streamvault.data.local.entity.SeriesEntity
 import com.streamvault.domain.model.Provider
 import com.streamvault.domain.model.Result
+import com.streamvault.data.remote.http.awaitResponse
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -220,7 +221,7 @@ class EmbyProvider @Inject constructor(
         Result.error("Failed to load Emby episodes: ${e.message}", e)
     }
 
-    private fun authenticateSession(serverUrl: String, username: String, password: String): EmbyAuthenticatedSession {
+    private suspend fun authenticateSession(serverUrl: String, username: String, password: String): EmbyAuthenticatedSession {
         val url = "${serverUrl.trimEnd('/')}/Users/AuthenticateByName"
         val payload = gson.toJson(EmbyAuthenticateRequestDto(username = username, password = password))
         val request = Request.Builder()
@@ -239,7 +240,7 @@ class EmbyProvider @Inject constructor(
         return EmbyAuthenticatedSession(accessToken = token, userId = userId, userName = parsed.user?.name ?: username)
     }
 
-    private fun fetchItems(provider: Provider, path: String, query: Map<String, String>): List<EmbyItemDto> {
+    private suspend fun fetchItems(provider: Provider, path: String, query: Map<String, String>): List<EmbyItemDto> {
         val url = buildUrl(provider.serverUrl, path, query)
         val request = Request.Builder()
             .url(url)
@@ -288,12 +289,13 @@ class EmbyProvider @Inject constructor(
         return result and Long.MAX_VALUE
     }
 
-    private fun executeRequest(request: Request, errorContext: String): String {
+    private suspend fun executeRequest(request: Request, errorContext: String): String {
         val client = okHttpClient.newBuilder()
             .connectTimeout(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .readTimeout(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .build()
-        client.newCall(request).execute().use { response ->
+        // A38 - cancellable rather than a blocking execute().
+        client.newCall(request).awaitResponse().use { response ->
             if (!response.isSuccessful) {
                 throw IllegalStateException("$errorContext: HTTP ${response.code}")
             }
