@@ -25,9 +25,10 @@ internal fun buildProgramTimeline(
         .filter { program -> channel?.isArchivePlayable(program, now) == true }
         .sortedByDescending { it.startTime }
         .take(maxHistoryItems)
+    // No re-sort: sortedPrograms is already ascending by startTime and filter() preserves order,
+    // so this sortedBy was a redundant full sort of an already-sorted list.
     val upcomingPrograms = sortedPrograms
         .filter { it.endTime > now || it == currentProgram }
-        .sortedBy { it.startTime }
         .take(maxUpcomingItems)
     return PlayerProgramTimeline(
         currentProgram = currentProgram,

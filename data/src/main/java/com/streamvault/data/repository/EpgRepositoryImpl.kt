@@ -420,7 +420,11 @@ class EpgRepositoryImpl @Inject constructor(
         streamId: Long,
         startTime: Long,
         endTime: Long
-    ): List<Program> {
+    ): List<Program> = withContext(Dispatchers.Default) {
+        // A14: the player overlay polls this every 30 seconds from viewModelScope, i.e. Main. The
+        // withContext(IO) inside getResolvedProgramsForChannels has already returned by this point, so
+        // the shiftAll + sortedBy over up to 30 HOURS of programmes was all landing on the UI thread
+        // while a video decoder ran on the same four cores.
         val normalizedChannelId = epgChannelId?.trim()?.takeIf { it.isNotEmpty() }
         val lookupKey = normalizedChannelId ?: streamId.takeIf { it > 0L }?.toString()
         val offsetMs = shiftMsFor(providerId)
@@ -433,18 +437,18 @@ class EpgRepositoryImpl @Inject constructor(
                 endTime = endTime - offsetMs
             )[lookupKey].orEmpty()
             if (resolvedPrograms.isNotEmpty()) {
-                return resolvedPrograms.shiftAll(offsetMs).sortedBy { it.startTime }
+                return@withContext resolvedPrograms.shiftAll(offsetMs).sortedBy { it.startTime }
             }
         }
 
         if (normalizedChannelId != null) {
             // getProgramsForChannel already applies the offset internally.
-            return getProgramsForChannel(providerId, normalizedChannelId, startTime, endTime)
+            return@withContext getProgramsForChannel(providerId, normalizedChannelId, startTime, endTime)
                 .first()
                 .sortedBy { it.startTime }
         }
 
-        return emptyList()
+        emptyList()
     }
 
     private val nowTicker: Flow<Long> = flow {
