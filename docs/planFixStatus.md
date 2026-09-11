@@ -75,6 +75,31 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | **A17** | Moved to Done (`84833e08`, `a6c12378`). Both halves: the search passes run in `withContext(guideWorkDispatcher)`, and the two category-visibility filters run in SQL via `ChannelRepository.getGuideSearchScopeChannels` (which reuses `observeChannels`, so parental and hidden-channel visibility are unchanged). Covered by `ChannelGuideScopeDaoTest` against a real in-memory Room database for all three filter shapes. **Two premises in the plan card were wrong** - see the A17 analysis above: the metadata predicate cannot be pushed, and the base snapshot cannot stand in for the load because `allChannels` is capped at `MAX_CHANNELS` (60). |
 | **A27** | Moved to Done (see the Done table). The reflective-codec half was **withdrawn as wrong** — see below. |
 
+## Device validation recipe (corrected round 22)
+
+Two rounds recorded "the Firestick was unreachable, then held by another app" as the reason live-TV
+validation could not run. **That was wrong**, and the cause was a bad launch command:
+
+- The debug build installs as `com.streamvault.app.debug`, not `com.streamvault.app`. Every
+  `am start -n com.streamvault.app/.MainActivity` silently started nothing, and the launcher kept
+  focus - which read as "another app has focus".
+- `monkey -p <pkg> -c android.intent.category.LAUNCHER` lands on **LeakCanary**, which registers its
+  own LAUNCHER alias in the debug build. The explicit component is required.
+
+Working sequence on the AFTSSS (192.168.0.2:5555):
+
+```bash
+adb connect 192.168.0.2:5555
+adb shell am force-stop com.streamvault.app.debug
+adb shell am start -n com.streamvault.app.debug/com.streamvault.app.MainActivity
+adb shell dumpsys window | grep -m1 mCurrentFocus     # expect com.streamvault.app.debug/...MainActivity
+adb shell dumpsys media_session | grep -A5 com.streamvault.app.debug
+```
+
+A first run after a data clear shows "Preparing your library" and must finish before any channel can
+play; `adb logcat -d | grep "Xtream live category"` shows progress. A34/A35/A20 are all unblocked by
+this - none of them needs a workaround, only the correct component name.
+
 ## A38 path decision (2026-09-11, implemented as `e8479530`)
 
 Decision 3 was to move `awaitResponse` into `:domain` so the two `LiveTimeshiftManager` sites
