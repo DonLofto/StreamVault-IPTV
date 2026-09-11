@@ -452,6 +452,15 @@ fun FullEpgScreen(
                         )
                     }
                     GuideNowProvider {
+                        // A19: hoist the fields these callbacks actually need. The lambdas previously
+                        // captured the whole uiState object, so ANY field change - including ones the
+                        // grid never renders, such as isPreviewLoading, isRefreshing or lastUpdatedAt -
+                        // produced a new uiState, re-created every lambda, and defeated composable
+                        // skipping all the way down through every visible EpgRow and ProgramItem.
+                        // Capturing stable values instead lets Compose memoise the lambdas.
+                        val guideParentalControlLevel = uiState.parentalControlLevel
+                        val guidePreviewChannelId = uiState.previewChannelId
+                        val guideCombinedProfileId = uiState.combinedProfileId
                         EpgGrid(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -469,15 +478,15 @@ fun FullEpgScreen(
                                 append(uiState.combinedProfileId ?: "none")
                             },
                             onChannelClick = { channel ->
-                                if (isGuideChannelLocked(channel, categoriesById, uiState.parentalControlLevel)) {
+                                if (isGuideChannelLocked(channel, categoriesById, guideParentalControlLevel)) {
                                     requestLockedGuideAction(LockedGuideAction.PlayChannel(channel, returnRoute))
-                                } else if (uiState.previewChannelId == channel.id) {
+                                } else if (guidePreviewChannelId == channel.id) {
                                     viewModel.handoffOrClearForFullscreen(channel)
                                     onPlayChannel(
                                         channel,
                                         playerCategoryId,
                                         playerIsVirtualCategory,
-                                        uiState.combinedProfileId,
+                                        guideCombinedProfileId,
                                         returnRoute
                                     )
                                 } else {
@@ -486,7 +495,7 @@ fun FullEpgScreen(
                             },
                             onChannelLongClick = { channel, currentProgram ->
                                 topNavVisible = false
-                                if (isGuideChannelLocked(channel, categoriesById, uiState.parentalControlLevel)) {
+                                if (isGuideChannelLocked(channel, categoriesById, guideParentalControlLevel)) {
                                     requestLockedGuideAction(LockedGuideAction.PlayChannel(channel, returnRoute))
                                 } else {
                                     val program = currentProgram ?: run {
@@ -511,7 +520,7 @@ fun FullEpgScreen(
                             },
                             onProgramClick = { channel, program ->
                                 topNavVisible = false
-                                if (isGuideChannelLocked(channel, categoriesById, uiState.parentalControlLevel)) {
+                                if (isGuideChannelLocked(channel, categoriesById, guideParentalControlLevel)) {
                                     requestLockedGuideAction(LockedGuideAction.OpenProgram(channel, program))
                                 } else {
                                     selectedProgram = channel to program
