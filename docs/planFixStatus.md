@@ -3,7 +3,7 @@
 Tracks implementation of the 59 findings in `docs/performance-audit.md`.
 Plan: `docs/planFix.md`. Baseline commit: `740bd55f`.
 
-**38 done · 4 partial · 1 superseded · 16 open.** Commits marked DONE are on `master`; the working
+**38 done · 5 partial · 1 superseded · 15 open.** Commits marked DONE are on `master`; the working
 tree is clean. Verification for every DONE item was a module compile plus the relevant test suite;
 Room-validated SQL and byte-identical golden output are called out where they apply.
 
@@ -58,6 +58,7 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 |---|---|
 | **A5** | Parse-time half DONE (`3b8cb2c5`: fallback `Regex` and `DateTimeFormatter` hoisted). **The exception-driven format probing itself is still open** — `parseDate` still constructs and throws up to 11 `DateTimeParseException`s per date, twice per programme. **ATTEMPTED AND REVERTED 2026-09-11 — read this before retrying.** Swapping the three helpers to `DateTimeFormatter.parse(CharSequence, ParsePosition)` with a `position.index == text.length` full-consumption check **changed behaviour**: 5 `XmltvParserTest` cases failed, all of them offset-less timestamps (`20250101140000` with pattern `yyyyMMddHHmmss`) that previously parsed and now returned null, plus a `DateTimeParseException` escaping for genuinely malformed input (so the ParsePosition overload can still throw). The naive swap is **not** behaviour-preserving. Retry only by first writing failing tests that pin the offset-less case, then establishing empirically what the ParsePosition overload does to `position.index` and to field resolution for these patterns. The single-`DateTimeFormatterBuilder`-with-`optionalOffset()` route may be the better shape. |
 | **A25** | Repository half DONE (`68adb5a2`: `flowOn(Dispatchers.Default)` on movie/series `getCategories`). **Open:** the `app/ui` ViewModel `combine` transforms named in the audit (MoviesViewModel:145-171, SeriesViewModel:161/322, HomeViewModel:484, EpgViewModel:1101) still run on `Main.immediate`. |
+| **A38** | Partial (`2347069a`). Blocking `Call.execute()` removed from `OkHttpStalkerApiService` (3 sites) and `StremioProvider` (1 site) via the existing `CancellableHttp.awaitResponse()`. **Still open:** `JellyfinProvider.executeRequest`, `EmbyProvider.executeRequest`, `RecordingCaptureEngine.fetchText`/`fetchBytes` and `RecordingSourceResolver.probeAdaptiveType` are non-suspend helpers with non-suspend callers, so converting them cascades; `DownloadManagerImpl.captureDownload` and `RecordingCaptureEngine.capture` are already suspend and convert directly. **The `callTimeout` half is not done** — the main client serves EPG under a 200 MB budget, so a blanket total-call cap could abort legitimate slow downloads. Needs a per-client decision. |
 | **A27** | Reclassified DONE (`c3929c86`). The reflective-codec half was **withdrawn as wrong** — see below. **Open:** the duplicate URL parse (`EntityMappers.kt:196` and `SyncCatalogStore.kt:822` both call `parseInternalStreamUrl`) — carry the `XtreamStreamToken` forward. |
 | **A52** | Row-value half DONE (`8aad07e7`: all four stage merges, 880→510 lines, Room-validated). **Open:** the monotonic watermark, so the progress commit stops re-scanning the whole provider catalog every 500 channels. |
 
@@ -88,9 +89,9 @@ static reading and was wrong about an API.
   measured baseline. Worse, "fixing" it by calling the `Charset` overload directly would compile
   against `compileSdk = 36` and throw `NoSuchMethodError` on API 25–32, i.e. on the target device.
 
-## Open (16)
+## Open (15)
 
-A4, A6, A8, A9, A12, A14, A17, A18, A19, A20, A34, A35, A38, A54, A55, A58.
+A4, A6, A8, A9, A12, A14, A17, A18, A19, A20, A34, A35, A54, A55, A58.
 
 Grouped by why they are still open:
 
