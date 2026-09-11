@@ -206,6 +206,31 @@ Recorded so these are not re-litigated. Each unblocks work that was previously g
 | 8 | **A5** date parsing | **Retry `ParsePosition`, tests-first** — pin the offset-less and malformed cases as failing tests, then establish empirically what `ParsePosition` does to `position.index` and field resolution for these patterns. |
 | 9 | Priority | **A4 next**, ahead of A58. |
 
+## A4 progress: guard tests written, and a premise corrected (2026-09-11)
+
+The A4 remediation is tests-first by decision. The guard tests are now in
+`OkHttpXtreamApiServiceTest` (14 tests, all passing) and pin:
+
+- **a malformed element mid-array aborts the stream** with `XtreamParsingException` carrying the
+  descriptor hint, and the good row before it was ALREADY emitted — i.e. the path really does stream,
+  and it does not silently skip bad rows. The refactor must preserve both.
+- **unquoted values are REJECTED**, which corrects the plan.
+
+**Correction:** the A4 notes assumed the Gson reader's `isLenient = true` makes the thin path
+tolerate non-strict JSON, and warned that a kotlinx streaming decoder would have to match that
+leniency. Measured, it does **not**: `[{ "stream_id": "101", "name": Live One }]` fails today with
+`XtreamParsingException`, because `JsonParser.parseReader` rebuilds the node and
+`element.toString()` re-emits **strict** JSON before kotlinx ever parses it. The leniency flag buys
+nothing on this path. So the refactor has **less** to preserve than the plan claimed — good news, and
+the opposite of what the plan warned about.
+
+**Feasibility established:** `Json.decodeToSequence` resolves and compiles against the current
+dependency set (`kotlinx-serialization-json-jvm:1.9.0`, no json-io artifact needed). That matters
+because the obvious alternative — `decodeFromStream<List<…>>` — would materialise the whole array
+and **regress memory** on the 15k-channel live catalog, which is exactly what the element-by-element
+Gson loop was introduced to avoid. `decodeToSequence` streams element by element and removes both the
+Gson tree parse and the `toString()` round-trip.
+
 ## Environment notes
 
 - `CancellableHttpTest` is **flaky and pre-existing**: different test cases fail on different runs when

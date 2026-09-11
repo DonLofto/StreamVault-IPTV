@@ -143,6 +143,65 @@ class OkHttpXtreamApiServiceTest {
         assertThat(seen).containsExactly(101L to "Live One", 102L to "Live Two").inOrder()
     }
 
+    /**
+     * A4 guard, and a correction to the plan's premise.
+     *
+     * The A4 notes assumed the Gson reader's \`isLenient = true\` makes the thin path tolerate
+     * non-strict JSON, and warned that a kotlinx streaming decoder would have to match that
+     * leniency. Measured on the current code, it does NOT: an unquoted string value is rejected with
+     * \`XtreamParsingException\`, because \`JsonParser.parseReader\` rebuilds the node and
+     * \`element.toString()\` re-emits STRICT JSON before kotlinx ever parses it. The leniency flag
+     * therefore buys nothing on this path, and the refactor has LESS to preserve than the plan said.
+     *
+     * This test pins the rejection. If the refactor makes the parser start accepting input that is
+     * rejected today, that is a behaviour change - possibly a welcome one, but not a silent one.
+     */
+    @Test
+    fun `streamLiveStreamRows still rejects unquoted values`() = runTest {
+        val service = OkHttpXtreamApiService(
+            client = clientReturning(
+                statusCode = 200,
+                body = """[{"stream_id": "101", "name": Live One}]"""
+            ),
+            json = json
+        )
+        var emitted = 0
+
+        val failure = runCatching {
+            service.streamLiveStreamRows("https://example.test/player_api.php") { emitted++ }
+        }.exceptionOrNull()
+
+        assertThat(failure).isInstanceOf(XtreamParsingException::class.java)
+        assertThat(failure).hasMessageThat().contains("Malformed JSON")
+        assertThat(emitted).isEqualTo(0)
+    }
+
+    /**
+     * A4 guard: a single bad element aborts the whole stream rather than being skipped, and the
+     * failure carries the descriptor hint. The refactor must preserve both - silently skipping bad
+     * rows would change what the catalog contains, and losing the hint would regress diagnostics.
+     */
+    @Test
+    fun `streamLiveStreamRows fails on a malformed element mid-array`() = runTest {
+        val service = OkHttpXtreamApiService(
+            client = clientReturning(
+                statusCode = 200,
+                body = """[{"stream_id":"101","name":"Live One"}, {not-json}]"""
+            ),
+            json = json
+        )
+        var emitted = 0
+
+        val failure = runCatching {
+            service.streamLiveStreamRows("https://example.test/player_api.php") { emitted++ }
+        }.exceptionOrNull()
+
+        assertThat(failure).isInstanceOf(XtreamParsingException::class.java)
+        assertThat(failure).hasMessageThat().contains("Malformed JSON")
+        // The good row before the bad one was already handed to the caller - the path streams.
+        assertThat(emitted).isEqualTo(1)
+    }
+
     @Test
     fun `streamLiveStreamRows cancels the underlying call when coroutine times out`() = runTest {
         val requestStarted = CountDownLatch(1)
