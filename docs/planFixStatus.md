@@ -51,7 +51,7 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | A11 | `01dc8a06` | Whole-body retries capped at 2 attempts and jittered |
 | A13 | `d0531dfc` | EPG resolution skipped when guide data did not change and mappings exist |
 | A57 | `5f971bbf` | Watch Next refresh throttled to once per minute of playback |
-| A6 / A9 | see below | `classify` memoised; catalog reclassification made an O(1) lookup |
+| A6 / A9 | `fc72267c` | `classify` memoised; catalog reclassification made an O(1) lookup. **Device-verified: 4/16 → 1/16 samples with app code actively executing** (see below). |
 
 ## Partial
 
@@ -110,6 +110,39 @@ Grouped by why they are still open:
   measured, so they need a before/after to confirm the fix helps.
 - **A11, A38** — retry-scope and timeout changes that could break legitimate large transfers
   (EPG carries a 200 MB budget); both need a `MockWebServer` fixture first.
+
+## A6 / A9 device acceptance measurement (2026-09-11)
+
+The audit defined the acceptance test as the thread-dump histogram: how many of 16 samples catch
+app code actively executing (present within the top 8 frames).
+
+| Build | Samples with app code executing |
+|---|---|
+| Baseline (`740bd55f`) | **4 / 16** |
+| After memoisation (`fc72267c`) | **1 / 16** |
+
+Method identical to the audit: `adb forward tcp:8700 jdwp:<pid>` then `jdb -attach` with
+`suspend` + `where all`, 16 samples, app foregrounded and settled for 90 s.
+
+**Honest reading.** This is a 75% reduction, not the 0/16 the audit implied as the target. The single
+remaining hit is still the same pipeline — and specifically `ChannelNormalizer.classifyUncached`,
+i.e. a genuine cold cache entry rather than a redundant recomputation:
+
+```
+classifyUncached -> classify -> ChannelRepositoryImpl.toVariant -> toPresentedRawChannel
+  -> buildPresentedChannels -> observeChannels\$2.invokeSuspend\$lambda\$2
+```
+
+So memoisation removed the *re*classification but not the first classification, which is expected:
+the first emission after a cold start still classifies the visible catalog once. Driving it to 0/16
+would need the classification persisted at ingest (the "classify once and store" half of A6/A9),
+which the LRU deliberately does not do — it trades memory for CPU, it does not eliminate the work.
+
+**A first attempt at this measurement was discarded as invalid**: the Firestick dropped off ADB
+mid-run, the `pidof` came back empty, and the harness reported a meaningless `0/16` (there was no
+device to sample). The script now checks connectivity per iteration and counts valid samples, so a
+drop cannot masquerade as a result. Note that this device drops off wireless ADB readily — treat any
+sample count below 16 as invalid rather than as data.
 
 ## Environment notes
 
