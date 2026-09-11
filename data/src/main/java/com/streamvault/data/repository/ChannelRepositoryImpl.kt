@@ -70,6 +70,9 @@ class ChannelRepositoryImpl @Inject constructor(
         const val GLOBAL_SEARCH_LIMIT = 500
         const val CATEGORY_SEARCH_LIMIT = 300
         const val MIN_SEARCH_QUERY_LENGTH = 2
+
+        /** A17 - never a real category id, so appending it to a filter list changes no result. */
+        const val CATEGORY_FILTER_SENTINEL = Long.MIN_VALUE
     }
 
     private data class ChannelPresentationSettings(
@@ -89,6 +92,23 @@ class ChannelRepositoryImpl @Inject constructor(
 
     override fun getChannels(providerId: Long): Flow<List<Channel>> =
         observeChannels(channelDao.getByProvider(providerId), providerId)
+
+    override suspend fun getGuideSearchScopeChannels(
+        providerId: Long,
+        accessibleCategoryIds: Set<Long>,
+        hiddenCategoryIds: Set<Long>
+    ): List<Channel> = observeChannels(
+        flowOf(
+            channelDao.getGuideSearchScopeChannels(
+                providerId = providerId,
+                // A sentinel that cannot be a real category id keeps both filter lists non-empty,
+                // so the null-category branch never depends on how an empty IN list evaluates.
+                accessibleCategoryIds = (accessibleCategoryIds + CATEGORY_FILTER_SENTINEL).toList(),
+                hiddenCategoryIds = (hiddenCategoryIds + CATEGORY_FILTER_SENTINEL).toList()
+            )
+        ),
+        providerId
+    ).first()
 
     override fun getChannelCount(providerId: Long): Flow<Int> =
         preferencesRepository.hideDecorativeLiveRows.flatMapLatest { hideDecorativeRows ->

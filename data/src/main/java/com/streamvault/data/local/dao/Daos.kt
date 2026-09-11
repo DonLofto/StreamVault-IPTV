@@ -129,6 +129,41 @@ abstract class ChannelDao {
     )
     abstract fun getByProvider(providerId: Long): Flow<List<ChannelBrowseEntity>>
 
+    /**
+     * A17 - channel universe for the guide search, with the two category-visibility filters pushed
+     * into SQL.
+     *
+     * The guide grid shows only MAX_CHANNELS channels, but a search must span the whole provider, so
+     * this deliberately reads the full catalog. The hidden-category and accessible-category filters
+     * are pure row predicates that previously ran in Kotlin over every one of those rows on a path
+     * debounced at 150 ms per keystroke.
+     *
+     * Callers append a sentinel id that cannot match a real category, so neither list is ever empty.
+     * SQLite does parse an empty IN list and evaluates it false, which happens to give the right
+     * answer, but relying on that would make the null-category branch load-bearing by accident.
+     */
+    @Query(
+        """
+        SELECT c.id, c.stream_id, c.name, c.logo_url, c.group_title, c.category_id, c.category_name, c.stream_url,
+               c.epg_channel_id, c.number, c.catch_up_supported, c.catch_up_days, c.catchUpSource,
+               c.provider_id, p.guide_source_policy, p.channel_logo_source_policy, ec.icon_url AS epg_icon_url,
+               c.is_adult, c.is_user_protected, c.logical_group_id, c.error_count
+        FROM channels c
+        JOIN providers p ON p.id = c.provider_id
+        LEFT JOIN channel_epg_mappings cem ON cem.provider_channel_id = c.id AND cem.provider_id = c.provider_id
+        LEFT JOIN epg_channels ec ON ec.epg_source_id = cem.epg_source_id AND ec.xmltv_channel_id = cem.xmltv_channel_id
+        WHERE c.provider_id = :providerId
+          AND (c.category_id IS NULL
+               OR (c.category_id IN (:accessibleCategoryIds) AND c.category_id NOT IN (:hiddenCategoryIds)))
+        ORDER BY c.number ASC
+        """
+    )
+    abstract suspend fun getGuideSearchScopeChannels(
+        providerId: Long,
+        accessibleCategoryIds: List<Long>,
+        hiddenCategoryIds: List<Long>
+    ): List<ChannelBrowseEntity>
+
     @Query(
         """
         SELECT c.id, c.stream_id, c.name, c.logo_url, c.group_title, c.category_id, c.category_name, c.stream_url,

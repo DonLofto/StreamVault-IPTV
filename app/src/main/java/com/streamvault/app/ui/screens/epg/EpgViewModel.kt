@@ -2054,32 +2054,47 @@ class EpgViewModel @Inject constructor(
     }
 
     private suspend fun loadGuideSearchScopeChannels(baseSnapshot: GuideBaseSnapshot): List<Channel> {
-        val rawChannels = when {
-            baseSnapshot.showFavoritesOnly || baseSnapshot.selectedCategoryId < 0L -> baseSnapshot.allChannels
-            baseSnapshot.selectedCategoryId == ChannelRepository.ALL_CHANNELS_ID ->
-                channelRepository.getChannels(baseSnapshot.providerId).first()
-            else -> channelRepository.getChannelsByCategory(baseSnapshot.providerId, baseSnapshot.selectedCategoryId).first()
-        }
-        if (baseSnapshot.selectedCategoryId != ChannelRepository.ALL_CHANNELS_ID) {
-            return rawChannels.filterNot { channel ->
-                channel.categoryId != null && channel.categoryId in baseSnapshot.hiddenCategoryIds
-            }
+        val hiddenCategoryIds = baseSnapshot.hiddenCategoryIds
+        fun Channel.isInHiddenCategory() = categoryId != null && categoryId in hiddenCategoryIds
+
+        // A17 - the ALL_CHANNELS scope is the whole provider catalog on purpose: the guide grid shows
+        // only MAX_CHANNELS of it, but a search has to find a channel anywhere in the provider, so
+        // this load cannot be replaced by the snapshot. What does move is the pair of pure
+        // category-visibility filters, which otherwise walk every channel in Kotlin on a path that
+        // re-runs for each debounced keystroke.
+        if (!baseSnapshot.showFavoritesOnly &&
+            baseSnapshot.selectedCategoryId == ChannelRepository.ALL_CHANNELS_ID
+        ) {
+            return channelRepository.getGuideSearchScopeChannels(
+                providerId = baseSnapshot.providerId,
+                accessibleCategoryIds = accessibleGuideCategoryIds(baseSnapshot),
+                hiddenCategoryIds = hiddenCategoryIds
+            )
         }
 
-        val accessibleCategoryIds = baseSnapshot.categories.filter { category ->
+        val rawChannels = if (baseSnapshot.showFavoritesOnly || baseSnapshot.selectedCategoryId < 0L) {
+            baseSnapshot.allChannels
+        } else {
+            channelRepository.getChannelsByCategory(baseSnapshot.providerId, baseSnapshot.selectedCategoryId).first()
+        }
+        if (baseSnapshot.selectedCategoryId != ChannelRepository.ALL_CHANNELS_ID) {
+            return rawChannels.filterNot { it.isInHiddenCategory() }
+        }
+
+        val accessibleCategoryIds = accessibleGuideCategoryIds(baseSnapshot)
+        return rawChannels.filterNot { it.isInHiddenCategory() }.filter { channel ->
+            channel.categoryId == null || channel.categoryId in accessibleCategoryIds
+        }
+    }
+
+    private fun accessibleGuideCategoryIds(baseSnapshot: GuideBaseSnapshot): Set<Long> =
+        baseSnapshot.categories.filter { category ->
             isGuideCategoryAccessible(
                 category = category,
                 parentalControlLevel = baseSnapshot.parentalControlLevel,
                 unlockedCategoryIds = emptySet()
             )
         }.map(Category::id).toSet()
-
-        return rawChannels.filterNot { channel ->
-            channel.categoryId != null && channel.categoryId in baseSnapshot.hiddenCategoryIds
-        }.filter { channel ->
-            channel.categoryId == null || channel.categoryId in accessibleCategoryIds
-        }
-    }
 
     private fun Channel.matchesGuideMetadataSearch(searchQuery: String): Boolean {
         return name.contains(searchQuery, ignoreCase = true) ||
