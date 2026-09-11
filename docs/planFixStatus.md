@@ -3,7 +3,7 @@
 Tracks implementation of the 59 findings in `docs/performance-audit.md`.
 Plan: `docs/planFix.md`. Baseline commit: `740bd55f`.
 
-**51 done · 4 partial · 1 superseded · 3 open.** Commits marked DONE are on `master`; the working
+**51 done · 5 partial · 1 superseded · 2 open.** Commits marked DONE are on `master`; the working
 tree is clean. Verification for every DONE item was a module compile plus the relevant test suite;
 Room-validated SQL and byte-identical golden output are called out where they apply.
 
@@ -68,6 +68,7 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | ID | State |
 |---|---|
 | **A5** | Parse-time half DONE (`3b8cb2c5`: fallback `Regex` and `DateTimeFormatter` hoisted). **The exception-driven format probing itself is still open** — `parseDate` still constructs and throws up to 11 `DateTimeParseException`s per date, twice per programme. **ATTEMPTED AND REVERTED 2026-09-11 — read this before retrying.** Swapping the three helpers to `DateTimeFormatter.parse(CharSequence, ParsePosition)` with a `position.index == text.length` full-consumption check **changed behaviour**: 5 `XmltvParserTest` cases failed, all of them offset-less timestamps (`20250101140000` with pattern `yyyyMMddHHmmss`) that previously parsed and now returned null, plus a `DateTimeParseException` escaping for genuinely malformed input (so the ParsePosition overload can still throw). The naive swap is **not** behaviour-preserving. Retry only by first writing failing tests that pin the offset-less case, then establishing empirically what the ParsePosition overload does to `position.index` and to field resolution for these patterns. The single-`DateTimeFormatterBuilder`-with-`optionalOffset()` route may be the better shape. |
+| **A58** | Part 1 done (`1fb250fc`): staged channel rows are built as a `Sequence` and written in 500-row chunks, so the second whole-provider list is gone; the `List`-returning builder stays for the two fresh-session callers. Pinned by a 100k-channel test asserting chunk size, total count and ordinal contiguity. **Open:** the larger half - streaming the Xtream/M3U ingest chain itself, which is upstream of the staging boundary - is untouched. **Note:** this is explicitly *not* the fix for the live-TV freeze; round 24 measured that at a 22 MB Java heap against 89 MB of graphics and a fully consumed device swap. |
 | **A20** | Implemented (`7d2eeb27`): Stalker gets a dedicated `@StalkerClient` and the EPG client is genuinely isolated, both via `newIsolatedClient` (a plain `newBuilder()` shares Dispatcher and ConnectionPool by reference). Unit tests pin both the defect and the fix, plus configuration inheritance. **Open:** the card rates this high risk because it changes network admission, so it needs the full live-TV protocol - blocked on the same memory-pressure freeze as A34. |
 | **A18** | Implemented (`737f5e1d`): guide rows compose only the programmes intersecting the visible time range plus a 30 minute overscan, read through `derivedStateOf`, so a per-pixel scroll does not recompose the row. Item layout, marker layer and focus callbacks are untouched. Range arithmetic extracted and unit-tested (4 cases). **Open:** the composition-count Compose test the card asks for, and an explicit D-pad traversal check on a TV - the card flags grid focus as delicate (prior audit B7). **The card's LazyRow prescription does not fit this component** - see the A18 re-analysis above. |
 | **A34** | Implemented (`fd6b1859`): the MEMORY backend now evicts on a byte ceiling derived from the heap class (quarter of the heap, clamped to 8-48 MB) in addition to the wall-clock depth, for both progressive chunks and HLS segments. **Open:** the plan's validation is `dumpsys meminfo` across a 5-minute live session, and this is a playback/timeshift change, so it still needs the full AGENTS.md live-TV protocol (61 screenshots, 2 channels, media session `PLAYING`, `error=null`). Unit-tested only so far. |
@@ -280,16 +281,16 @@ static reading and was wrong about an API.
   measured baseline. Worse, "fixing" it by calling the `Charset` overload directly would compile
   against `compileSdk = 36` and throw `NoSuchMethodError` on API 25–32, i.e. on the target device.
 
-## Open (3)
+## Open (2)
 
-A35, A54, A58. A34, A18 and A20 moved to Partial - all three are implemented and unit-tested; A34
-and A20 await the AGENTS.md live-TV protocol (which this build currently fails for memory-pressure
-reasons unrelated to either change), and A18 awaits the composition-count Compose test plus a D-pad
-check on a TV.
+A35, A54. A34, A18, A20 and A58 moved to Partial - all four are implemented and unit-tested; A34 and
+A20 await the AGENTS.md live-TV protocol (which this build currently fails for memory-pressure reasons
+unrelated to either change), A18 awaits the composition-count Compose test plus a D-pad check on a TV,
+and A58 has had only its staging-boundary half done.
 
 Grouped by why they are still open:
 
-- **Needs a multi-file streaming refactor** — **A58**. A `Sequence` at the staging boundary is too
+- **Needs a multi-file streaming refactor** — **A58**, half done in `1fb250fc`. A `Sequence` at the staging boundary is too
   late; the whole Xtream/M3U ingest chain has to stream.
 - **Needs an upstream signal the code does not have** — **A35** (DASH timeshift must start at the live
   edge).
