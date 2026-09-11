@@ -1040,12 +1040,7 @@ class Media3PlayerEngine @Inject constructor(
             learnedAudioCompatibility != null -> "LEARNED_AUDIO_FALLBACK"
             else -> "DEFAULT"
         }
-        val isLiveBuffer = currentResolvedStreamType in setOf(
-            ResolvedStreamType.HLS,
-            ResolvedStreamType.SMOOTH_STREAMING,
-            ResolvedStreamType.MPEG_TS_LIVE,
-            ResolvedStreamType.RTSP
-        )
+        val isLiveBuffer = currentResolvedStreamType in liveStreamTypes
         val previousAudioDecoderPolicy = activeAudioDecoderPolicy
         val previousVideoDecoderPolicy = activeVideoDecoderPolicy
         val nextBufferPolicy = PlaybackBufferPolicies.forPlayback(
@@ -1119,12 +1114,7 @@ class Media3PlayerEngine @Inject constructor(
             player.prepare()
             seekPositionMs?.takeIf { it > 0L }?.let(player::seekTo)
 
-            val isLive = currentResolvedStreamType in setOf(
-                ResolvedStreamType.HLS,
-                ResolvedStreamType.SMOOTH_STREAMING,
-                ResolvedStreamType.MPEG_TS_LIVE,
-                ResolvedStreamType.RTSP
-            )
+            val isLive = currentResolvedStreamType in liveStreamTypes
             val osContentType = if (isLive) {
                 android.media.AudioAttributes.CONTENT_TYPE_MUSIC
             } else {
@@ -2077,12 +2067,18 @@ class Media3PlayerEngine @Inject constructor(
         )
     }
 
-    private fun isCurrentStreamLive(): Boolean = currentResolvedStreamType in setOf(
+    /**
+     * Stream types treated as live. Hoisted rather than rebuilt per call - this ran twice a second
+     * from the engine tick as well as on every prepare/reconfigure.
+     */
+    private val liveStreamTypes = setOf(
         ResolvedStreamType.HLS,
         ResolvedStreamType.SMOOTH_STREAMING,
         ResolvedStreamType.MPEG_TS_LIVE,
         ResolvedStreamType.RTSP
     )
+
+    private fun isCurrentStreamLive(): Boolean = currentResolvedStreamType in liveStreamTypes
 
     private fun handleAudioRendererIssue(error: Exception, source: String) {
         val streamInfo = lastStreamInfo
