@@ -353,9 +353,11 @@ fun EpgRow(
     onProgramFocused: (Program) -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
-    val now = currentGuideNow()
-    val currentProgram by remember(programs, now) {
-        derivedStateOf { programs.currentProgramAt(now) }
+    // Deferred: reading the clock directly here re-ran the whole row on every 30-second tick.
+    // Through derivedStateOf the row only recomposes when the current program actually changes.
+    val guideNowState = currentGuideNowState()
+    val currentProgram by remember(programs, guideNowState) {
+        derivedStateOf { programs.currentProgramAt(guideNowState.value) }
     }
 
     val hasUsableArchive = channel.archivePlaybackCapability().canBuildReplayCandidate
@@ -382,7 +384,7 @@ fun EpgRow(
             onLongClick = onChannelLongClick?.let { cb ->
                 {
                     val prog = currentProgram
-                        ?: programs.minByOrNull { kotlin.math.abs(it.startTime - now) }
+                        ?: programs.minByOrNull { kotlin.math.abs(it.startTime - guideNowState.value) }
                     cb(prog)
                 }
             },
@@ -671,8 +673,15 @@ private fun ProgramItemCell(
     onFocused: () -> Unit,
     onFocusChanged: (Boolean) -> Unit
 ) {
-    val now = currentGuideNow()
-    val isCurrent = now in program.startTime until program.endTime
+    // Deferred: a direct clock read recomposed every cell in the visible grid every 30 seconds.
+    // Derived, each cell recomposes only when its own isCurrent flag flips.
+    val guideNowState = currentGuideNowState()
+    val isCurrent by remember(program, guideNowState) {
+        derivedStateOf {
+            val now = guideNowState.value
+            now in program.startTime until program.endTime
+        }
+    }
 
     TvClickableSurface(
         onClick = onClick,

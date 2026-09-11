@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -77,12 +78,19 @@ import java.time.ZoneId
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private val LocalGuideNow = compositionLocalOf { 0L }
+/**
+ * The guide clock as [State].
+ *
+ * Exposed as State rather than a raw Long so hot readers can defer the read through
+ * `derivedStateOf` and recompose only when their DERIVED value changes, instead of on every
+ * 30-second tick - a direct composition read invalidates the reading scope.
+ */
+private val LocalGuideNowState = compositionLocalOf<State<Long>> { mutableStateOf(0L) }
 
 @Composable
-internal fun rememberGuideNow(): Long {
+internal fun rememberGuideNow(): State<Long> {
     val lifecycleOwner = LocalLifecycleOwner.current
-    val currentTime by produceState(initialValue = System.currentTimeMillis(), lifecycleOwner) {
+    val currentTimeState = produceState(initialValue = System.currentTimeMillis(), lifecycleOwner) {
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             while (true) {
                 value = System.currentTimeMillis()
@@ -90,19 +98,24 @@ internal fun rememberGuideNow(): Long {
             }
         }
     }
-    return currentTime
+    return currentTimeState
 }
 
 @Composable
 internal fun GuideNowProvider(content: @Composable () -> Unit) {
-    val now = rememberGuideNow()
-    CompositionLocalProvider(LocalGuideNow provides now) {
+    val nowState = rememberGuideNow()
+    CompositionLocalProvider(LocalGuideNowState provides nowState) {
         content()
     }
 }
 
+/** The clock as State, for readers that should defer through derivedStateOf. */
 @Composable
-internal fun currentGuideNow(): Long = LocalGuideNow.current
+internal fun currentGuideNowState(): State<Long> = LocalGuideNowState.current
+
+/** Convenience read for leaves that format the clock; a composition read is acceptable there. */
+@Composable
+internal fun currentGuideNow(): Long = LocalGuideNowState.current.value
 
 @Composable
 internal fun GuideDensityRow(
