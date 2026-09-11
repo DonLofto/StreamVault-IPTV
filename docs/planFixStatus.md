@@ -3,7 +3,7 @@
 Tracks implementation of the 59 findings in `docs/performance-audit.md`.
 Plan: `docs/planFix.md`. Baseline commit: `740bd55f`.
 
-**34 done · 4 partial · 1 superseded · 20 open.** Commits marked DONE are on `master`; the working
+**35 done · 4 partial · 1 superseded · 19 open.** Commits marked DONE are on `master`; the working
 tree is clean. Verification for every DONE item was a module compile plus the relevant test suite;
 Room-validated SQL and byte-identical golden output are called out where they apply.
 
@@ -47,6 +47,7 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | A16 | `cb13e949` | Player diagnostics collected only while the overlay is visible |
 | A40 | `3b6b9ee9` | Guide clock exposed as State; grid row/cell defer through `derivedStateOf` |
 | A56 | `d67ebee3` | VOD browse page built once per fetch instead of twice |
+| A24 | `21c15fd8` | Archive capability evaluated once per channel, not per programme |
 
 ## Partial
 
@@ -84,10 +85,9 @@ static reading and was wrong about an API.
   measured baseline. Worse, "fixing" it by calling the `Charset` overload directly would compile
   against `compileSdk = 36` and throw `NoSuchMethodError` on API 25–32, i.e. on the target device.
 
-## Open (20)
+## Open (19)
 
-A4, A6, A8, A9, A11, A12, A13, A14, A17, A18, A19, A20, A24, A34, A35, A38, A54, A55, A57,
-A58.
+A4, A6, A8, A9, A11, A12, A13, A14, A17, A18, A19, A20, A34, A35, A38, A54, A55, A57, A58.
 
 Grouped by why they are still open:
 
