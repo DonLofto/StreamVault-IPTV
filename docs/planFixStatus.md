@@ -3,7 +3,7 @@
 Tracks implementation of the 59 findings in `docs/performance-audit.md`.
 Plan: `docs/planFix.md`. Baseline commit: `740bd55f`.
 
-**53 done · 3 partial · 1 superseded · 2 open.** Commits marked DONE are on `master`; the working
+**53 done · 4 partial · 1 superseded · 1 open.** Commits marked DONE are on `master`; the working
 tree is clean. Verification for every DONE item was a module compile plus the relevant test suite;
 Room-validated SQL and byte-identical golden output are called out where they apply.
 
@@ -69,6 +69,7 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | ID | State |
 |---|---|
 | **A5** | Moved to Done (`35e0364c`). Each date-format candidate now carries a **necessary** condition on the input, so shapes that provably cannot match are skipped instead of being discovered by a thrown and caught `DateTimeParseException`. The throwing parse stays authoritative and the priority order is unchanged, so a format that matched before still runs. Worst cases eliminated: ISO timestamps (five guaranteed throws) and short dates (ten). Offset-less compact timestamps still cost four, because the offset formats must precede the local ones. **Both earlier attempts are recorded below and must not be retried**: the `ParsePosition` route is closed by a stack trace. |
+| **A35** | Implemented (`09210631`): the DASH window fills from the live edge backwards - newest first, inserted with `addMediaFirst` so the deque stays chronological, stopping at the retention depth and marking the rest considered rather than downloading them only to be pruned. Later polls append. `DashWindowBackfillTest` pins the ordering, the append-after-backfill case, that pruning removes the oldest, and that the zero-duration init never counts. **Open:** the AGENTS.md live-TV protocol - this is a timeshift behaviour change and has not been run on a device. The round-28 claim that the reorder was impossible was **wrong** and is corrected above. |
 | **A58** | Part 1 done (`1fb250fc`): staged channel rows are built as a `Sequence` and written in 500-row chunks, so the second whole-provider list is gone; the `List`-returning builder stays for the two fresh-session callers. Pinned by a 100k-channel test asserting chunk size, total count and ordinal contiguity. Part 2 done (`addd7b81`): the two live-ingest sites that loaded the provider's entire channel table and filtered hidden categories in Kotlin now use `getByProviderAndCategoryIdsSync`, so the largest single materialisation on that path is gone. **Open:** only the fallback branches that map `liveResult.items` in one go, reached only when the staged path produced no session - the card's "the whole ingest chain has to stream" overstates the common case. **Note:** this is explicitly *not* the fix for the live-TV freeze; round 24 measured that at a 22 MB Java heap against 89 MB of graphics and a fully consumed device swap. |
 | **A20** | Implemented (`7d2eeb27`): Stalker gets a dedicated `@StalkerClient` and the EPG client is genuinely isolated, both via `newIsolatedClient` (a plain `newBuilder()` shares Dispatcher and ConnectionPool by reference). Unit tests pin both the defect and the fix, plus configuration inheritance. **Open:** the card rates this high risk because it changes network admission, so it needs the full live-TV protocol - blocked on the same memory-pressure freeze as A34. |
 | **A18** | Moved to Done - see the Done table. |
@@ -460,9 +461,9 @@ static reading and was wrong about an API.
   measured baseline. Worse, "fixing" it by calling the `Charset` overload directly would compile
   against `compileSdk = 36` and throw `NoSuchMethodError` on API 25–32, i.e. on the target device.
 
-## Open (2)
+## Open (1)
 
-A35, A54. A5 and A18 are now Done. A34, A20 and A58 moved to Partial - all four are implemented and unit-tested; A34 and
+A54 only. A35 moved to Partial (implemented and unit-tested; awaiting the live-TV protocol). A5 and A18 are now Done. A34, A20 and A58 moved to Partial - all four are implemented and unit-tested; A34 and
 A20 await the AGENTS.md live-TV protocol (which this build currently fails for memory-pressure reasons
 unrelated to either change), A18 awaits the composition-count Compose test plus a D-pad check on a TV,
 and A58 has had only its staging-boundary half done.
