@@ -504,9 +504,15 @@ static reading and was wrong about an API.
   measured baseline. Worse, "fixing" it by calling the `Charset` overload directly would compile
   against `compileSdk = 36` and throw `NoSuchMethodError` on API 25–32, i.e. on the target device.
 
-## Open (1)
+## Open (1) - BLOCKED on a decision
 
-A54 only. A35 moved to Partial (implemented and unit-tested; awaiting the live-TV protocol). A5 and A18 are now Done. A34, A20 and A58 moved to Partial - all four are implemented and unit-tested; A34 and
+**A54**, and it is blocked rather than pending work. Round 39 measured it on the device: the expression
+index option is dead (SQLite keeps its existing covering index), and the query is already an index-only
+scan, so what remains is a per-row `CAST` and a DISTINCT B-tree per invalidation. The two viable
+options and a recommendation are set out in the A54 section above. **No further work is possible until
+that call is made.**
+
+A35 moved to Partial (implemented and unit-tested; awaiting the live-TV protocol). A5 and A18 are Done. A34, A20 and A58 moved to Partial - all four are implemented and unit-tested; A34 and
 A20 await the AGENTS.md live-TV protocol (which this build currently fails for memory-pressure reasons
 unrelated to either change), A18 awaits the composition-count Compose test plus a D-pad check on a TV,
 and A58 has had only its staging-boundary half done.
