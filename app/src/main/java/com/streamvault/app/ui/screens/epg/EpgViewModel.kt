@@ -37,6 +37,7 @@ import com.streamvault.domain.usecase.ScheduleRecordingCommand
 import com.streamvault.domain.util.AdultContentVisibilityPolicy
 import com.streamvault.data.preferences.PreferencesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -1703,7 +1704,13 @@ class EpgViewModel @Inject constructor(
         val channelIds = channels.map { it.id }
         val resolvedPrograms: Map<String, List<Program>> = runCatching {
             epgRepository.getResolvedProgramsForChannels(providerId, channelIds, windowStart, windowEnd)
-        }.getOrElse { emptyMap() }
+        }.getOrElse { error ->
+            // runCatching catches Throwable, including CancellationException. This runs inside a
+            // collectLatest whose whole job is to cancel the superseded load, so swallowing the
+            // cancellation let the stale load finish and publish an EMPTY snapshot.
+            if (error is CancellationException) throw error
+            emptyMap()
+        }
 
         // 2. For channels not covered by resolution, fall back to legacy provider-native query.
         val unresolvedChannels = channels.filter { channel ->
@@ -1715,7 +1722,10 @@ class EpgViewModel @Inject constructor(
             runCatching {
                 if (fallbackGuideKeys.isEmpty()) emptyMap()
                 else epgRepository.getProgramsForChannelsSnapshot(providerId, fallbackGuideKeys, windowStart, windowEnd)
-            }.getOrElse { emptyMap() }
+            }.getOrElse { error ->
+                if (error is CancellationException) throw error
+                emptyMap()
+            }
         } else {
             emptyMap()
         }
