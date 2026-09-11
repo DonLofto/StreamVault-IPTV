@@ -3,7 +3,7 @@
 Tracks implementation of the 59 findings in `docs/performance-audit.md`.
 Plan: `docs/planFix.md`. Baseline commit: `740bd55f`.
 
-**46 done · 6 partial · 1 superseded · 6 open.** Commits marked DONE are on `master`; the working
+**47 done · 6 partial · 1 superseded · 5 open.** Commits marked DONE are on `master`; the working
 tree is clean. Verification for every DONE item was a module compile plus the relevant test suite;
 Room-validated SQL and byte-identical golden output are called out where they apply.
 
@@ -57,6 +57,7 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | A19 | `7d874cd2` | EPG grid callbacks capture stable values, not the whole uiState |
 | A4 | `76872471` + see below | Xtream decode paths stream with kotlinx; Gson removed entirely |
 | A6 / A9 | `fc72267c` | `classify` memoised; catalog reclassification made an O(1) lookup. **Device-verified: 4/16 → 1/16 samples with app code actively executing** (see below). |
+| A12 | `5d3ed203` | Unchanged-feed skip (migration 66 -> 67): ETag/Last-Modified conditional request, plus a SHA-256 of the decompressed payload; a match with a populated guide discards the staged rows instead of rebuilding the table |
 | A52 | `1c95d2f1` | Monotonic `staged_seq` staging watermark (migration 65 -> 66): progress commits merge only the rows staged since the previous commit instead of re-scanning the whole provider catalog every 500 channels. |
 
 ## Partial
@@ -98,15 +99,12 @@ static reading and was wrong about an API.
   measured baseline. Worse, "fixing" it by calling the `Charset` overload directly would compile
   against `compileSdk = 36` and throw `NoSuchMethodError` on API 25–32, i.e. on the target device.
 
-## Open (6)
+## Open (5)
 
-A12, A18, A20, A35, A54, A58. A34 moved to Partial (implemented, live-TV validation pending).
+A18, A20, A35, A54, A58. A34 moved to Partial (implemented, live-TV validation pending).
 
 Grouped by why they are still open:
 
-- **Needs a schema or download-layer change** — **A12**. The rewrite itself cannot be made cheaper
-  (see the A12 correction below); the win is skipping it for an unchanged feed, which needs a stored
-  feed identity. Decision 2 (per-provider content hash) is taken.
 - **Needs a multi-file streaming refactor** — **A58**. A `Sequence` at the staging boundary is too
   late; the whole Xtream/M3U ingest chain has to stream.
 - **Needs an upstream signal the code does not have** — **A35** (DASH timeshift must start at the live
