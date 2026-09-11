@@ -70,13 +70,48 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | **A5** | Moved to Done (`35e0364c`). Each date-format candidate now carries a **necessary** condition on the input, so shapes that provably cannot match are skipped instead of being discovered by a thrown and caught `DateTimeParseException`. The throwing parse stays authoritative and the priority order is unchanged, so a format that matched before still runs. Worst cases eliminated: ISO timestamps (five guaranteed throws) and short dates (ten). Offset-less compact timestamps still cost four, because the offset formats must precede the local ones. **Both earlier attempts are recorded below and must not be retried**: the `ParsePosition` route is closed by a stack trace. |
 | **A58** | Part 1 done (`1fb250fc`): staged channel rows are built as a `Sequence` and written in 500-row chunks, so the second whole-provider list is gone; the `List`-returning builder stays for the two fresh-session callers. Pinned by a 100k-channel test asserting chunk size, total count and ordinal contiguity. **Open:** the larger half - streaming the Xtream/M3U ingest chain itself, which is upstream of the staging boundary - is untouched. **Note:** this is explicitly *not* the fix for the live-TV freeze; round 24 measured that at a 22 MB Java heap against 89 MB of graphics and a fully consumed device swap. |
 | **A20** | Implemented (`7d2eeb27`): Stalker gets a dedicated `@StalkerClient` and the EPG client is genuinely isolated, both via `newIsolatedClient` (a plain `newBuilder()` shares Dispatcher and ConnectionPool by reference). Unit tests pin both the defect and the fix, plus configuration inheritance. **Open:** the card rates this high risk because it changes network admission, so it needs the full live-TV protocol - blocked on the same memory-pressure freeze as A34. |
-| **A18** | Implemented (`737f5e1d`): guide rows compose only the programmes intersecting the visible time range plus a 30 minute overscan, read through `derivedStateOf`, so a per-pixel scroll does not recompose the row. Item layout, marker layer and focus callbacks are untouched. Range arithmetic extracted and unit-tested (4 cases). **Open:** the composition-count Compose test the card asks for, and an explicit D-pad traversal check on a TV - the card flags grid focus as delicate (prior audit B7). **The card's LazyRow prescription does not fit this component** - see the A18 re-analysis above. |
+| **A18** | Implemented (`737f5e1d`): guide rows compose only the programmes intersecting the visible time range plus a 30 minute overscan, read through `derivedStateOf`, so a per-pixel scroll does not recompose the row. Item layout, marker layer and focus callbacks are untouched. Range arithmetic extracted and unit-tested (4 cases). **D-pad traversal verified by A/B** (round 31): reverting A18 to its parent and repeating the same scripted traversal on the same channel produces the identical focus pattern, so the windowing does not change focus behaviour - see the A18 focus-traversal section. **Open:** the composition-count Compose test the card asks for - the card flags grid focus as delicate (prior audit B7). **The card's LazyRow prescription does not fit this component** - see the A18 re-analysis above. |
 | **A34** | Implemented (`fd6b1859`): the MEMORY backend now evicts on a byte ceiling derived from the heap class (quarter of the heap, clamped to 8-48 MB) in addition to the wall-clock depth, for both progressive chunks and HLS segments. **Open:** the plan's validation is `dumpsys meminfo` across a 5-minute live session, and this is a playback/timeshift change, so it still needs the full AGENTS.md live-TV protocol (61 screenshots, 2 channels, media session `PLAYING`, `error=null`). Unit-tested only so far. |
 | **A25** | Moved to Done - see the Done table. |
 | **A38** | Moved to Done - see the Done table. |
 | **A38 site count** | 18 OkHttp sites found repo-wide; the audit's list of 9 missed `PlayerViewModel`, `GitHubReleaseChecker`, `StreamVaultPluginManager` and `LiveTranslationClient` entirely. All are converted as of `e8479530`. The 19th grep hit, `SlowQueryLoggingOpenHelperFactory.delegate.execute()`, is a SQLite API and correctly excluded. |
 | **A17** | Moved to Done (`84833e08`, `a6c12378`). Both halves: the search passes run in `withContext(guideWorkDispatcher)`, and the two category-visibility filters run in SQL via `ChannelRepository.getGuideSearchScopeChannels` (which reuses `observeChannels`, so parental and hidden-channel visibility are unchanged). Covered by `ChannelGuideScopeDaoTest` against a real in-memory Room database for all three filter shapes. **Two premises in the plan card were wrong** - see the A17 analysis above: the metadata predicate cannot be pushed, and the base snapshot cannot stand in for the load because `allChannels` is capped at `MAX_CHANNELS` (60). |
 | **A27** | Moved to Done (see the Done table). The reflective-codec half was **withdrawn as wrong** — see below. |
+
+## A18 focus-traversal A/B (round 31) - traversal is unchanged, and the quirk is pre-existing
+
+The A18 card flags grid focus as delicate (prior audit B7) and asks for traversal to be verified
+explicitly. There is no way to eyeball Compose focus from the window manager, but `uiautomator dump`
+exposes the focused node with its bounds, which makes it scriptable.
+
+Method: build and install the tree with A18's `EpgGridComponents.kt` reverted to its parent, open the
+Guide, select a channel that has schedule data, then press D-pad Right six times dumping the focused
+bounds after each press. Repeat on the current build with A18 applied. Same device, same navigation.
+
+| Press | With A18 (focused x-range) | Without A18 (focused x-range) |
+|---|---|---|
+| start | 52..412 (channel rail) | 854..1819 (already in grid) |
+| Right 1 | 420..1064 | 420..1028 |
+| Right 2 | 854..1819 | 854..1819 |
+| Right 3 | **854..1819 (no move)** | **854..1819 (no move)** |
+| Right 4 | 1063..1867 | 1027..1867 |
+| Right 5 | **no move** | **no move** |
+| Right 6 | **no move** | **no move** |
+
+The two runs produce the **same traversal pattern**, including the same three presses that do not move
+focus. The starting position differs only because the preceding Down presses landed on a different
+channel.
+
+Conclusions:
+
+1. **A18 does not change D-pad traversal.** That was the risk the card called out and it is now
+   measured rather than assumed.
+2. **There is a pre-existing traversal quirk** - roughly every other Right press in the programme grid
+   leaves focus where it is. It is NOT introduced by A18, but it is a real defect on this screen and
+   belongs in the audit as its own finding rather than being folded into A18.
+
+A18 therefore still lacks only the composition-count Compose test the card asks for. The D-pad check
+it asks for is done, and it passed.
 
 ## A5 second attempt (round 29) - REVERTED, and the key premise is now disproved
 
