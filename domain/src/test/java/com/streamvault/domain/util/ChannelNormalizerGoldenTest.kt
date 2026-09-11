@@ -109,6 +109,28 @@ class ChannelNormalizerGoldenTest {
         assertEquals(PROVIDER_ID.toString() + "_channel", c.logicalGroupId)
     }
 
+    /**
+     * A6/A9 regression guard.
+     *
+     * classify() is memoised because ChannelRepositoryImpl reclassifies the whole catalog on every
+     * observeChannels emission. assertSame proves the second call returned the CACHED instance rather
+     * than recomputing - a value-equality assertion would pass even if the cache were removed.
+     */
+    @Test
+    fun `classify memoises identical inputs and separates different ones`() {
+        val first = ChannelNormalizer.classify("Sky Sports 1 HD", 7L, "http://example.com/a.ts")
+        val second = ChannelNormalizer.classify("Sky Sports 1 HD", 7L, "http://example.com/a.ts")
+        org.junit.Assert.assertSame(first, second)
+
+        // Each key component must participate, or a preference change would return a stale result.
+        val otherProvider = ChannelNormalizer.classify("Sky Sports 1 HD", 8L, "http://example.com/a.ts")
+        org.junit.Assert.assertNotSame(first, otherProvider)
+        val otherUrl = ChannelNormalizer.classify("Sky Sports 1 HD", 7L, "http://example.com/b.m3u8")
+        org.junit.Assert.assertNotSame(first, otherUrl)
+        val otherName = ChannelNormalizer.classify("Sky Sports 2 HD", 7L, "http://example.com/a.ts")
+        org.junit.Assert.assertNotSame(first, otherName)
+    }
+
     private fun writeActualAndFail(actualText: String, reason: String) {
         val out = File("build/channel-normalizer-golden-actual.txt")
         out.parentFile?.mkdirs()

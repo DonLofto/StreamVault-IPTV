@@ -137,10 +137,53 @@ object ChannelNormalizer {
         return trimmed.startsWith("##") && trimmed.endsWith("##")
     }
 
+    /**
+     * Classification is a pure function of (channelName, providerId, streamUrl), but it is called
+     * once per channel on EVERY emission of ChannelRepositoryImpl.observeChannels - and that flow is
+     * a combine of six sources including user preferences, so toggling parental level, grouping mode
+     * or hidden ids reclassified the entire catalog. The on-device thread-dump profile caught this
+     * pipeline in every sample where app code was actively executing.
+     *
+     * Access-ordered LRU, bounded the same way AdultContentClassifier's cache is, so a large
+     * multi-provider catalog cannot grow it without limit. Results are immutable data classes.
+     */
+    private const val CLASSIFICATION_CACHE_SIZE = 4096
+
+    private data class ClassificationKey(
+        val channelName: String,
+        val providerId: Long,
+        val streamUrl: String
+    )
+
+    private val classificationCache: MutableMap<ClassificationKey, ChannelClassification> =
+        java.util.Collections.synchronizedMap(
+            object : LinkedHashMap<ClassificationKey, ChannelClassification>(512, 0.75f, true) {
+                override fun removeEldestEntry(
+                    eldest: MutableMap.MutableEntry<ClassificationKey, ChannelClassification>?
+                ): Boolean = size > CLASSIFICATION_CACHE_SIZE
+            }
+        )
+
     fun classify(
         channelName: String,
         providerId: Long,
         streamUrl: String = ""
+    ): ChannelClassification {
+        val key = ClassificationKey(channelName, providerId, streamUrl)
+        synchronized(classificationCache) {
+            classificationCache[key]?.let { return it }
+        }
+        val computed = classifyUncached(channelName, providerId, streamUrl)
+        synchronized(classificationCache) {
+            classificationCache[key] = computed
+        }
+        return computed
+    }
+
+    private fun classifyUncached(
+        channelName: String,
+        providerId: Long,
+        streamUrl: String
     ): ChannelClassification {
         val originalName = channelName.trim().ifBlank { "Channel" }
         val lowerName = originalName.lowercase(Locale.ROOT)
