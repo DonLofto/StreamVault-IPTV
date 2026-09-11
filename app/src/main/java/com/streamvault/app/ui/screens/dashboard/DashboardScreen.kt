@@ -176,15 +176,6 @@ fun DashboardScreen(
                         )
                     }
                 }
-                uiState.updateNotice?.let { updateNotice ->
-                    item(key = "update_notice") {
-                        DashboardUpdateCard(
-                            notice = updateNotice,
-                            onOpenSettings = { onNavigate(Routes.SETTINGS) },
-                            onInstallUpdate = viewModel::installDownloadedUpdate
-                        )
-                    }
-                }
                 items(orderedSections, key = { it.storageValue }) { section ->
                     when (section) {
                     AppHomeDashboardShelf.LIVE_SHORTCUTS -> DashboardShortcutRow(
@@ -744,66 +735,6 @@ private fun DashboardProviderWarningCard(
                 DashboardActionButton(
                     label = stringResource(R.string.dashboard_warning_review),
                     onClick = onOpenSettings
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun DashboardUpdateCard(
-    notice: DashboardUpdateNotice,
-    onOpenSettings: () -> Unit,
-    onInstallUpdate: () -> Unit
-) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 48.dp, vertical = 6.dp),
-        shape = RoundedCornerShape(20.dp),
-        colors = SurfaceDefaults.colors(containerColor = Primary.copy(alpha = 0.16f)),
-        border = Border(BorderStroke(1.dp, Primary.copy(alpha = 0.45f)))
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 22.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text(
-                text = stringResource(R.string.dashboard_update_title, notice.latestVersionName),
-                style = MaterialTheme.typography.titleMedium,
-                color = TextPrimary
-            )
-            Text(
-                text = stringResource(
-                    if (notice.installPermissionRequired) {
-                        R.string.dashboard_update_install_permission_required
-                    } else if (notice.installReady) {
-                        R.string.dashboard_update_install_ready
-                    } else {
-                        R.string.dashboard_update_available
-                    }
-                ),
-                style = MaterialTheme.typography.bodyMedium,
-                color = OnSurfaceDim
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                DashboardActionButton(
-                    label = stringResource(
-                        if (notice.installPermissionRequired) {
-                            R.string.dashboard_update_allow_installs
-                        } else if (notice.installReady) {
-                            R.string.dashboard_update_open_installer
-                        } else {
-                            R.string.dashboard_update_open_settings
-                        }
-                    ),
-                    onClick = {
-                        if (notice.installReady || notice.installPermissionRequired) {
-                            onInstallUpdate()
-                        } else {
-                            onOpenSettings()
-                        }
-                    }
                 )
             }
         }
