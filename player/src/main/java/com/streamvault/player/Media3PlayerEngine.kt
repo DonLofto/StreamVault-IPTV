@@ -396,8 +396,15 @@ class Media3PlayerEngine @Inject constructor(
                 )
                 if (shouldRefreshPlaybackSupportSnapshot()) {
                     val snapshot = buildPlaybackSupportSnapshot()
-                    scope.launch(Dispatchers.IO) {
-                        playbackSupportSnapshotStore.write(snapshot)
+                    // The snapshot is stable decoder/policy state, so rewriting it every second
+                    // produced ~3600 create/truncate/close cycles per hour of playback with no new
+                    // information, on flash shared with the timeshift writer and the media cache.
+                    // Write only when the content actually changes.
+                    if (snapshot != lastPlaybackSupportSnapshot) {
+                        lastPlaybackSupportSnapshot = snapshot
+                        scope.launch(Dispatchers.IO) {
+                            playbackSupportSnapshotStore.write(snapshot)
+                        }
                     }
                 }
                 if (promoteLiveHlsBufferIfNeeded()) {
@@ -2252,6 +2259,9 @@ class Media3PlayerEngine @Inject constructor(
         appendLine("target=${PlaybackLogSanitizer.sanitizeUrl(lastStreamInfo?.url)}")
         appendLine("lastError=${PlaybackLogSanitizer.sanitizeMessage(lastSupportErrorMessage)}")
     }
+
+    /** Previously written snapshot, so an unchanged one is not rewritten to flash every tick. */
+    private var lastPlaybackSupportSnapshot: String? = null
 
     private fun shouldRefreshPlaybackSupportSnapshot(): Boolean {
         if (!isLowMemoryPlaybackDevice) return true
