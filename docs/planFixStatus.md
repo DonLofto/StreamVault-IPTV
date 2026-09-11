@@ -144,6 +144,47 @@ device to sample). The script now checks connectivity per iteration and counts v
 drop cannot masquerade as a result. Note that this device drops off wireless ADB readily — treat any
 sample count below 16 as invalid rather than as data.
 
+## Plan corrections found while attempting A12 and A58 (2026-09-11)
+
+Both were attempted and both have **incorrect remediation guidance** in `docs/planFix.md`. Recorded
+here so the next implementer does not follow the plan off a cliff. Neither is implemented.
+
+### A12 — the suggested `INSERT … SELECT` swap would make it WORSE
+
+The plan says: "stage under the real provider id and swap via an `INSERT … SELECT` carrying the target
+id (avoiding the second index-maintenance pass)."
+
+Current design (`EpgRepositoryImpl.kt:281`, `:373-374`): staged rows are written to the **same**
+`programs` table under `stagingProviderId = -providerId`, then the swap runs
+`deleteByProvider(providerId)` + `moveToProvider(stagingProviderId, providerId)`, where
+`moveToProvider` is `UPDATE programs SET provider_id = :target WHERE provider_id = :source`.
+
+Per staged row that is **two** index-maintenance passes: the staging INSERT, then the UPDATE's
+index delete+reinsert across the six indices on `programs`.
+
+The suggested alternative is INSERT (staging) → INSERT … SELECT (target id) → DELETE (staging) =
+**three** passes per row. It is worse, not better. The staging indirection exists so the guide stays
+populated while a refresh downloads; it is a deliberate liveness trade, not an oversight.
+
+The change that would actually pay is the plan's own second suggestion — **skip the rewrite entirely
+for an unchanged feed**, since it currently re-runs on every 6 h TTL regardless. That needs a stored
+feed identity (a content hash column, or HTTP ETag/Last-Modified plumbed through the download), i.e. a
+schema or download-layer change. **Needs a decision.**
+
+### A58 — the method it says to mirror does not exist
+
+The plan says to "give the live path a `Sequence` entry point mirroring `stageChannelSequence`".
+There is **no** `stageChannelSequence`. The existing analogous methods are
+`stageMovieSequence`/`stageSeriesSequence` (`SyncCatalogStore.kt:689`, `:706`), both **private**, both
+delegating to `stageDistinctRows`. The live path uses the public list-based `stageChannelBatch`
+(`:358`).
+
+More importantly, adding a `Sequence`-taking staging method would **not** reduce peak memory on its
+own: the live path materialises `liveResult.items` in the **provider** and maps it to entities long
+before staging, so a `Sequence` at the staging boundary is already too late. The whole live ingest
+chain — Xtream/M3U provider → entities → `buildChannelStages` → stage — has to stream, which is a
+multi-file refactor against `SyncCatalogStoreMemoryTest`'s existing peak-heap assertions.
+
 ## Environment notes
 
 - `CancellableHttpTest` is **flaky and pre-existing**: different test cases fail on different runs when
