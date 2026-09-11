@@ -52,6 +52,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import com.streamvault.app.ui.components.CategoryRow
 import com.streamvault.app.ui.components.ChannelCard
 import com.streamvault.app.ui.components.LiveSourceSwitcher
+import com.streamvault.app.ui.components.ProvideMinimalBringIntoViewSpec
 import com.streamvault.app.ui.components.shell.ContentMetadataStrip
 import com.streamvault.app.ui.components.shell.LiveChannelRowSurface
 import com.streamvault.app.ui.components.shell.StatusPill
@@ -948,6 +949,10 @@ fun HomeScreen(
                             }
                         }
 
+                        // The category rail behaves like a cursor: the highlight travels to the
+                        // bottom edge before the list scrolls, instead of parking in the middle of
+                        // the panel while the list slides underneath it.
+                        ProvideMinimalBringIntoViewSpec {
                         LazyColumn(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1017,6 +1022,7 @@ fun HomeScreen(
                                     }
                                 }
                             )
+                        }
                         }
                     }
                 }
