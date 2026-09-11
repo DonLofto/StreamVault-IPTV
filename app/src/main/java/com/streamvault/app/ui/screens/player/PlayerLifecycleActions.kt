@@ -10,6 +10,14 @@ import kotlinx.coroutines.launch
 private const val LIFECYCLE_TOKEN_RENEWAL_LEAD_MS = 60_000L
 private const val LIFECYCLE_TOKEN_RENEWAL_CHECK_INTERVAL_MS = 10_000L
 
+/**
+ * How far playback must advance before the Watch Next row is refreshed again.
+ *
+ * The progress tick is every 5 seconds; refreshing Watch Next on each one meant 12 rounds of
+ * provider/history queries plus up to 40 cross-process ContentResolver writes per minute.
+ */
+private const val WATCH_NEXT_REFRESH_INTERVAL_MS = 60_000L
+
 internal fun PlayerViewModel.startProgressTracking() {
     progressTrackingJob?.cancel()
     if (currentContentType == ContentType.LIVE) return
@@ -33,7 +41,13 @@ internal suspend fun PlayerViewModel.persistPlaybackProgress() {
             operation = "Persist playback resume position",
             result = playbackHistoryRepository.updateResumePosition(history)
         )
-        watchNextManager.refreshWatchNext()
+        // Throttled. A backwards jump in position means a seek, or a new item whose position
+        // restarted near zero, so refresh immediately in that case.
+        val positionMovedEnough = pos - lastWatchNextRefreshPositionMs >= WATCH_NEXT_REFRESH_INTERVAL_MS
+        if (positionMovedEnough || pos < lastWatchNextRefreshPositionMs) {
+            lastWatchNextRefreshPositionMs = pos
+            watchNextManager.refreshWatchNext()
+        }
         launcherRecommendationsManager.refreshRecommendations()
 
         if (traktRepository.authState.value.isAuthenticated && (currentContentType == ContentType.MOVIE || currentContentType == ContentType.SERIES)) {

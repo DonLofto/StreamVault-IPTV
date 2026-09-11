@@ -155,6 +155,16 @@ class PlayerViewModel @Inject constructor(
     private val _upcomingPrograms = MutableStateFlow<List<Program>>(emptyList())
     val upcomingPrograms: StateFlow<List<Program>> = _upcomingPrograms.asStateFlow()
 
+    /**
+     * Resume position at which the Watch Next row was last refreshed.
+     *
+     * refreshWatchNext() re-queries the active provider and recent history, reads every
+     * WatchNextPrograms row the app has ever published (null selection), and re-issues up to 40
+     * ContentResolver insert/update calls across a process boundary. It ran on every 5-second
+     * progress tick - 12 times a minute - while the resume point moves by seconds.
+     */
+    internal var lastWatchNextRefreshPositionMs: Long = Long.MIN_VALUE
+
     internal val currentChannelFlow = MutableStateFlow<com.streamvault.domain.model.Channel?>(null)
     val currentChannel: StateFlow<com.streamvault.domain.model.Channel?> = currentChannelFlow.asStateFlow()
 
