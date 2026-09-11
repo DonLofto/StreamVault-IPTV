@@ -78,6 +78,35 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | **A17** | Moved to Done (`84833e08`, `a6c12378`). Both halves: the search passes run in `withContext(guideWorkDispatcher)`, and the two category-visibility filters run in SQL via `ChannelRepository.getGuideSearchScopeChannels` (which reuses `observeChannels`, so parental and hidden-channel visibility are unchanged). Covered by `ChannelGuideScopeDaoTest` against a real in-memory Room database for all three filter shapes. **Two premises in the plan card were wrong** - see the A17 analysis above: the metadata predicate cannot be pushed, and the base snapshot cannot stand in for the load because `allChannels` is capped at `MAX_CHANNELS` (60). |
 | **A27** | Moved to Done (see the Done table). The reflective-codec half was **withdrawn as wrong** — see below. |
 
+## A5 second attempt (round 29) - REVERTED, and the key premise is now disproved
+
+Round 15 tried swapping the helpers to `DateTimeFormatter.parse(CharSequence, ParsePosition)` with a
+full-consumption check and reverted after 5 `XmltvParserTest` failures. Round 29 tried a **different
+shape**: keep the authoritative throwing parse exactly as it was, and use the ParsePosition overload
+only as a **non-throwing pre-filter**, on the reasoning that it does not require the whole string to be
+consumed and so accepts a superset of what the throwing overload accepts. That reasoning would make it
+a safe filter that can never reject a format which would have matched.
+
+It still failed the same 5 tests, and the stack trace settles what round 15 could only suspect:
+
+```
+java.time.format.DateTimeParseException: Text 'invalid' could not be parsed at index 0
+  at java.time.format.DateTimeFormatter.parseResolved0(DateTimeFormatter.java:2052)
+  at java.time.format.DateTimeFormatter.parse(DateTimeFormatter.java:1922)
+  at com.streamvault.data.parser.XmltvParser.couldMatch(XmltvParser.kt:652)
+```
+
+The exception originates **inside the ParsePosition call**. The premise that this overload reports
+failure through `errorIndex` instead of throwing is false on the JDK this project builds against, so
+it cannot be used as a cheap filter either - catching it would reintroduce exactly the exception
+construction A5 exists to remove.
+
+Reverted; tree clean. What is left is not a helper swap but a **reshape of the probe**: classify the
+string syntactically first (length, separators, presence of a `Z`/`+`/trailing `-` offset marker) and
+attempt only the one or two formats that shape admits, instead of walking fourteen. That is testable
+against the existing 21-test `XmltvParserTest`, which already pins the offset-less cases that killed both
+attempts.
+
 ## A35 re-analysis (round 28) - "start from the live edge" is not a reorder
 
 The card's fix is "start from the live edge on first poll; cache resolved URIs". The second clause is
