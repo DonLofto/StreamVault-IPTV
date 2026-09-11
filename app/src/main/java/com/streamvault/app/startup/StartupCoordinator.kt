@@ -42,7 +42,15 @@ class StartupCoordinator @Inject constructor(
     private val launcherRecommendationsManager: Lazy<LauncherRecommendationsManager>,
     private val tvInputChannelSyncManager: Lazy<TvInputChannelSyncManager>,
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /**
+     * Dispatcher for the deferred startup work below. Assignable so tests can drive it with a
+     * test dispatcher; production never assigns it. [scope] is lazy so the assignment in a test
+     * still takes effect before the first launch.
+     */
+    @get:androidx.annotation.VisibleForTesting
+    internal var ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO
+
+    private val scope: CoroutineScope by lazy { CoroutineScope(SupervisorJob() + ioDispatcher) }
     private val deferredStarted = AtomicBoolean(false)
     private val updateCheckMutex = Mutex()
 

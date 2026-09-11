@@ -39,6 +39,7 @@ import com.streamvault.domain.util.AdultContentVisibilityPolicy
 import com.streamvault.data.preferences.PreferencesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -70,6 +71,7 @@ import javax.inject.Inject
 import android.app.Application
 import com.streamvault.app.R
 import com.streamvault.app.di.AuxiliaryPlayerEngine
+import com.streamvault.app.di.DefaultDispatcher
 import com.streamvault.app.player.LivePreviewHandoffManager
 import com.streamvault.app.player.PreviewHandoffSource
 import com.streamvault.app.plugins.StreamVaultPluginManager
@@ -276,6 +278,7 @@ class EpgViewModel @Inject constructor(
     private val pluginManager: StreamVaultPluginManager,
     private val livePreviewHandoffManager: LivePreviewHandoffManager,
     application: Application,
+    @param:DefaultDispatcher private val guideWorkDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
 
     private val appContext = application
@@ -1985,7 +1988,7 @@ class EpgViewModel @Inject constructor(
     private suspend fun buildSearchGuideSnapshot(
         baseSnapshot: GuideBaseSnapshot,
         searchQuery: String
-    ): Pair<List<Channel>, Map<String, List<Program>>> = withContext(Dispatchers.Default) {
+    ): Pair<List<Channel>, Map<String, List<Program>>> = withContext(guideWorkDispatcher) {
         // A17: this runs on the guide-search path, which is debounced at only 150 ms, and it does
         // several full passes over EVERY channel of the provider - the lookup map, the metadata
         // match, the matched-key build, plus a mapNotNull/associateWith over the result. It ran on

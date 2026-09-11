@@ -143,7 +143,10 @@ class EpgViewModelTest {
             playerEngineProvider = playerEngineProvider,
             pluginManager = pluginManager,
             livePreviewHandoffManager = livePreviewHandoffManager,
-            application = application
+            application = application,
+            // Drives the off-main guide-search work with the test scheduler, so advanceUntilIdle
+            // actually waits for it. A hard-coded Dispatchers.Default runs off-scheduler.
+            guideWorkDispatcher = testDispatcher
         ).also(createdViewModels::add)
 
     private fun clearViewModel(viewModel: EpgViewModel) {

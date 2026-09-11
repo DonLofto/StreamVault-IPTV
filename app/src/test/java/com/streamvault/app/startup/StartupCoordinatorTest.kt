@@ -46,9 +46,8 @@ class StartupCoordinatorTest {
             timeshiftDiskManager = Lazy { timeshiftDiskManager },
             watchNextManager = Lazy { watchNextManager },
             launcherRecommendationsManager = Lazy { launcherRecommendationsManager },
-            tvInputChannelSyncManager = Lazy { tvInputChannelSyncManager },
-            ioDispatcher = testDispatcher
-        )
+            tvInputChannelSyncManager = Lazy { tvInputChannelSyncManager }
+        ).apply { ioDispatcher = testDispatcher }
     }
 
     @Before

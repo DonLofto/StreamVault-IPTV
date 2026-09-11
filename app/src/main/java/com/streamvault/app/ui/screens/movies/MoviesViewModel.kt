@@ -44,6 +44,7 @@ import com.streamvault.app.ui.screens.vod.VodBrowseDefaults
 import com.streamvault.app.util.isPlaybackComplete
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -56,6 +57,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
@@ -178,7 +180,9 @@ class MoviesViewModel @Inject constructor(
                             hiddenCategoryIds = hiddenCategoryIds,
                             categorySortMode = sortMode
                         )
-                    }.combine(searchQueryForBrowse) { dependencies, query ->
+                    }
+                        .flowOn(Dispatchers.Default)
+                        .combine(searchQueryForBrowse) { dependencies, query ->
                         MovieCatalogParams(
                             providerId = provider.id,
                             allFavorites = dependencies.allFavorites,
