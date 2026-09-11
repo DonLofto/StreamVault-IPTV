@@ -4,6 +4,7 @@ import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Fts4
+import androidx.room.Ignore
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.streamvault.domain.model.ContentType
@@ -131,7 +132,23 @@ data class ChannelEntity(
     @ColumnInfo(name = "error_count") val errorCount: Int = 0,
     @ColumnInfo(name = "quality_options_json") val qualityOptionsJson: String? = null,
     @ColumnInfo(name = "sync_fingerprint") val syncFingerprint: String = ""
-)
+) {
+    /**
+     * A27 - transient carry-forward from [com.streamvault.data.mapper.toEntity].
+     *
+     * The mapper already parses the provider stream URL to recognise an internal Xtream LIVE URL
+     * and rebuild it canonically; the staging fingerprint then needs the same recognition and the
+     * same container extension, and re-parsed the URL to get them. That was a second URL parse per
+     * channel on every sync. Both fields are declared in the class body rather than the primary
+     * constructor, so they are not persisted and do not participate in equals/hashCode/copy;
+     * entities read back from the database leave them at their defaults and fall back to parsing.
+     */
+    @Ignore
+    var xtreamInternalLive: Boolean = false
+
+    @Ignore
+    var xtreamInternalLiveExtension: String? = null
+}
 
 data class ChannelBrowseEntity(
     val id: Long = 0,

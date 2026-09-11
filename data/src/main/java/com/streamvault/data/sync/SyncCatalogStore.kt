@@ -862,9 +862,22 @@ internal class SyncCatalogStore(
     }
 
     private fun channelFingerprint(channel: ChannelEntity): String {
-        val xtreamLiveToken = XtreamUrlFactory.parseInternalStreamUrl(channel.streamUrl)
-            ?.takeIf { token -> token.kind == XtreamStreamKind.LIVE }
-        if (xtreamLiveToken != null) {
+        // A27 - the mapper already recognised an internal Xtream LIVE URL while building this entity
+        // and carried the answer (and the extension) across, so the URL is not parsed a second time
+        // here. Entities loaded back from the database carry nothing and fall back to parsing.
+        val carried = channel.xtreamInternalLive
+        val xtreamLiveToken = if (carried) {
+            null
+        } else {
+            XtreamUrlFactory.parseInternalStreamUrl(channel.streamUrl)
+                ?.takeIf { token -> token.kind == XtreamStreamKind.LIVE }
+        }
+        val containerExtension = if (carried) {
+            channel.xtreamInternalLiveExtension
+        } else {
+            xtreamLiveToken?.containerExtension
+        }
+        if (carried || xtreamLiveToken != null) {
             return fingerprint(
                 channel.streamId.toString(),
                 normalizeText(channel.name),
@@ -876,7 +889,7 @@ internal class SyncCatalogStore(
                 channel.catchUpSupported.toString(),
                 channel.catchUpDays.toString(),
                 channel.isAdult.toString(),
-                normalizeText(xtreamLiveToken.containerExtension)
+                normalizeText(containerExtension)
             )
         }
         return fingerprint(

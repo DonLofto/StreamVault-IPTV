@@ -223,7 +223,11 @@ fun Channel.toEntity(): ChannelEntity {
         logicalGroupId = logicalGroupId,
         errorCount = errorCount,
         qualityOptionsJson = if (xtreamLiveToken == null) encodeQualityOptions(qualityOptions) else null
-    )
+    ).also { entity ->
+        // A27 - carry the recognition forward so the staging fingerprint does not re-parse the URL.
+        entity.xtreamInternalLive = xtreamLiveToken != null
+        entity.xtreamInternalLiveExtension = xtreamLiveToken?.containerExtension
+    }
 }
 
 // ── Movie ──────────────────────────────────────────────────────────

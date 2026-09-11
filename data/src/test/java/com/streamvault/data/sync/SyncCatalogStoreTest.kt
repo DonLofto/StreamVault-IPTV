@@ -350,6 +350,56 @@ class SyncCatalogStoreTest {
     }
 
     @Test
+    fun `stageChannelBatch fingerprint is identical whether the xtream token was carried or re-parsed`() = runTest {
+        val providerId = 7L
+        // A27: the mapper carries the internal-Xtream recognition across on the entity, so the
+        // fingerprint never re-parses the URL. Both routes must produce the same fingerprint, or a
+        // sync would see phantom changes and rewrite the whole catalog.
+        val reParsed = ChannelEntity(
+            streamId = 777L,
+            name = "World News",
+            logoUrl = "https://img.example.test/logo.png",
+            groupTitle = "News",
+            categoryId = 12L,
+            categoryName = "News",
+            streamUrl = "xtream://7/live/777?ext=m3u8",
+            epgChannelId = "world-news",
+            number = 4,
+            catchUpSupported = true,
+            catchUpDays = 3,
+            providerId = providerId
+        )
+        val carried = ChannelEntity(
+            streamId = 777L,
+            name = "World News",
+            logoUrl = "https://img.example.test/logo.png",
+            groupTitle = "News",
+            categoryId = 12L,
+            categoryName = "News",
+            streamUrl = "xtream://7/live/777?ext=m3u8",
+            epgChannelId = "world-news",
+            number = 4,
+            catchUpSupported = true,
+            catchUpDays = 3,
+            providerId = providerId
+        ).also { entity ->
+            entity.xtreamInternalLive = true
+            entity.xtreamInternalLiveExtension = "m3u8"
+        }
+
+        val store = store()
+        store.stageChannelBatch(providerId, 91L, listOf(reParsed))
+        store.stageChannelBatch(providerId, 92L, listOf(carried))
+
+        val insertedStages = argumentCaptor<List<ChannelImportStageEntity>>()
+        verify(catalogSyncDao, org.mockito.kotlin.times(2)).insertChannelStages(insertedStages.capture())
+        val fingerprints = insertedStages.allValues.map { it.single().syncFingerprint }
+        assertThat(fingerprints).hasSize(2)
+        assertThat(fingerprints.first()).isNotEmpty()
+        assertThat(fingerprints.first()).isEqualTo(fingerprints.last())
+    }
+
+    @Test
     fun `stageSeriesBatch preserves provider identity and metadata needed by staged apply`() = runTest {
         val providerId = 7L
         val sessionId = 89L
