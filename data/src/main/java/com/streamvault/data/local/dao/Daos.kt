@@ -67,6 +67,26 @@ abstract class ProviderDao {
     @Query("UPDATE providers SET epg_url = :epgUrl WHERE id = :id")
     abstract suspend fun updateEpgUrl(id: Long, epgUrl: String)
 
+    /**
+     * A12 - record the identity of the EPG feed that was just applied, so the next refresh can
+     * recognise an unchanged feed instead of rewriting the whole programs table again.
+     */
+    @Query(
+        """
+        UPDATE providers
+        SET epg_content_hash = :contentHash,
+            epg_etag = :etag,
+            epg_last_modified = :lastModified
+        WHERE id = :id
+        """
+    )
+    abstract suspend fun updateEpgFeedState(
+        id: Long,
+        contentHash: String,
+        etag: String?,
+        lastModified: String?
+    )
+
     @Transaction
     open suspend fun insert(provider: ProviderEntity): Long {
         if (provider.isActive) {

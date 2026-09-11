@@ -1539,6 +1539,40 @@ class StreamVaultDatabaseMigrationTest {
         migratedDb.close()
     }
 
+    /**
+     * A12: the per-provider EPG feed identity added in 66 -> 67.
+     *
+     * runMigrationsAndValidate compares the migrated schema against the generated 67 schema, which is
+     * the real check. This additionally asserts the three columns exist and are nullable, so a
+     * pre-upgrade row reads back NULL and falls through to a full rewrite exactly as before.
+     *
+     * Row survival is deliberately not asserted here: [providers] has 46 NOT NULL columns without SQL
+     * defaults at this version, and ALTER TABLE ... ADD COLUMN cannot drop or rewrite existing rows.
+     */
+    @Test
+    fun migration_66_to_67() {
+        migrationTestHelper.createDatabase("streamvault-66-67-test", 66).close()
+
+        val migratedDb = migrationTestHelper.runMigrationsAndValidate(
+            "streamvault-66-67-test",
+            67,
+            true,
+            StreamVaultDatabase.MIGRATION_66_67
+        )
+
+        listOf("epg_content_hash", "epg_etag", "epg_last_modified").forEach { column ->
+            assertEquals(
+                "missing column $column on providers",
+                1,
+                countRows(
+                    migratedDb,
+                    "SELECT COUNT(*) FROM pragma_table_info('providers') WHERE name = '$column' AND \"notnull\" = 0"
+                )
+            )
+        }
+        migratedDb.close()
+    }
+
     private fun exists(db: androidx.sqlite.db.SupportSQLiteDatabase, sql: String): Boolean {
         db.query(sql).use { cursor ->
             return cursor.moveToFirst()

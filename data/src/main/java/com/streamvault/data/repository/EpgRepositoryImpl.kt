@@ -49,6 +49,8 @@ import okhttp3.Request
 import java.io.FilterInputStream
 import java.io.InputStream
 import java.io.IOException
+import java.security.DigestInputStream
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import com.streamvault.data.remote.NetworkTimeoutConfig
 import java.util.concurrent.ConcurrentHashMap
@@ -91,6 +93,20 @@ class EpgRepositoryImpl @Inject constructor(
     companion object {
         private const val MAX_EPG_SIZE_BYTES = NetworkTimeoutConfig.EPG_MAX_SIZE_BYTES
         private const val EPG_PROGRAM_BATCH_SIZE = 500
+        private const val HTTP_NOT_MODIFIED = 304
+
+        private val HEX_DIGITS = "0123456789abcdef".toCharArray()
+
+        /** Lowercase hex SHA-256 of [this]; avoids a per-byte format string on a 32-byte digest. */
+        private fun ByteArray.toSha256Hex(): String {
+            val out = CharArray(size * 2)
+            forEachIndexed { index, byte ->
+                val value = byte.toInt() and 0xFF
+                out[index * 2] = HEX_DIGITS[value ushr 4]
+                out[index * 2 + 1] = HEX_DIGITS[value and 0x0F]
+            }
+            return String(out)
+        }
         private const val NOW_AND_NEXT_LOOKBACK_MS = 60L * 60L * 1000L
         private const val NOW_AND_NEXT_LOOKAHEAD_MS = 2L * 60L * 60L * 1000L
         private const val NOW_AND_NEXT_REFRESH_INTERVAL_MS = 60L * 1000L
@@ -279,11 +295,18 @@ class EpgRepositoryImpl @Inject constructor(
             val outcome = providerLifecycleCoordinator.withProviderOperation(providerId) {
                 providerRefreshMutex(providerId).withLock {
                     val stagingProviderId = -providerId
-                    val providerTimezoneId = providerDao.getById(providerId)
+                    val providerRow = providerDao.getById(providerId)
+                    val providerTimezoneId = providerRow
                         ?.stalkerDeviceTimezone
                         ?.trim()
                         ?.takeIf(String::isNotEmpty)
                     val batch = ArrayList<ProgramEntity>(EPG_PROGRAM_BATCH_SIZE)
+                    // A12 - identity of the payload being applied, and the validators the server
+                    // returned for it. Declared here because they outlive the response scope.
+                    val feedDigest = MessageDigest.getInstance("SHA-256")
+                    var stagedProgramCount = 0
+                    var responseEtag: String? = null
+                    var responseLastModified: String? = null
                     suspend fun flushBatch() {
                         if (batch.isEmpty()) return
                         val rows = batch.toList()
@@ -299,12 +322,25 @@ class EpgRepositoryImpl @Inject constructor(
                             ?: HttpRequestProfile(ownerTag = "provider:$providerId/epg")
                         val request = Request.Builder()
                             .url(epgUrl)
+                            .apply {
+                                // A12 - ask for a 304 when the feed is unchanged. Servers that do
+                                // not implement conditional requests ignore these headers.
+                                providerRow?.epgEtag?.takeIf { it.isNotBlank() }
+                                    ?.let { header("If-None-Match", it) }
+                                providerRow?.epgLastModified?.takeIf { it.isNotBlank() }
+                                    ?.let { header("If-Modified-Since", it) }
+                            }
                             .build()
                             .withRequestProfile(providerRequestProfile)
                         val call = epgHttpClient.newCall(request)
                         try {
                             val response = call.awaitResponse()
                             response.use {
+                                // A12 - nothing changed upstream, so there is nothing to parse, stage
+                                // or rewrite. This is the cheapest possible outcome for a refresh.
+                                if (response.code == HTTP_NOT_MODIFIED) {
+                                    return@withLock Result.success(Unit)
+                                }
                                 if (!response.isSuccessful) {
                                     Log.w(
                                         "EpgRepository",
@@ -319,6 +355,10 @@ class EpgRepositoryImpl @Inject constructor(
                                 }
 
                                 val body = response.body ?: return@withLock Result.error("Empty EPG response")
+
+                                // A12 - validators the server handed back, for the next conditional request.
+                                responseEtag = response.header("ETag")?.takeIf { it.isNotBlank() }
+                                responseLastModified = response.header("Last-Modified")?.takeIf { it.isNotBlank() }
 
                                 transactionRunner.inTransaction {
                                     programDao.deleteByProvider(stagingProviderId)
@@ -344,12 +384,16 @@ class EpgRepositoryImpl @Inject constructor(
                                             xmlInput,
                                             NetworkTimeoutConfig.EPG_MAX_DECOMPRESSED_BYTES
                                         )
+                                        // Digest the decompressed payload, so the identity is
+                                        // independent of whatever transport encoding the server used.
+                                        val digestingStream = DigestInputStream(decompressionLimited, feedDigest)
                                         xmltvParser.parseStreaming(
-                                            decompressionLimited,
+                                            digestingStream,
                                             timezoneId = providerTimezoneId,
                                             maxProgrammes = NetworkTimeoutConfig.EPG_MAX_PROGRAMMES
                                         ) { program ->
                                             batch.add(program.copy(providerId = stagingProviderId).toEntity())
+                                            stagedProgramCount++
                                             if (batch.size >= EPG_PROGRAM_BATCH_SIZE) {
                                                 flushBatch()
                                             }
@@ -365,13 +409,32 @@ class EpgRepositoryImpl @Inject constructor(
 
                         flushBatch()
 
+                        val feedHash = feedDigest.digest().toSha256Hex()
+
                         transactionRunner.inTransaction {
                             if (providerDao.getById(providerId) == null) {
                                 programDao.deleteByProvider(stagingProviderId)
                                 return@inTransaction
                             }
-                            programDao.deleteByProvider(providerId)
-                            programDao.moveToProvider(stagingProviderId, providerId)
+                            // A12 - an identical payload for a provider that still has its guide
+                            // means the delete + move rewrite would reproduce exactly the rows that
+                            // are already in place, at two index-maintenance passes per programme.
+                            // Discard the staging rows instead and leave the live table untouched.
+                            val unchanged = stagedProgramCount > 0 &&
+                                providerRow?.epgContentHash == feedHash &&
+                                programDao.countByProvider(providerId) > 0
+                            if (unchanged) {
+                                programDao.deleteByProvider(stagingProviderId)
+                            } else {
+                                programDao.deleteByProvider(providerId)
+                                programDao.moveToProvider(stagingProviderId, providerId)
+                            }
+                            providerDao.updateEpgFeedState(
+                                id = providerId,
+                                contentHash = feedHash,
+                                etag = responseEtag,
+                                lastModified = responseLastModified
+                            )
                         }
 
                         Result.success(Unit)

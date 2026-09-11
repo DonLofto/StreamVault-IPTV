@@ -131,6 +131,12 @@ class SyncManagerTest {
             stalkerMacAddress: String
         ): ProviderEntity? = null
         override suspend fun updateEpgUrl(id: Long, epgUrl: String) = Unit
+        override suspend fun updateEpgFeedState(
+            id: Long,
+            contentHash: String,
+            etag: String?,
+            lastModified: String?
+        ) = Unit
     }
 
     companion object {

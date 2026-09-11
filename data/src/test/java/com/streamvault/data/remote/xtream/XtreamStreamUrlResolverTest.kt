@@ -725,6 +725,12 @@ class XtreamStreamUrlResolverTest {
         override suspend fun activate(id: Long) = Unit
         override suspend fun updateSyncTime(id: Long, timestamp: Long) = Unit
         override suspend fun updateEpgUrl(id: Long, epgUrl: String) = Unit
+        override suspend fun updateEpgFeedState(
+            id: Long,
+            contentHash: String,
+            etag: String?,
+            lastModified: String?
+        ) = Unit
     }
 
     private class FakeStalkerApiService : StalkerApiService {

@@ -50,7 +50,7 @@ import com.streamvault.data.local.entity.*
         XtreamLiveOnboardingStateEntity::class,
         DownloadEntity::class
     ],
-    version = 66,
+    version = 67,
     exportSchema = true   // ← was false; schema JSON now tracked in version control
 )
 @TypeConverters(RoomEnumConverters::class)
@@ -2779,6 +2779,23 @@ abstract class StreamVaultDatabase : RoomDatabase() {
                     "CREATE INDEX IF NOT EXISTS `index_channel_import_stage_session_id_provider_id_staged_seq` " +
                         "ON `channel_import_stage` (`session_id`, `provider_id`, `staged_seq`)"
                 )
+            }
+        }
+
+        /**
+         * A12 - per-provider EPG feed identity.
+         *
+         * Adds the columns that let a refresh recognise an unchanged feed: a conditional
+         * request via ETag/Last-Modified where the server supports one, and a content hash
+         * of the decompressed XMLTV payload where it does not. Non-destructive: three
+         * nullable columns, existing rows read back as NULL and fall through to a full
+         * rewrite exactly as before.
+         */
+        val MIGRATION_66_67 = object : Migration(66, 67) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE `providers` ADD COLUMN `epg_content_hash` TEXT")
+                database.execSQL("ALTER TABLE `providers` ADD COLUMN `epg_etag` TEXT")
+                database.execSQL("ALTER TABLE `providers` ADD COLUMN `epg_last_modified` TEXT")
             }
         }
 

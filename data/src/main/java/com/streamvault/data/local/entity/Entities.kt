@@ -76,7 +76,19 @@ data class ProviderEntity(
     @ColumnInfo(name = "m3u_vod_classification_enabled") val m3uVodClassificationEnabled: Boolean = false,
     val status: ProviderStatus = ProviderStatus.UNKNOWN,
     @ColumnInfo(name = "last_synced_at") val lastSyncedAt: Long = 0,
-    @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis()
+    @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
+    /**
+     * A12 - identity of the last successfully applied EPG feed for this provider.
+     *
+     * The XMLTV rewrite costs two index-maintenance passes per programme row (the staging
+     * insert and the move-to-provider update), and it re-ran on every refresh TTL even when
+     * the upstream feed had not changed at all. [epgEtag]/[epgLastModified] let a conditional
+     * request short-circuit the download entirely; [epgContentHash] catches the servers that
+     * do not implement conditional requests.
+     */
+    @ColumnInfo(name = "epg_content_hash") val epgContentHash: String? = null,
+    @ColumnInfo(name = "epg_etag") val epgEtag: String? = null,
+    @ColumnInfo(name = "epg_last_modified") val epgLastModified: String? = null
 )
 
 @Entity(

@@ -705,6 +705,145 @@ class EpgRepositoryImplTest {
     }
 
     @Test
+    fun `refreshEpg skips the rewrite when the feed content is unchanged`() = runTest {
+        whenever(xmltvParser.parseStreaming(any(), anyOrNull(), any(), any())).thenAnswer { invocation ->
+            val onProgram = invocation.getArgument<suspend (Program) -> Unit>(3)
+            runBlocking {
+                onProgram(
+                    Program(
+                        providerId = 7L,
+                        channelId = "channel-1",
+                        title = "News",
+                        description = "",
+                        startTime = 1_735_722_000_000L,
+                        endTime = 1_735_725_600_000L,
+                        lang = "en"
+                    )
+                )
+            }
+        }
+
+        // The provider row doubles as the stored feed identity, so the stub has to reflect what
+        // the previous refresh recorded - exactly how the real row behaves.
+        var storedHash: String? = null
+        whenever(providerDao.getById(7L)).thenAnswer {
+            ProviderEntity(
+                id = 7L,
+                name = "Provider",
+                type = ProviderType.M3U,
+                serverUrl = "https://provider.example.com",
+                epgContentHash = storedHash
+            )
+        }
+        val recordedHashes = mutableListOf<String>()
+        doAnswer { invocation ->
+            recordedHashes += invocation.getArgument<String>(1)
+            storedHash = invocation.getArgument<String>(1)
+            Unit
+        }.whenever(providerDao).updateEpgFeedState(any(), any(), anyOrNull(), anyOrNull())
+        // The guide is already populated, so an identical payload really is a no-op.
+        whenever(programDao.countByProvider(7L)).thenReturn(12)
+
+        val repository = EpgRepositoryImpl(
+            programDao = programDao,
+            providerDao = providerDao,
+            xmltvParser = xmltvParser,
+            okHttpClient = okHttpClientReturningXml(),
+            transactionRunner = transactionRunner,
+            epgSourceRepository = epgSourceRepository,
+            preferencesRepository = preferencesRepository
+        )
+
+        assertThat(repository.refreshEpg(7L, "https://example.com/epg.xml").isSuccess).isTrue()
+        assertThat(repository.refreshEpg(7L, "https://example.com/epg.xml").isSuccess).isTrue()
+
+        // Same payload both times, so the recorded identity is stable...
+        assertThat(recordedHashes).hasSize(2)
+        assertThat(recordedHashes[0]).isEqualTo(recordedHashes[1])
+        assertThat(recordedHashes[0]).hasLength(64)
+        // ...and the second refresh discards its staged rows instead of rebuilding the table:
+        // across both refreshes the live guide is dropped exactly once and rows are moved into
+        // it exactly once, both belonging to the first (identity-recording) refresh.
+        verify(programDao, times(1)).deleteByProvider(7L)
+        verify(programDao, times(1)).moveToProvider(-7L, 7L)
+    }
+
+    @Test
+    fun `refreshEpg rewrites the table when the feed content changed`() = runTest {
+        whenever(xmltvParser.parseStreaming(any(), anyOrNull(), any(), any())).thenAnswer { invocation ->
+            val onProgram = invocation.getArgument<suspend (Program) -> Unit>(3)
+            runBlocking {
+                onProgram(
+                    Program(
+                        providerId = 7L,
+                        channelId = "channel-1",
+                        title = "News",
+                        description = "",
+                        startTime = 1_735_722_000_000L,
+                        endTime = 1_735_725_600_000L,
+                        lang = "en"
+                    )
+                )
+            }
+        }
+
+        // A stored identity that cannot match this payload, i.e. the feed changed upstream.
+        whenever(providerDao.getById(7L)).thenReturn(
+            ProviderEntity(
+                id = 7L,
+                name = "Provider",
+                type = ProviderType.M3U,
+                serverUrl = "https://provider.example.com",
+                epgContentHash = "0".repeat(64)
+            )
+        )
+        whenever(programDao.countByProvider(7L)).thenReturn(12)
+
+        val repository = EpgRepositoryImpl(
+            programDao = programDao,
+            providerDao = providerDao,
+            xmltvParser = xmltvParser,
+            okHttpClient = okHttpClientReturningXml(),
+            transactionRunner = transactionRunner,
+            epgSourceRepository = epgSourceRepository,
+            preferencesRepository = preferencesRepository
+        )
+
+        assertThat(repository.refreshEpg(7L, "https://example.com/epg.xml").isSuccess).isTrue()
+
+        verify(programDao).deleteByProvider(7L)
+        verify(programDao).moveToProvider(-7L, 7L)
+    }
+
+    @Test
+    fun `refreshEpg treats a 304 as success without touching the guide`() = runTest {
+        whenever(providerDao.getById(7L)).thenReturn(
+            ProviderEntity(
+                id = 7L,
+                name = "Provider",
+                type = ProviderType.M3U,
+                serverUrl = "https://provider.example.com",
+                epgEtag = "\"v1\""
+            )
+        )
+
+        val repository = EpgRepositoryImpl(
+            programDao = programDao,
+            providerDao = providerDao,
+            xmltvParser = xmltvParser,
+            okHttpClient = okHttpClientReturningStatus(304),
+            transactionRunner = transactionRunner,
+            epgSourceRepository = epgSourceRepository,
+            preferencesRepository = preferencesRepository
+        )
+
+        assertThat(repository.refreshEpg(7L, "https://example.com/epg.xml").isSuccess).isTrue()
+        verify(programDao, never()).deleteByProvider(any())
+        verify(programDao, never()).insertAll(any())
+        verify(xmltvParser, never()).parseStreaming(any(), anyOrNull(), any(), any())
+    }
+
+    @Test
     fun `refreshEpg passes provider timezone to parser for no offset timestamps`() = runTest {
         whenever(providerDao.getById(7L)).thenReturn(
             ProviderEntity(
@@ -750,6 +889,20 @@ class EpgRepositoryImplTest {
 
     private fun okHttpClientReturningXml(): OkHttpClient =
         okHttpClientReturningBody("<tv></tv>".toByteArray(Charsets.UTF_8))
+
+    /** A12 - a client that answers with a bare status and no body, e.g. a conditional-request 304. */
+    private fun okHttpClientReturningStatus(code: Int): OkHttpClient =
+        OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(code)
+                    .message("No Content")
+                    .body(ByteArray(0).toResponseBody(null))
+                    .build()
+            }
+            .build()
 
     private fun okHttpClientReturningBody(
         body: ByteArray,
