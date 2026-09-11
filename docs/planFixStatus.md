@@ -75,6 +75,41 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | **A17** | Moved to Done (`84833e08`, `a6c12378`). Both halves: the search passes run in `withContext(guideWorkDispatcher)`, and the two category-visibility filters run in SQL via `ChannelRepository.getGuideSearchScopeChannels` (which reuses `observeChannels`, so parental and hidden-channel visibility are unchanged). Covered by `ChannelGuideScopeDaoTest` against a real in-memory Room database for all three filter shapes. **Two premises in the plan card were wrong** - see the A17 analysis above: the metadata predicate cannot be pushed, and the base snapshot cannot stand in for the load because `allChannels` is capped at `MAX_CHANNELS` (60). |
 | **A27** | Moved to Done (see the Done table). The reflective-codec half was **withdrawn as wrong** — see below. |
 
+## Live-TV validation attempts (round 23) - FAILED, live playback freezes
+
+First successful run of the AGENTS.md protocol on the AFTSSS after the round-22 launch-command fix.
+The outcome is a **failure of the current build**, not a pass, and it is recorded here rather than
+quietly retried.
+
+Setup: debug build installed from HEAD (`84833e08` + docs), app launched via
+`com.streamvault.app.debug/com.streamvault.app.MainActivity`, library sync completed, channel started
+from `Live TV -> 24/7 CineMania` (full-screen playback of "CineMania Gold 4K", "Playing now: Do Qaidi
+(1989)").
+
+| Evidence | Result |
+|---|---|
+| Media session before capture | `state=3` (PLAYING), `error=null` |
+| Screenshots | 61 at 2 s, as the protocol requires |
+| Unique frame hashes | **14** |
+| Frames that differ from the previous one | indices **00-13 only**; 14-60 are byte-identical |
+| Media session after capture | `state=1` (STOPPED), `error=null` |
+
+So playback advanced for roughly the first **26-28 seconds** and then froze for the remaining
+~94 seconds of the window, with no player error reported on the media session. A frame captured at
+index 30 is a genuine video frame of the movie, i.e. the surface was showing a stale picture rather
+than a blank one.
+
+Caveats that a follow-up must close before this is called a product regression:
+- `adb exec-out screencap` does not always capture hardware-composited video planes faithfully. The
+  first 14 frames *did* advance, which argues against a pure capture artefact, but a second run
+  against a different channel is needed to confirm.
+- A background catalog sync had just finished (15598 channels indexed); contention is possible.
+- The player's own log lines were absent from `logcat -d` by the time it was read - the 2-minute
+  capture plus system logging had rotated the buffer. Capture logs *during* the run next time.
+
+**This does not invalidate A34's unit tests, but A34 must stay Partial: its live-TV validation did
+not pass, and nothing about the current build should be marked validated on the strength of this run.**
+
 ## Device validation recipe (corrected round 22)
 
 Two rounds recorded "the Firestick was unreachable, then held by another app" as the reason live-TV
