@@ -1048,6 +1048,9 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
 
         fun mediaSegments(): List<HlsSegmentSnapshot> = media.toList()
 
+        /** O(1) size accessor: the eviction loop only needs the count, not a copy of the deque. */
+        fun mediaSize(): Int = media.size
+
         fun mediaDurationMs(): Long = mediaDurationMs
 
         fun allSegments(): List<HlsSegmentSnapshot> = listOfNotNull(init) + media
@@ -1138,7 +1141,7 @@ internal class DefaultLiveTimeshiftManager @Inject constructor(
                         val retained = retainSegment(remote, isInit = false)
                         val windowDuration = segmentMutex.withLock {
                             window.addMedia(retained)
-                            while (backend == LiveTimeshiftBackend.DISK && !diskManager.isWithinBudget() && window.mediaSegments().size > 1) {
+                            while (backend == LiveTimeshiftBackend.DISK && !diskManager.isWithinBudget() && window.mediaSize() > 1) {
                                 window.evictOldestMedia()
                             }
                             window.mediaDurationMs()
