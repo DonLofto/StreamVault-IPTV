@@ -149,6 +149,37 @@ Two further facts observed several minutes after the capture, which sharpen the 
 **This does not invalidate A34's unit tests, but A34 must stay Partial: its live-TV validation did
 not pass, and nothing about the current build should be marked validated on the strength of this run.**
 
+### Round 26: what is actually holding the memory
+
+`dumpsys meminfo` for the whole device, taken while the frozen session was still resident:
+
+| Process | PSS |
+|---|---|
+| `com.streamvault.app.debug` | **270,938K** |
+| `media.codec` | **172,878K** |
+| `system` | 65,812K |
+| `surfaceflinger` | 60,449K |
+| `com.amazon.device.services` | 34,180K |
+
+`MemFree 50,952 kB`, `MemAvailable 117,456 kB`, and **swap is exhausted: 393,212 kB total with 2,696 kB
+free**.
+
+So during live playback the app plus the hardware decoder account for ~434 MB of PSS on a 922 MB
+device, and the device has swapped itself out. `media.codec` is the video decoder holding buffers for
+a 1080p stream, and the app's own largest single term is Graphics at 89 MB.
+
+This reframes the freeze one final time, and it is the most useful conclusion of the last four rounds:
+
+- It is **not** a Java-heap problem, so it is not something A58 would fix.
+- It is **not** in the app alone - the decoder process is a peer, not an overhead.
+- It is a **capacity** problem: a 1080p live stream decoded alongside a 15,598-channel catalogue does
+  not fit on an AFTSSS with 922 MB and a fully consumed swap.
+
+The audit's acceptance metrics - idle CPU, GC count, cold start - never covered memory during
+playback, which is why this surfaced only when the live-TV protocol was finally run. Any future
+performance work on this device should treat "app + media.codec + swap" as the budget, not the app's
+Java heap.
+
 ### Round 24 follow-up: the freeze is memory pressure, and it is NOT the Java heap
 
 A second validation run on a fresh process, with logs captured *during* the window, moved this from
