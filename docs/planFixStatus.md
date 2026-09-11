@@ -57,7 +57,7 @@ Room-validated SQL and byte-identical golden output are called out where they ap
 | A19 | `7d874cd2` | EPG grid callbacks capture stable values, not the whole uiState |
 | A4 | `76872471` + see below | Xtream decode paths stream with kotlinx; Gson removed entirely |
 | A6 / A9 | `fc72267c` | `classify` memoised; catalog reclassification made an O(1) lookup. **Device-verified: 4/16 → 1/16 samples with app code actively executing** (see below). |
-| A52 | `PENDING` | Monotonic `staged_seq` staging watermark (migration 65 -> 66): progress commits merge only the rows staged since the previous commit instead of re-scanning the whole provider catalog every 500 channels. |
+| A52 | `1c95d2f1` | Monotonic `staged_seq` staging watermark (migration 65 -> 66): progress commits merge only the rows staged since the previous commit instead of re-scanning the whole provider catalog every 500 channels. |
 
 ## Partial
 
